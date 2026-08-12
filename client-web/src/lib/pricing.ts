@@ -103,9 +103,9 @@ export function formatCOP(value: number): string {
   }).format(Math.round(value || 0));
 }
 
-/** Ventana de programación: ahora+30min … +15 días. */
+/** Ventana de programación: ahora+5min … +15 días. */
 export function scheduleWindow(now = new Date()) {
-  const min = new Date(now.getTime() + 30 * 60 * 1000);
+  const min = new Date(now.getTime() + 5 * 60 * 1000);
   const max = new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000);
   return { min, max };
 }
@@ -115,8 +115,21 @@ export function toDatetimeLocalValue(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Interpreta datetime-local como hora local (no UTC). */
 export function parseDatetimeLocal(value: string): Date | null {
   if (!value) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value.trim());
+  if (m) {
+    return new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5]),
+      0,
+      0,
+    );
+  }
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -125,7 +138,20 @@ export function validateScheduledFor(value: string, now = new Date()): string | 
   const d = parseDatetimeLocal(value);
   if (!d) return 'Elige fecha y hora de entrega';
   const { min, max } = scheduleWindow(now);
-  if (d < min) return 'La entrega debe ser al menos en 30 minutos';
+  // Gracia 3 min: el input no se actualiza solo mientras esperas
+  if (d.getTime() < min.getTime() - 3 * 60 * 1000) {
+    return 'La entrega debe ser al menos en 5 minutos';
+  }
   if (d > max) return 'Solo se puede programar hasta 15 días de antelación';
   return null;
+}
+
+/** Si el horario quedó justo abajo del mínimo, lo sube automáticamente. */
+export function resolveScheduledFor(value: string, now = new Date()): Date | null {
+  const d = parseDatetimeLocal(value);
+  if (!d) return null;
+  const { min, max } = scheduleWindow(now);
+  if (d > max) return null;
+  if (d.getTime() < min.getTime()) return min;
+  return d;
 }

@@ -14,6 +14,7 @@ import {
   formatCOP,
   MIN_SHIPPING_FEE_COP,
   parseDatetimeLocal,
+  resolveScheduledFor,
   scheduleWindow,
   toDatetimeLocalValue,
   validateScheduledFor,
@@ -262,6 +263,11 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
     e.preventDefault();
     setError(null);
 
+    if (!profile) {
+      setError('Debes iniciar sesión con Google para confirmar la solicitud.');
+      return;
+    }
+
     if (!pickup || !delivery) {
       setError('Marca en el mapa la recolección (A) y la entrega (B).');
       return;
@@ -277,6 +283,12 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       return;
     }
 
+    const scheduled = resolveScheduledFor(values.scheduledFor);
+    if (!scheduled) {
+      setError('Elige una fecha/hora de entrega válida (hasta 15 días).');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const declared = values.declaredValue.trim()
@@ -288,14 +300,15 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       }
 
       const phone = values.customerPhone.trim();
+      if (!phone) {
+        throw new Error('El teléfono es obligatorio');
+      }
       await setPhone(phone);
-
-      const scheduled = parseDatetimeLocal(values.scheduledFor)!;
 
       const result = await submitOrder({
         customerName: values.customerName.trim(),
         customerPhone: phone,
-        customerEmail: values.customerEmail.trim() || undefined,
+        customerEmail: values.customerEmail.trim() || profile.email || undefined,
         pickupAddress: values.pickupAddress.trim(),
         pickupLat: pickup.lat,
         pickupLng: pickup.lng,
@@ -305,8 +318,8 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         description: values.description.trim() || undefined,
         notes: values.notes.trim() || undefined,
         declaredValue: declared,
-        customerUid: profile?.uid,
-        customerPhotoURL: profile?.photoURL || undefined,
+        customerUid: profile.uid,
+        customerPhotoURL: profile.photoURL || undefined,
         shippingFee: quote.shippingFee,
         routeDistanceKm: quote.distanceKm,
         routeDurationMin: routeMin,
@@ -316,11 +329,15 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         scheduledFor: scheduled.toISOString(),
       });
 
+      if (!result.trackingCode) {
+        throw new Error('El pedido se creó pero no devolvió código de seguimiento');
+      }
+
       const { min } = scheduleWindow();
       setValues({
         ...INITIAL,
-        customerName: profile?.displayName || '',
-        customerEmail: profile?.email || '',
+        customerName: profile.displayName || '',
+        customerEmail: profile.email || '',
         customerPhone: phone,
         scheduledFor: toDatetimeLocalValue(min),
       });
@@ -355,12 +372,29 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           <button
             type="button"
             onClick={() => void signIn()}
-            className="cta-ghost shrink-0 self-start text-sm"
+            className="cta-primary shrink-0 self-start text-sm"
           >
-            Usar mi Google
+            Iniciar sesión con Google
           </button>
         ) : null}
       </div>
+
+      {!profile && !authLoading ? (
+        <div
+          className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100"
+          role="status"
+        >
+          Debes iniciar sesión con Google para confirmar y recibir tu código de seguimiento (DMC-XXXX) y
+          el PIN de entrega.
+          <button
+            type="button"
+            className="ml-2 font-bold text-[var(--domi-cyan)] underline"
+            onClick={() => void signIn()}
+          >
+            Entrar ahora
+          </button>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block sm:col-span-1">
@@ -535,7 +569,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             onChange={(e) => update('scheduledFor', e.target.value)}
           />
           <span className="mt-1 block text-[11px] text-[var(--domi-muted)]">
-            La tarifa usa hora pico/normal según esta fecha (zona Bogotá).
+            Mínimo 5 minutos · máximo 15 días. La tarifa usa hora pico/normal (zona Bogotá).
           </span>
         </label>
 
@@ -613,12 +647,18 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         </p>
       ) : null}
 
-      <button type="submit" className="cta-primary mt-6 w-full sm:w-auto" disabled={submitting || geoBusy}>
+      <button
+        type="submit"
+        className="cta-primary mt-6 w-full sm:w-auto"
+        disabled={submitting || geoBusy || authLoading}
+      >
         {submitting ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             Enviando…
           </>
+        ) : !profile ? (
+          'Inicia sesión para confirmar'
         ) : (
           'Confirmar solicitud'
         )}

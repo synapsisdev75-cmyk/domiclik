@@ -6,6 +6,7 @@ import { BrandLogo } from '../components/BrandLogo';
 import { RatingForm } from '../components/RatingForm';
 import { AuthButton } from '../components/AuthButton';
 import { findOrderByTrackingCode, type PublicOrderTracking } from '../lib/firebase';
+import { useAuth } from '../lib/auth';
 
 const STATUS_LABEL: Record<TrackingStatus, string> = {
   pending: 'Pendiente de asignación',
@@ -31,6 +32,7 @@ function asStatus(value: string): TrackingStatus {
 export function TrackingPage() {
   const { code } = useParams<{ code?: string }>();
   const navigate = useNavigate();
+  const { profile, signIn, loading: authLoading } = useAuth();
   const [lookup, setLookup] = useState(code?.toUpperCase() || '');
   const [data, setData] = useState<PublicOrderTracking | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +40,12 @@ export function TrackingPage() {
   const [refreshToken, setRefreshToken] = useState(0);
 
   const load = useCallback(async (trackingCode: string) => {
+    if (!profile) {
+      setData(null);
+      setError('Debes iniciar sesión con Google para ver el seguimiento.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -54,7 +62,7 @@ export function TrackingPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [profile]);
 
   useEffect(() => {
     if (!code) {
@@ -63,11 +71,16 @@ export function TrackingPage() {
       return;
     }
     setLookup(code.toUpperCase());
+    if (authLoading) return;
     void load(code);
-  }, [code, load, refreshToken]);
+  }, [code, load, refreshToken, authLoading]);
 
   function goLookup(e: FormEvent) {
     e.preventDefault();
+    if (!profile) {
+      setError('Debes iniciar sesión con Google para consultar un pedido.');
+      return;
+    }
     const trimmed = lookup.trim().toUpperCase();
     if (!trimmed) return;
     navigate(`/seguimiento/${encodeURIComponent(trimmed)}`);
@@ -134,6 +147,15 @@ export function TrackingPage() {
             role="alert"
           >
             {error}
+            {!profile ? (
+              <button
+                type="button"
+                className="ml-2 font-bold text-[var(--domi-cyan)] underline"
+                onClick={() => void signIn()}
+              >
+                Iniciar sesión
+              </button>
+            ) : null}
           </div>
         ) : null}
 
