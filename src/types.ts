@@ -113,6 +113,13 @@ export interface DeliveryOrder {
    */
   deliveryConfirmCode?: string;
   deliveryConfirmedAt?: string;
+  /** Entrega programada (ISO). Hasta 15 días desde la solicitud. */
+  scheduledFor?: string;
+  pricingBand?: 'peak' | 'normal';
+  pricePerKm?: number;
+  peakMultiplier?: number;
+  /** Si true, el precio viene de la cotización del cliente (no recalcular en dispatch). */
+  clientQuoted?: boolean;
   /** Origen: página de ventas autorizada */
   sourceSiteId?: string;
   externalOrderId?: string;

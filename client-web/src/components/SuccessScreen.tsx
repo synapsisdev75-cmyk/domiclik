@@ -79,6 +79,44 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
         </div>
       ) : null}
 
+      {(result.shippingFee || result.scheduledFor) && (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {result.shippingFee ? (
+            <div className="rounded-xl border border-[rgba(0,230,118,0.25)] bg-[rgba(0,230,118,0.06)] px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-green)]">
+                Tarifa estimada
+              </p>
+              <p className="mt-1 text-xl font-bold text-white">
+                {new Intl.NumberFormat('es-CO', {
+                  style: 'currency',
+                  currency: 'COP',
+                  maximumFractionDigits: 0,
+                }).format(result.shippingFee)}
+              </p>
+              {result.routeDistanceKm ? (
+                <p className="mt-1 text-xs text-[var(--domi-muted)]">
+                  {result.routeDistanceKm} km
+                  {result.pricingBand === 'peak' ? ' · hora pico' : ' · hora normal'}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {result.scheduledFor ? (
+            <div className="rounded-xl border border-[var(--domi-border)] bg-[rgba(5,8,15,0.45)] px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                Entrega programada
+              </p>
+              <p className="mt-1 text-sm font-semibold text-white">
+                {new Date(result.scheduledFor).toLocaleString('es-CO', {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       <div className="mt-6 flex flex-wrap gap-3">
         <Link to={`/seguimiento/${result.trackingCode}`} className="cta-primary">
           <Radar className="h-4 w-4" aria-hidden />

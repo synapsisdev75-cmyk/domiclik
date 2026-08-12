@@ -24,6 +24,15 @@ export type IngestOrderBody = {
   description?: string;
   declaredValue?: number;
   notes?: string;
+  /** Cotización del cliente (mapa): COP */
+  shippingFee?: number;
+  routeDistanceKm?: number;
+  routeDurationMin?: number;
+  pricingBand?: 'peak' | 'normal';
+  pricePerKm?: number;
+  peakMultiplier?: number;
+  /** ISO — entrega programada (máx. 15 días) */
+  scheduledFor?: string;
 };
 
 export type IngestOrderResponse = {
@@ -33,6 +42,10 @@ export type IngestOrderResponse = {
   /** PIN que el cliente da al repartidor para confirmar entrega */
   deliveryConfirmCode: string;
   status: 'pending' | 'assigned';
+  shippingFee?: number | null;
+  routeDistanceKm?: number | null;
+  scheduledFor?: string | null;
+  pricingBand?: 'peak' | 'normal' | null;
 };
 
 export type IngestErrorResponse = {

@@ -105,6 +105,23 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
     const deliveryConfirmCode = String(Math.floor(100000 + Math.random() * 900000));
     const now = new Date().toISOString();
 
+    const clientFee = Number(body.shippingFee);
+    const clientKm = Number(body.routeDistanceKm);
+    const clientQuoted =
+      Number.isFinite(clientFee) && clientFee > 0 && Number.isFinite(clientKm) && clientKm > 0;
+
+    let scheduledFor = '';
+    if (body.scheduledFor) {
+      const sched = new Date(String(body.scheduledFor));
+      if (!Number.isNaN(sched.getTime())) {
+        const max = Date.now() + 15 * 24 * 60 * 60 * 1000;
+        const min = Date.now() - 5 * 60 * 1000;
+        if (sched.getTime() <= max && sched.getTime() >= min) {
+          scheduledFor = sched.toISOString();
+        }
+      }
+    }
+
     const order = {
       id: orderId,
       trackingCode,
@@ -129,7 +146,15 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
       description: body.description || 'Pedido desde página de ventas',
       itemType: 'varios',
       declaredValue: Number(body.declaredValue) || 0,
-      shippingFee: 0,
+      shippingFee: clientQuoted ? Math.round(clientFee) : 0,
+      routePrice: clientQuoted ? Math.round(clientFee) : 0,
+      routeDistanceKm: clientQuoted ? Math.round(clientKm * 100) / 100 : undefined,
+      routeDurationMin: Number(body.routeDurationMin) || undefined,
+      pricingBand: body.pricingBand === 'peak' ? 'peak' : body.pricingBand === 'normal' ? 'normal' : undefined,
+      pricePerKm: Number(body.pricePerKm) || undefined,
+      peakMultiplier: Number(body.peakMultiplier) || undefined,
+      clientQuoted,
+      scheduledFor: scheduledFor || undefined,
       status: 'pending',
       assignedDriverId: null,
       assignedDriverName: null,
@@ -142,28 +167,36 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
 
     await setDoc(doc(db, 'orders', orderId), order);
 
-    // Auto-despacho: precio + motorizado más cercano (best-effort)
+    // Auto-despacho inmediato solo si no está programado a más de 2h
+    const schedMs = scheduledFor ? new Date(scheduledFor).getTime() - Date.now() : 0;
+    const deferAssign = Boolean(scheduledFor && schedMs > 2 * 60 * 60 * 1000);
+
     try {
-      const { dispatchPendingOrder } = await import('../src/lib/autoDispatch');
-      const { DEFAULT_DISPATCH_SETTINGS } = await import('../src/lib/adminMetrics');
-      const driversSnap = await getDocs(collection(db, 'drivers'));
-      const drivers: any[] = [];
-      driversSnap.forEach((d) => drivers.push({ id: d.id, ...d.data() }));
-      const settingsSnap = await getDoc(doc(db, 'settings', 'dispatch'));
-      const settings = settingsSnap.exists()
-        ? { ...DEFAULT_DISPATCH_SETTINGS, ...settingsSnap.data(), id: 'dispatch' as const }
-        : DEFAULT_DISPATCH_SETTINGS;
-      const result = await dispatchPendingOrder(order as any, drivers, settings);
-      return res.status(201).json({
-        ok: true,
-        orderId,
-        trackingCode,
-        deliveryConfirmCode,
-        status: result.assigned ? 'assigned' : 'pending',
-        assignedDriverId: result.driverId || null,
-        routePrice: result.routePrice || null,
-        routeDistanceKm: result.routeDistanceKm || null,
-      });
+      if (!deferAssign) {
+        const { dispatchPendingOrder } = await import('../src/lib/autoDispatch');
+        const { DEFAULT_DISPATCH_SETTINGS } = await import('../src/lib/adminMetrics');
+        const driversSnap = await getDocs(collection(db, 'drivers'));
+        const drivers: any[] = [];
+        driversSnap.forEach((d) => drivers.push({ id: d.id, ...d.data() }));
+        const settingsSnap = await getDoc(doc(db, 'settings', 'dispatch'));
+        const settings = settingsSnap.exists()
+          ? { ...DEFAULT_DISPATCH_SETTINGS, ...settingsSnap.data(), id: 'dispatch' as const }
+          : DEFAULT_DISPATCH_SETTINGS;
+        const result = await dispatchPendingOrder(order as any, drivers, settings);
+        return res.status(201).json({
+          ok: true,
+          orderId,
+          trackingCode,
+          deliveryConfirmCode,
+          status: result.assigned ? 'assigned' : 'pending',
+          assignedDriverId: result.driverId || null,
+          shippingFee: result.routePrice ?? order.shippingFee,
+          routeDistanceKm: result.routeDistanceKm ?? order.routeDistanceKm ?? null,
+          routePrice: result.routePrice || null,
+          scheduledFor: scheduledFor || null,
+          pricingBand: order.pricingBand || null,
+        });
+      }
     } catch (dispatchErr) {
       console.warn('[ingest] auto-dispatch skipped', dispatchErr);
     }
@@ -174,6 +207,10 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
       trackingCode,
       deliveryConfirmCode,
       status: 'pending',
+      shippingFee: order.shippingFee || null,
+      routeDistanceKm: order.routeDistanceKm || null,
+      scheduledFor: scheduledFor || null,
+      pricingBand: order.pricingBand || null,
     });
   } catch (err) {
     console.error('[ingest]', err);

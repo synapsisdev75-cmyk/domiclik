@@ -118,10 +118,10 @@ const INTENTS: Intent[] = [
   },
   {
     id: 'pagos',
-    keywords: ['pago', 'pagar', 'precio', 'tarifa', 'cuesta', 'costo', 'efectivo', 'transferencia', 'online'],
+    keywords: ['pago', 'pagar', 'precio', 'tarifa', 'cuesta', 'costo', 'efectivo', 'transferencia', 'online', 'kilometro', 'km'],
     reply: () => ({
       text:
-        'El valor del envío lo calcula Central según distancia y tipo de pedido. En esta versión el cobro se coordina con Central (efectivo o transferencia). La pasarela de pago en línea llega pronto.',
+        'La tarifa se calcula en el mapa: $2.300 COP por kilómetro. En hora pico (mañana, mediodía y tarde en días hábiles) se aplica ×1.35. Hay un mínimo de $5.000. Puedes programar la entrega hasta 15 días adelante.',
       suggestions: ['Hablar con Central', '¿Cómo solicito?'],
     }),
   },

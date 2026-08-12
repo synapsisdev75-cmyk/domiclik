@@ -88,22 +88,33 @@ export async function dispatchPendingOrder(
   let routeDurationMin = order.routeDurationMin;
   let routePrice = order.routePrice ?? order.shippingFee;
 
-  try {
-    const route = await calculateOptimalRoute(
-      order.pickupCoords.lat,
-      order.pickupCoords.lng,
-      order.deliveryCoords.lat,
-      order.deliveryCoords.lng
-    );
-    routeDistanceKm = route.distanceKm;
-    routeDurationMin = route.durationMinutes;
-    routePrice = computeRoutePrice(route.distanceKm, settings);
-  } catch (err) {
-    console.warn('[dispatch] route calc failed, using fallback price', err);
-    const approx = haversineKm(order.pickupCoords, order.deliveryCoords) * 1.35;
-    routeDistanceKm = Math.round(approx * 100) / 100;
-    routeDurationMin = Math.max(8, Math.ceil(approx * 4));
-    routePrice = computeRoutePrice(routeDistanceKm, settings);
+  const keepClientQuote =
+    order.clientQuoted === true &&
+    typeof order.shippingFee === 'number' &&
+    order.shippingFee > 0;
+
+  if (!keepClientQuote) {
+    try {
+      const route = await calculateOptimalRoute(
+        order.pickupCoords.lat,
+        order.pickupCoords.lng,
+        order.deliveryCoords.lat,
+        order.deliveryCoords.lng
+      );
+      routeDistanceKm = route.distanceKm;
+      routeDurationMin = route.durationMinutes;
+      routePrice = computeRoutePrice(route.distanceKm, settings);
+    } catch (err) {
+      console.warn('[dispatch] route calc failed, using fallback price', err);
+      const approx = haversineKm(order.pickupCoords, order.deliveryCoords) * 1.35;
+      routeDistanceKm = Math.round(approx * 100) / 100;
+      routeDurationMin = Math.max(8, Math.ceil(approx * 4));
+      routePrice = computeRoutePrice(routeDistanceKm, settings);
+    }
+  } else {
+    routePrice = order.shippingFee;
+    routeDistanceKm = order.routeDistanceKm ?? routeDistanceKm;
+    routeDurationMin = order.routeDurationMin ?? routeDurationMin;
   }
 
   await updateOrderFields(order.id, {
