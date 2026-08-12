@@ -13,3 +13,11 @@ export const WHATSAPP = import.meta.env.VITE_DOMICLICK_WHATSAPP || '573001234567
 export const PHONE = import.meta.env.VITE_DOMICLICK_PHONE || '+573001234567';
 
 export const WHATSAPP_URL = `https://wa.me/${WHATSAPP.replace(/\D/g, '')}`;
+
+export const GOOGLE_MAPS_API_KEY =
+  import.meta.env.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
+  import.meta.env.VITE_GOOGLE_MAPS_API_KEY ||
+  '';
+
+export const GOOGLE_MAPS_MAP_ID =
+  import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || '7959bb6afa37dd5e9db669a8';

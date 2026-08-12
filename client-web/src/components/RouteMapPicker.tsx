@@ -1,8 +1,14 @@
-import { useEffect, useRef } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import { useEffect, useMemo } from 'react';
+import {
+  APIProvider,
+  Map,
+  AdvancedMarker,
+  useMap,
+  useMapsLibrary,
+} from '@vis.gl/react-google-maps';
 import type { LatLng } from '../lib/geo';
 import { VILLAVICENCIO_CENTER } from '../lib/geo';
+import { GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_MAP_ID } from '../lib/config';
 
 export type MapPickMode = 'pickup' | 'delivery' | null;
 
@@ -12,143 +18,275 @@ type RouteMapPickerProps = {
   path: LatLng[];
   pickMode: MapPickMode;
   onPick: (point: LatLng) => void;
+  onDragPickup: (point: LatLng) => void;
+  onDragDelivery: (point: LatLng) => void;
+  onGoogleRoute?: (route: { distanceKm: number; durationMin: number; path: LatLng[] }) => void;
   heightClass?: string;
 };
 
-function pinIcon(color: string, letter: string) {
-  return L.divIcon({
-    className: '',
-    iconSize: [28, 28],
-    iconAnchor: [14, 28],
-    html: `<div style="
-      width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);
-      background:${color};border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);
-      display:flex;align-items:center;justify-content:center;">
-      <span style="transform:rotate(45deg);color:#fff;font:700 12px/1 sans-serif">${letter}</span>
-    </div>`,
-  });
+function PinBadge({ letter, color }: { letter: string; color: string }) {
+  return (
+    <div
+      className="flex items-center justify-center select-none"
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: '50% 50% 50% 0',
+        transform: 'rotate(-45deg)',
+        background: color,
+        border: '2px solid #fff',
+        boxShadow: `0 0 0 1px ${color}, 0 4px 12px rgba(0,0,0,.55)`,
+        cursor: 'grab',
+      }}
+      title={`Arrastra el pin ${letter}`}
+    >
+      <span
+        style={{
+          transform: 'rotate(45deg)',
+          color: '#fff',
+          fontWeight: 800,
+          fontSize: 13,
+          fontFamily: 'Outfit, sans-serif',
+        }}
+      >
+        {letter}
+      </span>
+    </div>
+  );
 }
 
-export function RouteMapPicker({
+function RouteLayer({
   pickup,
   delivery,
   path,
-  pickMode,
-  onPick,
-  heightClass = 'h-64 sm:h-72',
-}: RouteMapPickerProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const pickupMarkerRef = useRef<L.Marker | null>(null);
-  const deliveryMarkerRef = useRef<L.Marker | null>(null);
-  const lineRef = useRef<L.Polyline | null>(null);
-  const onPickRef = useRef(onPick);
-  const pickModeRef = useRef(pickMode);
+  onGoogleRoute,
+}: {
+  pickup: LatLng | null;
+  delivery: LatLng | null;
+  path: LatLng[];
+  onGoogleRoute?: RouteMapPickerProps['onGoogleRoute'];
+}) {
+  const map = useMap();
+  const routesLib = useMapsLibrary('routes');
 
   useEffect(() => {
-    onPickRef.current = onPick;
-  }, [onPick]);
+    if (!map || !pickup || !delivery) return;
 
-  useEffect(() => {
-    pickModeRef.current = pickMode;
-  }, [pickMode]);
+    let cancelled = false;
+    let renderer: google.maps.DirectionsRenderer | null = null;
+    let glow: google.maps.Polyline | null = null;
+    let line: google.maps.Polyline | null = null;
 
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    const drawFallback = (pts: LatLng[]) => {
+      if (pts.length < 2) return;
+      glow = new google.maps.Polyline({
+        path: pts,
+        geodesic: true,
+        strokeColor: '#00E5FF',
+        strokeOpacity: 0.22,
+        strokeWeight: 12,
+        map,
+      });
+      line = new google.maps.Polyline({
+        path: pts,
+        geodesic: true,
+        strokeColor: '#00E5FF',
+        strokeOpacity: 0.95,
+        strokeWeight: 3,
+        map,
+      });
+      const bounds = new google.maps.LatLngBounds();
+      pts.forEach((p) => bounds.extend(p));
+      map.fitBounds(bounds, 72);
+    };
 
-    const map = L.map(containerRef.current, {
-      center: [VILLAVICENCIO_CENTER.lat, VILLAVICENCIO_CENTER.lng],
-      zoom: 13,
-      zoomControl: true,
-    });
+    if (routesLib) {
+      const service = new routesLib.DirectionsService();
+      renderer = new routesLib.DirectionsRenderer({
+        map,
+        suppressMarkers: true,
+        preserveViewport: false,
+        polylineOptions: {
+          strokeColor: '#00E5FF',
+          strokeOpacity: 0.95,
+          strokeWeight: 4,
+        },
+      });
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap',
-      maxZoom: 19,
-    }).addTo(map);
-
-    map.on('click', (e: L.LeafletMouseEvent) => {
-      if (!pickModeRef.current) return;
-      onPickRef.current({ lat: e.latlng.lat, lng: e.latlng.lng });
-    });
-
-    mapRef.current = map;
-    window.setTimeout(() => map.invalidateSize(), 80);
+      service.route(
+        {
+          origin: { lat: pickup.lat, lng: pickup.lng },
+          destination: { lat: delivery.lat, lng: delivery.lng },
+          travelMode: google.maps.TravelMode.DRIVING,
+        },
+        (result, status) => {
+          if (cancelled) return;
+          if (status !== google.maps.DirectionsStatus.OK || !result) {
+            drawFallback(path.length >= 2 ? path : [pickup, delivery]);
+            return;
+          }
+          renderer?.setDirections(result);
+          const leg = result.routes[0]?.legs[0];
+          const overview = result.routes[0]?.overview_path || [];
+          const routePath = overview.map((p) => ({ lat: p.lat(), lng: p.lng() }));
+          const distanceKm = (leg?.distance?.value || 0) / 1000;
+          const durationMin = Math.round((leg?.duration?.value || 0) / 60);
+          if (onGoogleRoute && distanceKm > 0) {
+            onGoogleRoute({
+              distanceKm: Math.round(distanceKm * 100) / 100,
+              durationMin: Math.max(5, durationMin),
+              path: routePath.length >= 2 ? routePath : [pickup, delivery],
+            });
+          }
+        },
+      );
+    } else {
+      drawFallback(path.length >= 2 ? path : [pickup, delivery]);
+    }
 
     return () => {
-      map.remove();
-      mapRef.current = null;
-      pickupMarkerRef.current = null;
-      deliveryMarkerRef.current = null;
-      lineRef.current = null;
+      cancelled = true;
+      renderer?.setMap(null);
+      glow?.setMap(null);
+      line?.setMap(null);
     };
-  }, []);
+  }, [map, routesLib, pickup?.lat, pickup?.lng, delivery?.lat, delivery?.lng, onGoogleRoute]);
+
+  return null;
+}
+
+function MapClickHandler({
+  pickMode,
+  onPick,
+}: {
+  pickMode: MapPickMode;
+  onPick: (point: LatLng) => void;
+}) {
+  const map = useMap();
 
   useEffect(() => {
-    const map = mapRef.current;
     if (!map) return;
-
-    if (pickup) {
-      if (!pickupMarkerRef.current) {
-        pickupMarkerRef.current = L.marker([pickup.lat, pickup.lng], {
-          icon: pinIcon('#2B6CFF', 'A'),
-        }).addTo(map);
-      } else {
-        pickupMarkerRef.current.setLatLng([pickup.lat, pickup.lng]);
-      }
-      pickupMarkerRef.current.bindPopup('Partida (A)');
-    } else if (pickupMarkerRef.current) {
-      map.removeLayer(pickupMarkerRef.current);
-      pickupMarkerRef.current = null;
-    }
-
-    if (delivery) {
-      if (!deliveryMarkerRef.current) {
-        deliveryMarkerRef.current = L.marker([delivery.lat, delivery.lng], {
-          icon: pinIcon('#FF5722', 'B'),
-        }).addTo(map);
-      } else {
-        deliveryMarkerRef.current.setLatLng([delivery.lat, delivery.lng]);
-      }
-      deliveryMarkerRef.current.bindPopup('Entrega (B)');
-    } else if (deliveryMarkerRef.current) {
-      map.removeLayer(deliveryMarkerRef.current);
-      deliveryMarkerRef.current = null;
-    }
-
-    const pts = path.length >= 2 ? path : pickup && delivery ? [pickup, delivery] : [];
-    if (pts.length >= 2) {
-      const latlngs = pts.map((p) => [p.lat, p.lng] as [number, number]);
-      if (!lineRef.current) {
-        lineRef.current = L.polyline(latlngs, {
-          color: '#00E5FF',
-          weight: 4,
-          opacity: 0.85,
-        }).addTo(map);
-      } else {
-        lineRef.current.setLatLngs(latlngs);
-      }
-      map.fitBounds(L.latLngBounds(latlngs).pad(0.2));
-    } else if (lineRef.current) {
-      map.removeLayer(lineRef.current);
-      lineRef.current = null;
-    }
-
-    window.setTimeout(() => map.invalidateSize(), 40);
-  }, [pickup, delivery, path]);
+    const listener = map.addListener('click', (e: google.maps.MapMouseEvent) => {
+      if (!pickMode || !e.latLng) return;
+      onPick({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+    });
+    return () => listener.remove();
+  }, [map, pickMode, onPick]);
 
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    el.style.cursor = pickMode ? 'crosshair' : '';
-  }, [pickMode]);
+    if (!map) return;
+    map.setOptions({ draggableCursor: pickMode ? 'crosshair' : undefined });
+  }, [map, pickMode]);
+
+  return null;
+}
+
+function InnerMap(props: RouteMapPickerProps) {
+  const {
+    pickup,
+    delivery,
+    path,
+    pickMode,
+    onPick,
+    onDragPickup,
+    onDragDelivery,
+    onGoogleRoute,
+  } = props;
+
+  const center = useMemo(() => {
+    if (pickup) return pickup;
+    if (delivery) return delivery;
+    return VILLAVICENCIO_CENTER;
+  }, [pickup, delivery]);
+
+  return (
+    <Map
+      defaultCenter={{ lat: center.lat, lng: center.lng }}
+      defaultZoom={13}
+      mapId={GOOGLE_MAPS_MAP_ID}
+      colorScheme="DARK"
+      gestureHandling="greedy"
+      disableDefaultUI={false}
+      zoomControl
+      mapTypeControl={false}
+      streetViewControl={false}
+      fullscreenControl={false}
+      style={{ width: '100%', height: '100%' }}
+      className="h-full w-full"
+    >
+      <MapClickHandler pickMode={pickMode} onPick={onPick} />
+      <RouteLayer
+        pickup={pickup}
+        delivery={delivery}
+        path={path}
+        onGoogleRoute={onGoogleRoute}
+      />
+
+      {pickup ? (
+        <AdvancedMarker
+          position={{ lat: pickup.lat, lng: pickup.lng }}
+          draggable
+          title="Partida (A) — arrastra para mover"
+          onDragEnd={(e) => {
+            const ll = e.latLng;
+            if (!ll) return;
+            onDragPickup({ lat: ll.lat(), lng: ll.lng() });
+          }}
+        >
+          <PinBadge letter="A" color="#2B6CFF" />
+        </AdvancedMarker>
+      ) : null}
+
+      {delivery ? (
+        <AdvancedMarker
+          position={{ lat: delivery.lat, lng: delivery.lng }}
+          draggable
+          title="Entrega (B) — arrastra para mover"
+          onDragEnd={(e) => {
+            const ll = e.latLng;
+            if (!ll) return;
+            onDragDelivery({ lat: ll.lat(), lng: ll.lng() });
+          }}
+        >
+          <PinBadge letter="B" color="#FF5722" />
+        </AdvancedMarker>
+      ) : null}
+    </Map>
+  );
+}
+
+export function RouteMapPicker(props: RouteMapPickerProps) {
+  const { heightClass = 'h-64 sm:h-72' } = props;
+
+  if (!GOOGLE_MAPS_API_KEY) {
+    return (
+      <div
+        className={`${heightClass} flex items-center justify-center rounded-xl border border-[var(--domi-border)] bg-[#0a0e16] px-4 text-center text-sm text-[var(--domi-muted)]`}
+      >
+        Falta <code className="text-[var(--domi-cyan)]">VITE_GOOGLE_MAPS_PLATFORM_KEY</code> en
+        client-web/.env
+      </div>
+    );
+  }
 
   return (
     <div
-      ref={containerRef}
-      className={`${heightClass} w-full overflow-hidden rounded-xl border border-[var(--domi-border)]`}
+      className={`relative ${heightClass} w-full overflow-hidden rounded-xl border border-[var(--domi-border)] bg-[#0a0e16]`}
       role="application"
-      aria-label="Mapa de ruta DomiClick"
-    />
+      aria-label="Mapa Google DomiClick"
+    >
+      <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={['marker', 'routes', 'geometry']}>
+        <InnerMap {...props} />
+      </APIProvider>
+
+      <div className="pointer-events-none absolute bottom-2 right-2 z-10 flex items-center gap-2 rounded-xl border border-[#FF5722]/40 bg-[#0a101c]/90 px-2.5 py-1.5 shadow-[0_0_16px_rgba(255,87,34,0.25)]">
+        <div className="leading-tight">
+          <div className="font-display text-[10px] font-black italic text-white">
+            Domi<span className="text-[#FF5722]">Click</span>
+          </div>
+          <div className="text-[8px] text-slate-400">Google Maps · arrastra A / B</div>
+        </div>
+      </div>
+    </div>
   );
 }

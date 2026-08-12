@@ -134,6 +134,37 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
     [pickMode],
   );
 
+  const onDragPickup = useCallback(async (point: LatLng) => {
+    setPickup(point);
+    setGeoBusy(true);
+    try {
+      const label = await reverseGeocode(point.lat, point.lng);
+      setValues((prev) => ({ ...prev, pickupAddress: label }));
+    } finally {
+      setGeoBusy(false);
+    }
+  }, []);
+
+  const onDragDelivery = useCallback(async (point: LatLng) => {
+    setDelivery(point);
+    setGeoBusy(true);
+    try {
+      const label = await reverseGeocode(point.lat, point.lng);
+      setValues((prev) => ({ ...prev, deliveryAddress: label }));
+    } finally {
+      setGeoBusy(false);
+    }
+  }, []);
+
+  const onGoogleRoute = useCallback(
+    (route: { distanceKm: number; durationMin: number; path: LatLng[] }) => {
+      setPath(route.path);
+      setRouteKm(route.distanceKm);
+      setRouteMin(route.durationMin);
+    },
+    [],
+  );
+
   async function geocodeField(kind: 'pickup' | 'delivery') {
     const text = kind === 'pickup' ? values.pickupAddress : values.deliveryAddress;
     setError(null);
@@ -340,6 +371,9 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             path={path}
             pickMode={pickMode}
             onPick={(p) => void onMapPick(p)}
+            onDragPickup={(p) => void onDragPickup(p)}
+            onDragDelivery={(p) => void onDragDelivery(p)}
+            onGoogleRoute={onGoogleRoute}
           />
 
           {pickup && delivery ? (
@@ -352,8 +386,9 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             </p>
           ) : (
             <p className="text-xs text-[var(--domi-muted)]">
-              Toca el mapa para ubicar A (partida) y luego B (entrega). También puedes escribir la
-              dirección y pulsar “Ubicar”.
+              Toca el mapa para ubicar A (partida) y B (entrega). Luego puedes{' '}
+              <span className="text-white">arrastrar los pines</span> para ajustar. También puedes
+              escribir la dirección y pulsar “Ubicar”.
             </p>
           )}
         </div>
