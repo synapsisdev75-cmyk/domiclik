@@ -1,4 +1,5 @@
 import { ROAD_FACTOR } from './pricing';
+import { GOOGLE_MAPS_API_KEY } from './config';
 
 export const VILLAVICENCIO_CENTER = { lat: 4.142, lng: -73.6266 };
 
@@ -63,38 +64,120 @@ export type RouteEstimate = {
   distanceKm: number;
   durationMin: number;
   path: LatLng[];
+  provider: 'google' | 'osrm' | 'approx';
 };
 
-/** Ruta por OSRM (público) con fallback Haversine × factor carretera. */
-export async function estimateRoute(from: LatLng, to: LatLng): Promise<RouteEstimate> {
+function approxRoute(from: LatLng, to: LatLng): RouteEstimate {
   const fallbackKm = haversineKm(from, to) * ROAD_FACTOR;
-  const fallback: RouteEstimate = {
+  return {
     distanceKm: Math.round(fallbackKm * 100) / 100,
     durationMin: Math.max(8, Math.ceil(fallbackKm * 3.5)),
     path: [from, to],
+    provider: 'approx',
   };
+}
 
-  try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
-    const res = await fetch(url);
-    if (!res.ok) return fallback;
-    const data = (await res.json()) as {
-      routes?: Array<{
-        distance: number;
-        duration: number;
-        geometry?: { coordinates: [number, number][] };
-      }>;
-    };
-    const route = data.routes?.[0];
-    if (!route) return fallback;
-    const path =
-      route.geometry?.coordinates?.map(([lng, lat]) => ({ lat, lng })) || [from, to];
-    return {
-      distanceKm: Math.round((route.distance / 1000) * 100) / 100,
-      durationMin: Math.max(5, Math.round(route.duration / 60)),
-      path,
-    };
-  } catch {
-    return fallback;
+/** Google Directions JS (requiere Directions API habilitada en la key). */
+export function estimateRouteWithGoogle(from: LatLng, to: LatLng): Promise<RouteEstimate | null> {
+  const g = (window as unknown as { google?: typeof google }).google;
+  if (!g?.maps?.DirectionsService) return Promise.resolve(null);
+
+  const service = new g.maps.DirectionsService();
+  const travel =
+    (g.maps.TravelMode as { TWO_WHEELER?: google.maps.TravelMode }).TWO_WHEELER ||
+    g.maps.TravelMode.DRIVING;
+
+  return new Promise((resolve) => {
+    service.route(
+      {
+        origin: from,
+        destination: to,
+        travelMode: travel,
+        provideRouteAlternatives: false,
+        optimizeWaypoints: false,
+      },
+      (result, status) => {
+        if (status !== g.maps.DirectionsStatus.OK || !result?.routes?.[0]?.legs?.[0]) {
+          console.warn('[DomiClick] Google Directions:', status);
+          resolve(null);
+          return;
+        }
+        const route = result.routes[0];
+        const leg = route.legs[0];
+        const path: LatLng[] =
+          route.overview_path?.map((p) => ({ lat: p.lat(), lng: p.lng() })) ||
+          leg.steps?.flatMap((st) => st.path.map((p) => ({ lat: p.lat(), lng: p.lng() }))) ||
+          [from, to];
+
+        resolve({
+          distanceKm: Math.round(((leg.distance?.value || 0) / 1000) * 100) / 100,
+          durationMin: Math.max(5, Math.round((leg.duration?.value || 0) / 60)),
+          path: path.length >= 2 ? path : [from, to],
+          provider: 'google',
+        });
+      },
+    );
+  });
+}
+
+const OSRM_ENDPOINTS = [
+  'https://router.project-osrm.org/route/v1/driving',
+  'https://routing.openstreetmap.de/routed-car/route/v1/driving',
+];
+
+async function estimateRouteWithOsrm(from: LatLng, to: LatLng): Promise<RouteEstimate | null> {
+  const coords = `${from.lng},${from.lat};${to.lng},${to.lat}`;
+  const qs = 'overview=full&geometries=geojson&steps=false';
+
+  for (const base of OSRM_ENDPOINTS) {
+    try {
+      const controller = new AbortController();
+      const t = window.setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(`${base}/${coords}?${qs}`, { signal: controller.signal });
+      window.clearTimeout(t);
+      if (!res.ok) continue;
+      const data = (await res.json()) as {
+        code?: string;
+        routes?: Array<{
+          distance: number;
+          duration: number;
+          geometry?: { coordinates: [number, number][] };
+        }>;
+      };
+      if (data.code && data.code !== 'Ok') continue;
+      const route = data.routes?.[0];
+      if (!route?.geometry?.coordinates?.length) continue;
+      const path = route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+      if (path.length < 2) continue;
+      return {
+        distanceKm: Math.round((route.distance / 1000) * 100) / 100,
+        durationMin: Math.max(5, Math.round(route.duration / 60)),
+        path,
+        provider: 'osrm',
+      };
+    } catch (err) {
+      console.warn('[DomiClick] OSRM endpoint failed', base, err);
+    }
   }
+  return null;
+}
+
+/**
+ * Ruta por calles (óptima): Google Directions → OSRM → aproximación.
+ * Nunca debería quedarse en línea recta si OSRM/Google responden.
+ */
+export async function estimateRoute(from: LatLng, to: LatLng): Promise<RouteEstimate> {
+  if (GOOGLE_MAPS_API_KEY) {
+    const googleRoute = await estimateRouteWithGoogle(from, to);
+    if (googleRoute && googleRoute.path.length > 2) return googleRoute;
+  }
+
+  const osrm = await estimateRouteWithOsrm(from, to);
+  if (osrm) return osrm;
+
+  // Último intento Google aunque path sea corto
+  const googleAgain = await estimateRouteWithGoogle(from, to);
+  if (googleAgain) return googleAgain;
+
+  return approxRoute(from, to);
 }

@@ -1,10 +1,9 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   APIProvider,
   Map,
   AdvancedMarker,
   useMap,
-  useMapsLibrary,
 } from '@vis.gl/react-google-maps';
 import type { LatLng } from '../lib/geo';
 import { VILLAVICENCIO_CENTER } from '../lib/geo';
@@ -20,6 +19,7 @@ type RouteMapPickerProps = {
   onPick: (point: LatLng) => void;
   onDragPickup: (point: LatLng) => void;
   onDragDelivery: (point: LatLng) => void;
+  /** Reservado por compatibilidad; la ruta la calcula el formulario vía estimateRoute */
   onGoogleRoute?: (route: { distanceKm: number; durationMin: number; path: LatLng[] }) => void;
   heightClass?: string;
 };
@@ -55,102 +55,67 @@ function PinBadge({ letter, color }: { letter: string; color: string }) {
   );
 }
 
-function RouteLayer({
-  pickup,
-  delivery,
-  path,
-  onGoogleRoute,
-}: {
-  pickup: LatLng | null;
-  delivery: LatLng | null;
-  path: LatLng[];
-  onGoogleRoute?: RouteMapPickerProps['onGoogleRoute'];
-}) {
+/** Dibuja la geometría de calles (path) — nunca depende solo de Directions API. */
+function RoadPolyline({ path }: { path: LatLng[] }) {
   const map = useMap();
-  const routesLib = useMapsLibrary('routes');
+  const glowRef = useRef<google.maps.Polyline | null>(null);
+  const lineRef = useRef<google.maps.Polyline | null>(null);
 
   useEffect(() => {
-    if (!map || !pickup || !delivery) return;
+    if (!map || !(window as unknown as { google?: typeof google }).google?.maps) return;
 
-    let cancelled = false;
-    let renderer: google.maps.DirectionsRenderer | null = null;
-    let glow: google.maps.Polyline | null = null;
-    let line: google.maps.Polyline | null = null;
-
-    const drawFallback = (pts: LatLng[]) => {
-      if (pts.length < 2) return;
-      glow = new google.maps.Polyline({
-        path: pts,
-        geodesic: true,
-        strokeColor: '#00E5FF',
-        strokeOpacity: 0.22,
-        strokeWeight: 12,
-        map,
-      });
-      line = new google.maps.Polyline({
-        path: pts,
-        geodesic: true,
-        strokeColor: '#00E5FF',
-        strokeOpacity: 0.95,
-        strokeWeight: 3,
-        map,
-      });
-      const bounds = new google.maps.LatLngBounds();
-      pts.forEach((p) => bounds.extend(p));
-      map.fitBounds(bounds, 72);
+    const clear = () => {
+      glowRef.current?.setMap(null);
+      lineRef.current?.setMap(null);
+      glowRef.current = null;
+      lineRef.current = null;
     };
 
-    if (routesLib) {
-      const service = new routesLib.DirectionsService();
-      renderer = new routesLib.DirectionsRenderer({
-        map,
-        suppressMarkers: true,
-        preserveViewport: false,
-        polylineOptions: {
-          strokeColor: '#00E5FF',
-          strokeOpacity: 0.95,
-          strokeWeight: 4,
-        },
-      });
-
-      service.route(
-        {
-          origin: { lat: pickup.lat, lng: pickup.lng },
-          destination: { lat: delivery.lat, lng: delivery.lng },
-          travelMode: google.maps.TravelMode.DRIVING,
-        },
-        (result, status) => {
-          if (cancelled) return;
-          if (status !== google.maps.DirectionsStatus.OK || !result) {
-            drawFallback(path.length >= 2 ? path : [pickup, delivery]);
-            return;
-          }
-          renderer?.setDirections(result);
-          const leg = result.routes[0]?.legs[0];
-          const overview = result.routes[0]?.overview_path || [];
-          const routePath = overview.map((p) => ({ lat: p.lat(), lng: p.lng() }));
-          const distanceKm = (leg?.distance?.value || 0) / 1000;
-          const durationMin = Math.round((leg?.duration?.value || 0) / 60);
-          if (onGoogleRoute && distanceKm > 0) {
-            onGoogleRoute({
-              distanceKm: Math.round(distanceKm * 100) / 100,
-              durationMin: Math.max(5, durationMin),
-              path: routePath.length >= 2 ? routePath : [pickup, delivery],
-            });
-          }
-        },
-      );
-    } else {
-      drawFallback(path.length >= 2 ? path : [pickup, delivery]);
+    if (path.length < 2) {
+      clear();
+      return;
     }
 
-    return () => {
-      cancelled = true;
-      renderer?.setMap(null);
-      glow?.setMap(null);
-      line?.setMap(null);
-    };
-  }, [map, routesLib, pickup?.lat, pickup?.lng, delivery?.lat, delivery?.lng, onGoogleRoute]);
+    clear();
+
+    glowRef.current = new google.maps.Polyline({
+      path,
+      geodesic: false,
+      strokeColor: '#00E5FF',
+      strokeOpacity: 0.22,
+      strokeWeight: 12,
+      map,
+      zIndex: 1,
+    });
+
+    lineRef.current = new google.maps.Polyline({
+      path,
+      geodesic: false,
+      strokeColor: '#00E5FF',
+      strokeOpacity: 0.95,
+      strokeWeight: 4,
+      icons: [
+        {
+          icon: {
+            path: 'M 0,-1 0,1',
+            strokeOpacity: 1,
+            scale: 3,
+            strokeColor: '#00E5FF',
+          },
+          offset: '0',
+          repeat: '16px',
+        },
+      ],
+      map,
+      zIndex: 2,
+    });
+
+    const bounds = new google.maps.LatLngBounds();
+    path.forEach((p) => bounds.extend(p));
+    map.fitBounds(bounds, 80);
+
+    return clear;
+  }, [map, path]);
 
   return null;
 }
@@ -182,22 +147,19 @@ function MapClickHandler({
 }
 
 function InnerMap(props: RouteMapPickerProps) {
-  const {
-    pickup,
-    delivery,
-    path,
-    pickMode,
-    onPick,
-    onDragPickup,
-    onDragDelivery,
-    onGoogleRoute,
-  } = props;
+  const { pickup, delivery, path, pickMode, onPick, onDragPickup, onDragDelivery } = props;
 
   const center = useMemo(() => {
     if (pickup) return pickup;
     if (delivery) return delivery;
     return VILLAVICENCIO_CENTER;
   }, [pickup, delivery]);
+
+  const roadPath = useMemo(() => {
+    if (path.length >= 2) return path;
+    if (pickup && delivery) return [pickup, delivery];
+    return [];
+  }, [path, pickup, delivery]);
 
   return (
     <Map
@@ -215,12 +177,7 @@ function InnerMap(props: RouteMapPickerProps) {
       className="h-full w-full"
     >
       <MapClickHandler pickMode={pickMode} onPick={onPick} />
-      <RouteLayer
-        pickup={pickup}
-        delivery={delivery}
-        path={path}
-        onGoogleRoute={onGoogleRoute}
-      />
+      <RoadPolyline path={roadPath} />
 
       {pickup ? (
         <AdvancedMarker
@@ -275,7 +232,7 @@ export function RouteMapPicker(props: RouteMapPickerProps) {
       role="application"
       aria-label="Mapa Google DomiClick"
     >
-      <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={['marker', 'routes', 'geometry']}>
+      <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={['marker', 'routes', 'geometry', 'places']}>
         <InnerMap {...props} />
       </APIProvider>
 
@@ -284,7 +241,7 @@ export function RouteMapPicker(props: RouteMapPickerProps) {
           <div className="font-display text-[10px] font-black italic text-white">
             Domi<span className="text-[#FF5722]">Click</span>
           </div>
-          <div className="text-[8px] text-slate-400">Google Maps · arrastra A / B</div>
+          <div className="text-[8px] text-slate-400">Ruta por calles · arrastra A / B</div>
         </div>
       </div>
     </div>

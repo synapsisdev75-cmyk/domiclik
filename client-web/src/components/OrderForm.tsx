@@ -4,6 +4,7 @@ import { submitOrder } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   estimateRoute,
+  estimateRouteWithGoogle,
   geocodeAddress,
   reverseGeocode,
   type LatLng,
@@ -60,6 +61,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   const [path, setPath] = useState<LatLng[]>([]);
   const [routeKm, setRouteKm] = useState(0);
   const [routeMin, setRouteMin] = useState(0);
+  const [routeProvider, setRouteProvider] = useState<'google' | 'osrm' | 'approx' | null>(null);
   const [pickMode, setPickMode] = useState<MapPickMode>('pickup');
   const [geoBusy, setGeoBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -93,6 +95,20 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       setPath(est.path);
       setRouteKm(est.distanceKm);
       setRouteMin(est.durationMin);
+      setRouteProvider(est.provider);
+
+      // Si Google aún no estaba listo, reintentar Directions al cargar el SDK
+      if (est.provider !== 'google') {
+        window.setTimeout(() => {
+          void estimateRouteWithGoogle(from, to).then((g) => {
+            if (!g || g.path.length < 3) return;
+            setPath(g.path);
+            setRouteKm(g.distanceKm);
+            setRouteMin(g.durationMin);
+            setRouteProvider('google');
+          });
+        }, 1400);
+      }
     } finally {
       setGeoBusy(false);
     }
@@ -510,6 +526,13 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           <p className="mt-1 text-sm text-[var(--domi-muted)]">
             {quote.formula}
             {geoBusy ? ' · recalculando…' : ` · ~${routeMin} min`}
+            {routeProvider === 'google'
+              ? ' · Google Directions'
+              : routeProvider === 'osrm'
+                ? ' · ruta por calles'
+                : routeProvider === 'approx'
+                  ? ' · estimación aprox.'
+                  : ''}
           </p>
           <p className="mt-1 text-xs text-[var(--domi-muted)]">
             Bandera: <span className="text-white">{quote.label}</span> · Mínimo{' '}
