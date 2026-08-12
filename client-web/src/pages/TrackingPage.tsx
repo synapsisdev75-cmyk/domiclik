@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, KeyRound, Loader2, PackageSearch, RefreshCw } from 'lucide-react';
 import type { TrackingStatus } from '../contracts/salesIngest';
 import { BrandLogo } from '../components/BrandLogo';
-import { ChatbotPlaceholder } from '../components/ChatbotPlaceholder';
 import { RatingForm } from '../components/RatingForm';
 import { AuthButton } from '../components/AuthButton';
 import { findOrderByTrackingCode, type PublicOrderTracking } from '../lib/firebase';
@@ -212,8 +211,6 @@ export function TrackingPage() {
           </p>
         ) : null}
       </main>
-
-      <ChatbotPlaceholder />
     </div>
   );
 }

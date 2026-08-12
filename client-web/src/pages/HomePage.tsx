@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
 import type { IngestOrderResponse } from '../contracts/salesIngest';
-import { ChatbotPlaceholder } from '../components/ChatbotPlaceholder';
 import { Hero } from '../components/Hero';
 import { OrderForm } from '../components/OrderForm';
 import { QuickTrackingForm } from '../components/QuickTrackingForm';
@@ -38,8 +37,6 @@ export function HomePage() {
           <p className="mt-1">Excelencia a un click de ti · Villavicencio, Meta</p>
         </footer>
       </main>
-
-      <ChatbotPlaceholder />
     </div>
   );
 }

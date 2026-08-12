@@ -2,6 +2,9 @@
 
 No hace falta comprar un segundo dominio. Con **un dominio** y **subdominios** alcanza.
 
+> **Guía Vercel paso a paso (landing):** ver [`DEPLOY-VERCEL.md`](./DEPLOY-VERCEL.md).  
+> La URL `pedir.domiclik.vercel.app` no existe hasta que crees el proyecto; Vercel da `https://nombre-proyecto.vercel.app`.
+
 Sustituye `tudominio.com` por el tuyo (ej. `domiclick.co`).
 
 ---
