@@ -1,0 +1,10 @@
+{
+  "name": "DomiClick",
+  "description": "DomiClick: Excelencia a un click de ti. Plataforma logística, paquetería y rastreo GPS de motorizados en tiempo real en Villavicencio.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

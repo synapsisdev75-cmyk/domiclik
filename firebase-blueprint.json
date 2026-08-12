@@ -1,0 +1,129 @@
+{
+  "entities": {
+    "users": {
+      "title": "Users",
+      "description": "User accounts with roles (admin or driver)",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "driver", "pending_driver"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["email", "role"]
+    },
+    "drivers": {
+      "title": "Drivers",
+      "description": "Motorized delivery driver records and approval status",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "documentId": { "type": "string" },
+        "licenseNumber": { "type": "string" },
+        "plateNumber": { "type": "string" },
+        "motoModel": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "isActive": { "type": "boolean" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" },
+            "addressName": { "type": "string" },
+            "heading": { "type": "number" },
+            "updatedAt": { "type": "string" }
+          }
+        },
+        "rating": { "type": "number" },
+        "completedDeliveries": { "type": "number" },
+        "approvedBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["fullName", "plateNumber", "status"]
+    },
+    "orders": {
+      "title": "Orders",
+      "description": "Delivery logistics orders in Villavicencio",
+      "type": "object",
+      "properties": {
+        "trackingCode": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "pickupAddress": { "type": "string" },
+        "pickupCoords": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "deliveryAddress": { "type": "string" },
+        "deliveryCoords": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "description": { "type": "string" },
+        "declaredValue": { "type": "number" },
+        "shippingFee": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "assigned", "in_transit", "delivered", "cancelled"] },
+        "assignedDriverId": { "type": "string" },
+        "assignedDriverName": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "chats": {
+      "title": "Chats",
+      "description": "Internal communication channels between Admin and Motorizados",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastMessageTime": { "type": "string" },
+        "unreadByAdmin": { "type": "boolean" },
+        "unreadByDriver": { "type": "boolean" }
+      }
+    },
+    "messages": {
+      "title": "Messages",
+      "description": "Individual messages inside a chat",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string" }
+      }
+    },
+    "location_history": {
+      "title": "Location History",
+      "description": "Geolocation telemetry breadcrumbs logged by drivers during active shifts",
+      "type": "object",
+      "properties": {
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "plateNumber": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "speed": { "type": "number" },
+        "heading": { "type": "number" },
+        "addressName": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "dateKey": { "type": "string" }
+      },
+      "required": ["driverId", "lat", "lng", "timestamp"]
+    }
+  }
+}

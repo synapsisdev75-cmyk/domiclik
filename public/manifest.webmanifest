@@ -1,0 +1,33 @@
+{
+  "name": "DomiClick — Logística Villavicencio",
+  "short_name": "DomiClick",
+  "description": "Sistema de gestión logística inteligente. Excelencia a un click de ti.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#05080f",
+  "theme_color": "#FF5722",
+  "lang": "es-CO",
+  "categories": ["business", "productivity", "navigation"],
+  "icons": [
+    {
+      "src": "/brand/favicon.png",
+      "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/brand/logo-mark.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
