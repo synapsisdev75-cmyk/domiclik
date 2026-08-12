@@ -281,3 +281,99 @@ export async function submitCustomerRating(input: CustomerRatingInput) {
 
   return review;
 }
+
+export type ClientOrderInput = {
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  customerUid?: string;
+  customerPhotoURL?: string;
+  pickupAddress: string;
+  pickupLat: number;
+  pickupLng: number;
+  deliveryAddress: string;
+  deliveryLat: number;
+  deliveryLng: number;
+  description?: string;
+  notes?: string;
+  declaredValue?: number;
+  shippingFee?: number;
+  routeDistanceKm?: number;
+  routeDurationMin?: number;
+  pricingBand?: 'peak' | 'normal';
+  pricePerKm?: number;
+  peakMultiplier?: number;
+  scheduledFor?: string;
+  sourceSiteId: string;
+};
+
+/**
+ * Escribe el pedido directo a Firestore (misma DB que la torre de control).
+ * Usado como canal principal/respaldo para que Central vea la solicitud en vivo.
+ */
+export async function createClientOrder(input: ClientOrderInput) {
+  const orderId = 'ord_' + Date.now();
+  const trackingCode = 'DMC-' + Math.floor(1000 + Math.random() * 9000);
+  const deliveryConfirmCode = String(Math.floor(100000 + Math.random() * 900000));
+  const now = new Date().toISOString();
+  const fee = Math.round(Number(input.shippingFee) || 0);
+  const km = Number(input.routeDistanceKm) || 0;
+
+  const order = {
+    id: orderId,
+    trackingCode,
+    deliveryConfirmCode,
+    customerName: input.customerName.trim(),
+    customerPhone: input.customerPhone.trim(),
+    customerEmail: input.customerEmail || '',
+    customerUid: input.customerUid || '',
+    customerPhotoURL: input.customerPhotoURL || '',
+    pickupAddress: input.pickupAddress.trim() || 'Punto de recolección',
+    pickupCoords: {
+      lat: input.pickupLat,
+      lng: input.pickupLng,
+      addressName: input.pickupAddress.trim() || 'Recolección',
+    },
+    deliveryAddress: input.deliveryAddress.trim(),
+    deliveryCoords: {
+      lat: input.deliveryLat,
+      lng: input.deliveryLng,
+      addressName: input.deliveryAddress.trim(),
+    },
+    description: input.description || 'Pedido desde landing clientes',
+    itemType: 'varios' as const,
+    declaredValue: Number(input.declaredValue) || 0,
+    shippingFee: fee,
+    routePrice: fee,
+    routeDistanceKm: km > 0 ? Math.round(km * 100) / 100 : undefined,
+    routeDurationMin: Number(input.routeDurationMin) || undefined,
+    pricingBand: input.pricingBand,
+    pricePerKm: input.pricePerKm,
+    peakMultiplier: input.peakMultiplier,
+    clientQuoted: fee > 0,
+    scheduledFor: input.scheduledFor || undefined,
+    status: 'pending' as const,
+    assignedDriverId: null,
+    assignedDriverName: null,
+    notes: input.notes || '',
+    sourceSiteId: input.sourceSiteId,
+    externalOrderId: '',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await setDoc(doc(db, 'orders', orderId), order);
+
+  return {
+    ok: true as const,
+    orderId,
+    trackingCode,
+    deliveryConfirmCode,
+    status: 'pending' as const,
+    shippingFee: fee || null,
+    routeDistanceKm: order.routeDistanceKm || null,
+    scheduledFor: order.scheduledFor || null,
+    pricingBand: order.pricingBand || null,
+  };
+}
+

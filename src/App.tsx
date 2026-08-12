@@ -107,6 +107,9 @@ function MainApp() {
 
     for (const order of orders) {
       const was = prev.get(order.id);
+      if (was === undefined && order.status === 'pending' && currentRole === 'admin') {
+        alertOrderAssigned();
+      }
       if (was !== order.status) {
         if (order.status === 'delivered' && was && was !== 'delivered') {
           alertDeliveryComplete();
