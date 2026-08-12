@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { CalendarClock, Loader2, MapPinned, Navigation, Package } from 'lucide-react';
 import { submitOrder } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -50,6 +50,10 @@ interface OrderFormProps {
   onSuccess: (result: IngestOrderResponse) => void;
 }
 
+function coordsKey(p: LatLng) {
+  return `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
+}
+
 export function OrderForm({ onSuccess }: OrderFormProps) {
   const { profile, signIn, setPhone, loading: authLoading } = useAuth();
   const [values, setValues] = useState<OrderFormValues>(() => {
@@ -67,6 +71,12 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const routeGenRef = useRef(0);
+  const googleRetryRef = useRef<number | null>(null);
+  const pickupRef = useRef<LatLng | null>(null);
+  const deliveryRef = useRef<LatLng | null>(null);
+  const draggingRef = useRef(false);
+
   const whenForPrice = useMemo(() => {
     return parseDatetimeLocal(values.scheduledFor) || new Date();
   }, [values.scheduledFor]);
@@ -79,6 +89,11 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   const scheduleBounds = useMemo(() => scheduleWindow(), []);
 
   useEffect(() => {
+    pickupRef.current = pickup;
+    deliveryRef.current = delivery;
+  }, [pickup, delivery]);
+
+  useEffect(() => {
     if (!profile) return;
     setValues((prev) => ({
       ...prev,
@@ -89,28 +104,56 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   }, [profile]);
 
   const refreshRoute = useCallback(async (from: LatLng, to: LatLng) => {
+    const gen = ++routeGenRef.current;
+    if (googleRetryRef.current != null) {
+      window.clearTimeout(googleRetryRef.current);
+      googleRetryRef.current = null;
+    }
+
     setGeoBusy(true);
+    setPath([]);
+    setRouteKm(0);
+    setRouteMin(0);
+
     try {
       const est = await estimateRoute(from, to);
+      if (gen !== routeGenRef.current) return;
+      if (
+        !pickupRef.current ||
+        !deliveryRef.current ||
+        coordsKey(pickupRef.current) !== coordsKey(from) ||
+        coordsKey(deliveryRef.current) !== coordsKey(to)
+      ) {
+        return;
+      }
+
       setPath(est.path);
       setRouteKm(est.distanceKm);
       setRouteMin(est.durationMin);
       setRouteProvider(est.provider);
 
-      // Si Google aún no estaba listo, reintentar Directions al cargar el SDK
       if (est.provider !== 'google') {
-        window.setTimeout(() => {
+        googleRetryRef.current = window.setTimeout(() => {
           void estimateRouteWithGoogle(from, to).then((g) => {
             if (!g || g.path.length < 3) return;
+            if (gen !== routeGenRef.current) return;
+            if (
+              !pickupRef.current ||
+              !deliveryRef.current ||
+              coordsKey(pickupRef.current) !== coordsKey(from) ||
+              coordsKey(deliveryRef.current) !== coordsKey(to)
+            ) {
+              return;
+            }
             setPath(g.path);
             setRouteKm(g.distanceKm);
             setRouteMin(g.durationMin);
             setRouteProvider('google');
           });
-        }, 1400);
+        }, 1200);
       }
     } finally {
-      setGeoBusy(false);
+      if (gen === routeGenRef.current) setGeoBusy(false);
     }
   }, []);
 
@@ -119,9 +162,19 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       setPath([]);
       setRouteKm(0);
       setRouteMin(0);
+      setRouteProvider(null);
       return;
     }
+    // Mientras se arrastra, solo mueve el pin; la ruta se calcula al soltar
+    if (draggingRef.current) return;
     void refreshRoute(pickup, delivery);
+    return () => {
+      routeGenRef.current += 1;
+      if (googleRetryRef.current != null) {
+        window.clearTimeout(googleRetryRef.current);
+        googleRetryRef.current = null;
+      }
+    };
   }, [pickup, delivery, refreshRoute]);
 
   function update<K extends keyof OrderFormValues>(key: K, value: OrderFormValues[K]) {
@@ -129,57 +182,56 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   }
 
   const onMapPick = useCallback(
-    async (point: LatLng) => {
+    (point: LatLng) => {
       if (!pickMode) return;
-      setGeoBusy(true);
-      try {
-        const label = await reverseGeocode(point.lat, point.lng);
-        if (pickMode === 'pickup') {
-          setPickup(point);
-          update('pickupAddress', label);
-          setPickMode('delivery');
-        } else {
-          setDelivery(point);
-          update('deliveryAddress', label);
-          setPickMode(null);
-        }
-      } finally {
-        setGeoBusy(false);
+      draggingRef.current = false;
+      setPath([]);
+      if (pickMode === 'pickup') {
+        setPickup(point);
+        setPickMode('delivery');
+        void reverseGeocode(point.lat, point.lng).then((label) => {
+          setValues((prev) => ({ ...prev, pickupAddress: label }));
+        });
+      } else {
+        setDelivery(point);
+        setPickMode(null);
+        void reverseGeocode(point.lat, point.lng).then((label) => {
+          setValues((prev) => ({ ...prev, deliveryAddress: label }));
+        });
       }
     },
     [pickMode],
   );
 
-  const onDragPickup = useCallback(async (point: LatLng) => {
+  const onLiveDragPickup = useCallback((point: LatLng) => {
+    draggingRef.current = true;
+    setPath([]);
     setPickup(point);
-    setGeoBusy(true);
-    try {
-      const label = await reverseGeocode(point.lat, point.lng);
+  }, []);
+
+  const onDragPickup = useCallback((point: LatLng) => {
+    draggingRef.current = false;
+    setPath([]);
+    setPickup(point);
+    void reverseGeocode(point.lat, point.lng).then((label) => {
       setValues((prev) => ({ ...prev, pickupAddress: label }));
-    } finally {
-      setGeoBusy(false);
-    }
+    });
   }, []);
 
-  const onDragDelivery = useCallback(async (point: LatLng) => {
+  const onLiveDragDelivery = useCallback((point: LatLng) => {
+    draggingRef.current = true;
+    setPath([]);
     setDelivery(point);
-    setGeoBusy(true);
-    try {
-      const label = await reverseGeocode(point.lat, point.lng);
-      setValues((prev) => ({ ...prev, deliveryAddress: label }));
-    } finally {
-      setGeoBusy(false);
-    }
   }, []);
 
-  const onGoogleRoute = useCallback(
-    (route: { distanceKm: number; durationMin: number; path: LatLng[] }) => {
-      setPath(route.path);
-      setRouteKm(route.distanceKm);
-      setRouteMin(route.durationMin);
-    },
-    [],
-  );
+  const onDragDelivery = useCallback((point: LatLng) => {
+    draggingRef.current = false;
+    setPath([]);
+    setDelivery(point);
+    void reverseGeocode(point.lat, point.lng).then((label) => {
+      setValues((prev) => ({ ...prev, deliveryAddress: label }));
+    });
+  }, []);
 
   async function geocodeField(kind: 'pickup' | 'delivery') {
     const text = kind === 'pickup' ? values.pickupAddress : values.deliveryAddress;
@@ -188,9 +240,12 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
     try {
       const hit = await geocodeAddress(text);
       if (!hit) {
-        setError(`No encontramos esa dirección. Márcala en el mapa (${kind === 'pickup' ? 'partida' : 'entrega'}).`);
+        setError(
+          `No encontramos esa dirección. Márcala en el mapa (${kind === 'pickup' ? 'recolección' : 'entrega'}).`,
+        );
         return;
       }
+      setPath([]);
       if (kind === 'pickup') {
         setPickup({ lat: hit.lat, lng: hit.lng });
         update('pickupAddress', hit.label);
@@ -208,7 +263,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
     setError(null);
 
     if (!pickup || !delivery) {
-      setError('Marca en el mapa la partida (A) y la entrega (B), o busca las direcciones.');
+      setError('Marca en el mapa la recolección (A) y la entrega (B).');
       return;
     }
     if (!quote) {
@@ -291,7 +346,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           <div>
             <h2 className="font-display text-2xl font-bold text-white">Solicitar entrega</h2>
             <p className="mt-1 text-sm text-[var(--domi-muted)]">
-              Marca partida y entrega en el mapa. Tarifa: $2.300 COP/km (hora pico +35%).
+              A = recolección · B = entrega. Tarifa $2.300 COP/km (hora pico +35%).
             </p>
           </div>
         </div>
@@ -365,7 +420,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
                 }`}
                 onClick={() => setPickMode('pickup')}
               >
-                Marcar partida (A)
+                A · Recolección
               </button>
               <button
                 type="button"
@@ -376,7 +431,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
                 }`}
                 onClick={() => setPickMode('delivery')}
               >
-                Marcar entrega (B)
+                B · Entrega
               </button>
             </div>
           </div>
@@ -386,32 +441,40 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             delivery={delivery}
             path={path}
             pickMode={pickMode}
-            onPick={(p) => void onMapPick(p)}
-            onDragPickup={(p) => void onDragPickup(p)}
-            onDragDelivery={(p) => void onDragDelivery(p)}
-            onGoogleRoute={onGoogleRoute}
+            routing={geoBusy}
+            onPick={onMapPick}
+            onDragPickup={onDragPickup}
+            onDragDelivery={onDragDelivery}
+            onLiveDragPickup={onLiveDragPickup}
+            onLiveDragDelivery={onLiveDragDelivery}
           />
 
           {pickup && delivery ? (
-            <p className="rounded-xl border border-[rgba(0,229,255,0.25)] bg-[rgba(0,229,255,0.06)] px-3 py-2 text-sm text-white">
-              <span className="font-semibold text-[var(--domi-cyan)]">De:</span>{' '}
-              {values.pickupAddress || 'Partida'}
-              <br />
-              <span className="font-semibold text-[var(--domi-orange)]">A:</span>{' '}
-              {values.deliveryAddress || 'Entrega'}
-            </p>
+            <div className="space-y-1 rounded-xl border border-[rgba(0,229,255,0.25)] bg-[rgba(0,229,255,0.06)] px-3 py-2 text-sm text-white">
+              <p>
+                <span className="font-semibold text-[var(--domi-cyan)]">A · Recolección:</span>{' '}
+                {values.pickupAddress || 'Punto de salida'}
+              </p>
+              <p>
+                <span className="font-semibold text-[var(--domi-orange)]">B · Entrega:</span>{' '}
+                {values.deliveryAddress || 'Punto de llegada'}
+              </p>
+              {geoBusy ? (
+                <p className="text-xs text-[var(--domi-muted)]">Recalculando ruta óptima…</p>
+              ) : null}
+            </div>
           ) : (
             <p className="text-xs text-[var(--domi-muted)]">
-              Toca el mapa para ubicar A (partida) y B (entrega). Luego puedes{' '}
-              <span className="text-white">arrastrar los pines</span> para ajustar. También puedes
-              escribir la dirección y pulsar “Ubicar”.
+              Marca <span className="text-white">A (recolección)</span> y{' '}
+              <span className="text-white">B (entrega)</span>. Arrastra los pines: la ruta se
+              recalcula al soltar.
             </p>
           )}
         </div>
 
         <label className="block sm:col-span-2">
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Dirección de partida *
+            Dirección de recolección (A) *
           </span>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
@@ -419,7 +482,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
               required
               value={values.pickupAddress}
               onChange={(e) => update('pickupAddress', e.target.value)}
-              placeholder="Ej. C.C. Viva, Av. 40"
+              placeholder="Ej. C.C. Unicentro, punto de salida"
             />
             <button
               type="button"
@@ -435,7 +498,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
 
         <label className="block sm:col-span-2">
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Dirección de entrega *
+            Dirección de entrega (B) *
           </span>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
