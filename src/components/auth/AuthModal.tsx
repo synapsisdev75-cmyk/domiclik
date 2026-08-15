@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { auth, googleProvider, LOGIN_ROLE_KEY } from '../../lib/firebase';
+import { auth, LOGIN_ROLE_KEY } from '../../lib/firebase';
+import { signInWithGoogleAccount, describeAuthError } from '../../lib/googleAuth';
 import {
-  signInWithPopup,
-  signInWithRedirect,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
@@ -59,23 +58,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
     sessionStorage.setItem(LOGIN_ROLE_KEY, role);
     try {
-      const res = await signInWithPopup(auth, googleProvider);
-      if (res.user.email) {
+      const user = await signInWithGoogleAccount();
+      if (user.email) {
         sessionStorage.removeItem(LOGIN_ROLE_KEY);
-        onAuthenticated(res.user.email, role);
+        onAuthenticated(user.email, role);
         onClose();
       }
-    } catch (err: any) {
-      try {
-        await signInWithRedirect(auth, googleProvider);
-        return;
-      } catch {
-        setError(
-          err?.code === 'auth/operation-not-allowed'
-            ? 'Activa el proveedor Google en Firebase Authentication.'
-            : 'No se pudo iniciar con Google. Revisa popup o Sign-in method.'
-        );
-      }
+    } catch (err: unknown) {
+      setError(describeAuthError(err));
     } finally {
       setLoading(false);
     }

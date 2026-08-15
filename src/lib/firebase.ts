@@ -19,8 +19,12 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import {
+  initializeAuth,
   getAuth,
   GoogleAuthProvider,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  browserPopupRedirectResolver,
 } from 'firebase/auth';
 import {
   getStorage,
@@ -71,6 +75,20 @@ function createFirestore() {
 
 export const db = createFirestore();
 
+function createAuth() {
+  try {
+    return initializeAuth(app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } catch {
+    return getAuth(app);
+  }
+}
+
+export const auth = createAuth();
+export const storage = getStorage(app);
+
 /** Fuerza red + lectura real a Firestore (DB nombrada del proyecto). */
 export async function connectFirestore(): Promise<boolean> {
   try {
@@ -100,8 +118,6 @@ export async function connectFirestore(): Promise<boolean> {
   }
 }
 
-export const auth = getAuth(app);
-export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 googleProvider.addScope('email');

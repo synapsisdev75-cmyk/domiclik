@@ -9,7 +9,6 @@ import {
 } from 'react';
 import type { User } from 'firebase/auth';
 import {
-  completeGoogleRedirect,
   saveCustomerPhone,
   signInWithGoogle,
   signOutCustomer,
@@ -39,29 +38,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let unsub = () => {};
-    void (async () => {
-      try {
-        await completeGoogleRedirect();
-      } catch {
-        /* redirect may be empty */
-      }
-      unsub = subscribeAuth(async (next) => {
-        setUser(next);
-        if (next) {
-          const p = userToProfile(next);
-          setProfile(p);
-          try {
-            await upsertCustomerProfile(p);
-          } catch (err) {
-            console.warn('[auth] no se pudo guardar perfil cliente', err);
-          }
-        } else {
-          setProfile(null);
+    const unsub = subscribeAuth(async (next) => {
+      setUser(next);
+      if (next) {
+        const p = userToProfile(next);
+        setProfile(p);
+        try {
+          await upsertCustomerProfile(p);
+        } catch (err) {
+          console.warn('[auth] no se pudo guardar perfil cliente', err);
         }
-        setLoading(false);
-      });
-    })();
+      } else {
+        setProfile(null);
+      }
+      setLoading(false);
+    });
     return () => unsub();
   }, []);
 
@@ -71,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithGoogle();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al iniciar sesión';
-      if (!message.includes('Redirigiendo')) setError(message);
+      setError(message);
     }
   }, []);
 

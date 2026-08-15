@@ -1,9 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { auth, googleProvider, LOGIN_ROLE_KEY } from '../../lib/firebase';
+import React, { useState } from 'react';
+import { auth, LOGIN_ROLE_KEY } from '../../lib/firebase';
+import { signInWithGoogleAccount, describeAuthError } from '../../lib/googleAuth';
 import {
-  signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
@@ -157,27 +155,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [authError, setAuthError] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await getRedirectResult(auth);
-        if (cancelled || !res?.user?.email) return;
-        const saved =
-          (sessionStorage.getItem(LOGIN_ROLE_KEY) as LoginRole) || 'admin';
-        sessionStorage.removeItem(LOGIN_ROLE_KEY);
-        onLoginSuccess(res.user.email, saved);
-      } catch (err: any) {
-        if (!cancelled) {
-          setAuthError(err?.code ? `Google: ${err.code}` : 'Error al completar login con Google.');
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -231,50 +208,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setInfoMsg('');
     sessionStorage.setItem(LOGIN_ROLE_KEY, role);
     try {
-      const res = await signInWithPopup(auth, googleProvider);
-      if (res.user.email) {
+      const user = await signInWithGoogleAccount();
+      if (user.email) {
         sessionStorage.removeItem(LOGIN_ROLE_KEY);
-        onLoginSuccess(res.user.email, role);
+        onLoginSuccess(user.email, role);
       }
-    } catch (err: any) {
-      const code = err?.code || '';
-      if (
-        code === 'auth/popup-blocked' ||
-        code === 'auth/popup-closed-by-user' ||
-        code === 'auth/cancelled-popup-request' ||
-        code === 'auth/operation-not-supported-in-this-environment'
-      ) {
-        try {
-          await signInWithRedirect(auth, googleProvider);
-          return;
-        } catch (redirectErr: any) {
-          setAuthError(
-            `Google redirect falló (${redirectErr?.code || 'error'}). Activa Google en Firebase Auth.`
-          );
-        }
-      } else if (code === 'auth/unauthorized-domain') {
-        const host = window.location.hostname;
-        setAuthError(
-          `Dominio no autorizado (${host}). En Firebase → Authentication → Settings → Authorized domains agrega localhost y ${host}.`
-        );
-      } else if (code === 'auth/operation-not-allowed') {
-        setAuthError(
-          'Proveedor Google desactivado. En Firebase → Authentication → Sign-in method activa Google.'
-        );
-      } else if (code === 'auth/network-request-failed') {
-        const host = window.location.hostname;
-        setAuthError(
-          host !== 'localhost' && host !== '127.0.0.1'
-            ? `No hay red con Google Auth desde ${host}. Abre http://localhost:3000, permite popups y en Firebase agrega este dominio en Authorized domains. También puedes entrar con correo/contraseña.`
-            : 'No hay red con Google Auth. Revisa internet, desactiva bloqueadores, permite popups, y en Firebase activa el proveedor Google. También puedes entrar con correo/contraseña.'
-        );
-      } else {
-        setAuthError(
-          code
-            ? `Google (${code}). Revisa Authentication → Google en Firebase.`
-            : 'No se pudo iniciar con Google.'
-        );
-      }
+    } catch (err: unknown) {
+      setAuthError(describeAuthError(err));
     } finally {
       setLoading(false);
     }
