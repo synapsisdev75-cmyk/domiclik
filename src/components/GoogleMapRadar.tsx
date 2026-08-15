@@ -214,23 +214,34 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
 
           {approved.map((driver) => (
             <AdvancedMarker
-              key={driver.id}
+              key={`${driver.id}-${driver.location?.lat?.toFixed(5)}-${driver.location?.lng?.toFixed(5)}`}
               position={{ lat: driver.location.lat, lng: driver.location.lng }}
-              title={`${driver.fullName} · ${driver.plateNumber}`}
+              title={`${driver.fullName} · ${driver.plateNumber}${driver.isActive ? ' · GPS vivo' : ''}`}
             >
               <div
                 className="relative flex items-center justify-center pointer-events-none"
                 style={{
-                  width: 18,
-                  height: 18,
+                  width: 22,
+                  height: 22,
                   transform: 'translateY(50%)',
                 }}
               >
+                {driver.isActive ? (
+                  <span
+                    className="absolute inset-0 rounded-full border-2 opacity-60"
+                    style={{
+                      borderColor: '#00E676',
+                      animation: 'domiGpsPulse 1.4s ease-out infinite',
+                    }}
+                  />
+                ) : null}
                 <div
                   className="w-[14px] h-[14px] rounded-full border-2 border-white"
                   style={{
                     background: driver.isActive ? '#00E676' : '#2B6CFF',
-                    boxShadow: `0 0 0 1px ${driver.isActive ? '#00E676' : '#2B6CFF'}, 0 1px 4px rgba(0,0,0,.55)`,
+                    boxShadow: `0 0 0 1px ${driver.isActive ? '#00E676' : '#2B6CFF'}, 0 0 10px ${
+                      driver.isActive ? '#00E676' : '#2B6CFF'
+                    }`,
                   }}
                 />
               </div>

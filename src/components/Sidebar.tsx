@@ -13,6 +13,7 @@ const menuItems: { id: string; label: string; icon: BrandIconKey }[] = [
   { id: 'solicitudes', label: 'Solicitudes', icon: 'nuevaMision' },
   { id: 'flota', label: 'Flota', icon: 'operadores' },
   { id: 'envios', label: 'Envíos', icon: 'operaciones' },
+  { id: 'incidentes', label: 'Incidentes', icon: 'incidentes' },
   { id: 'rutas', label: 'Rutas', icon: 'historial' },
   { id: 'historial', label: 'Historial', icon: 'enCurso' },
   { id: 'reportes', label: 'Control', icon: 'estadisticas' },

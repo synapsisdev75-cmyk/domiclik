@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, ChevronDown, Sparkles } from 'lucide-react';
+import { User, ChevronDown, Sparkles, LogOut } from 'lucide-react';
 import { BrandLogo } from './brand/BrandAssets';
 import { InstallAppButton } from './InstallAppButton';
 
@@ -12,6 +12,10 @@ interface HeaderBarProps {
   realtimeLabel?: string;
   canAccessAdmin?: boolean;
   roleLabel?: string;
+  /** Cabina transportista: sin menú admin ni extras. */
+  compact?: boolean;
+  /** Sin menú desplegable de roles (repartidor detectado). */
+  hideRoleMenu?: boolean;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
@@ -23,6 +27,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   realtimeLabel,
   canAccessAdmin = false,
   roleLabel,
+  compact = false,
+  hideRoleMenu = false,
 }) => {
   const [timeString, setTimeString] = useState<string>('');
   const [dateString, setDateString] = useState<string>('');
@@ -47,9 +53,14 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
     return () => clearInterval(interval);
   }, []);
 
+  const flatDriverBar = compact || hideRoleMenu;
+
   return (
     <header className="bg-[#05080f]/95 border-b border-[#1a2744] px-4 sm:px-6 py-3 flex items-center justify-between gap-4 select-none relative z-30 backdrop-blur-md">
-      <div className="flex items-center gap-3 cursor-pointer group" onClick={onOpenBrandModal}>
+      <div
+        className={`flex items-center gap-3 ${onOpenBrandModal ? 'cursor-pointer group' : ''}`}
+        onClick={onOpenBrandModal}
+      >
         <div className="relative">
           <div className="w-12 h-12 rounded-2xl bg-transparent flex items-center justify-center overflow-visible p-0.5">
             <BrandLogo variant="mark" className="w-11 h-11" />
@@ -65,7 +76,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             <span className="text-[#FF5722] drop-shadow-[0_0_12px_rgba(255,87,34,0.6)]">Click</span>
           </h1>
           <p className="text-[11px] font-medium text-slate-400 tracking-tight mt-0.5">
-            Excelencia a un click de ti.
+            {flatDriverBar ? 'Cabina del transportista' : 'Excelencia a un click de ti.'}
           </p>
         </div>
       </div>
@@ -73,10 +84,22 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       <div className="hidden md:flex items-center gap-4 bg-[#0a101c]/90 border border-[#1a2744] px-4 py-2 rounded-2xl shadow-inner">
         <div className="flex items-center gap-2">
           <span className="relative flex h-3 w-3">
-            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${realtimeLive ? 'bg-[#00E676]' : 'bg-amber-400'}`} />
-            <span className={`relative inline-flex rounded-full h-3 w-3 ${realtimeLive ? 'bg-[#00E676]' : 'bg-amber-400'}`} />
+            <span
+              className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                realtimeLive ? 'bg-[#00E676]' : 'bg-amber-400'
+              }`}
+            />
+            <span
+              className={`relative inline-flex rounded-full h-3 w-3 ${
+                realtimeLive ? 'bg-[#00E676]' : 'bg-amber-400'
+              }`}
+            />
           </span>
-          <span className={`text-xs font-black tracking-wider uppercase font-tech ${realtimeLive ? 'text-[#00E676]' : 'text-amber-400'}`}>
+          <span
+            className={`text-xs font-black tracking-wider uppercase font-tech ${
+              realtimeLive ? 'text-[#00E676]' : 'text-amber-400'
+            }`}
+          >
             {realtimeLabel || (realtimeLive ? 'EN VIVO · Firebase' : 'SISTEMA ACTIVO')}
           </span>
         </div>
@@ -85,95 +108,130 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           <div className="text-xs font-bold text-white tracking-widest">{timeString}</div>
           <div className="text-[10px] text-slate-400 font-medium">{dateString}</div>
         </div>
-        <div className="h-4 w-px bg-[#1a2744] hidden lg:block" />
-        <div className="hidden lg:block">
-          <InstallAppButton />
-        </div>
+        {!flatDriverBar && (
+          <>
+            <div className="h-4 w-px bg-[#1a2744] hidden lg:block" />
+            <div className="hidden lg:block">
+              <InstallAppButton />
+            </div>
+          </>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="lg:hidden">
-          <InstallAppButton compact />
-        </div>
-        <div className="relative">
-          <button
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="flex items-center gap-3 bg-[#090F1E] hover:bg-[#0E172C] border border-[#182643] px-3.5 py-2 rounded-2xl transition shadow-lg"
-          >
-            <div className="w-8 h-8 rounded-full bg-[#111C33] border border-[#00E5FF]/40 flex items-center justify-center">
-              <User className="w-4 h-4 text-[#00E5FF]" />
-            </div>
-            <div className="text-left hidden sm:block">
-              <div className="text-xs font-bold text-white leading-tight">
-                {roleLabel || (canAccessAdmin ? 'Admin Operador' : 'Usuario')}
-              </div>
-              <div className="text-[10px] text-slate-400 font-mono">
-                {canAccessAdmin ? 'Modo Administrador' : 'Acceso restringido'}
-              </div>
-            </div>
-            <ChevronDown
-              className={`w-4 h-4 text-slate-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}
-            />
-          </button>
+        {!flatDriverBar && (
+          <div className="lg:hidden">
+            <InstallAppButton compact />
+          </div>
+        )}
 
-          {isDropdownOpen && (
-            <div className="absolute right-0 mt-2 w-56 bg-[#0A0F1D] border border-[#1A2846] rounded-2xl shadow-2xl p-2 z-50 space-y-1 font-mono text-xs">
-              <div className="px-3 py-2 border-b border-[#1A2846] text-slate-300">
-                <p className="text-[10px] text-slate-400">Usuario Conectado:</p>
-                <p className="font-bold text-white truncate">
-                  {currentUserEmail || 'admin@domiclick.com'}
-                </p>
+        {flatDriverBar ? (
+          <div className="flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2 bg-[#090F1E] border border-[#182643] px-3 py-2 rounded-2xl">
+              <div className="w-8 h-8 rounded-full bg-[#111C33] border border-[#00E676]/50 flex items-center justify-center">
+                <User className="w-4 h-4 text-[#00E676]" />
               </div>
-              {onSelectRole && (
-                <>
-                  {canAccessAdmin && (
+              <div className="text-left">
+                <div className="text-xs font-bold text-white leading-tight max-w-[140px] truncate">
+                  {roleLabel || 'Transportista'}
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]">
+                  {currentUserEmail || 'Cabina GPS'}
+                </div>
+              </div>
+            </div>
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="flex items-center gap-1.5 bg-red-950/40 hover:bg-red-900/50 border border-red-500/40 text-red-300 px-3 py-2 rounded-2xl text-xs font-bold"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Salir</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="relative">
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="flex items-center gap-3 bg-[#090F1E] hover:bg-[#0E172C] border border-[#182643] px-3.5 py-2 rounded-2xl transition shadow-lg"
+            >
+              <div className="w-8 h-8 rounded-full bg-[#111C33] border border-[#00E5FF]/40 flex items-center justify-center">
+                <User className="w-4 h-4 text-[#00E5FF]" />
+              </div>
+              <div className="text-left hidden sm:block">
+                <div className="text-xs font-bold text-white leading-tight">
+                  {roleLabel || (canAccessAdmin ? 'Admin Operador' : 'Usuario')}
+                </div>
+                <div className="text-[10px] text-slate-400 font-mono">
+                  {canAccessAdmin ? 'Modo Administrador' : 'Acceso restringido'}
+                </div>
+              </div>
+              <ChevronDown
+                className={`w-4 h-4 text-slate-400 transition-transform ${
+                  isDropdownOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {isDropdownOpen && (
+              <div className="absolute right-0 mt-2 w-56 bg-[#0A0F1D] border border-[#1A2846] rounded-2xl shadow-2xl p-2 z-50 space-y-1 font-mono text-xs">
+                <div className="px-3 py-2 border-b border-[#1A2846] text-slate-300">
+                  <p className="text-[10px] text-slate-400">Usuario Conectado:</p>
+                  <p className="font-bold text-white truncate">{currentUserEmail || '—'}</p>
+                </div>
+                {onSelectRole && (
+                  <>
+                    {canAccessAdmin && (
+                      <button
+                        onClick={() => {
+                          onSelectRole('admin');
+                          setIsDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#14223E] text-slate-200 font-semibold"
+                      >
+                        Vista Admin Operador
+                      </button>
+                    )}
                     <button
                       onClick={() => {
-                        onSelectRole('admin');
+                        onSelectRole('driver');
                         setIsDropdownOpen(false);
                       }}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#14223E] text-slate-200 font-semibold"
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#14223E] text-[#FF5722] font-semibold"
                     >
-                      Vista Admin Operador
+                      Vista Cabina Motorizado
                     </button>
-                  )}
+                  </>
+                )}
+                {onOpenBrandModal && (
                   <button
                     onClick={() => {
-                      onSelectRole('driver');
+                      onOpenBrandModal();
                       setIsDropdownOpen(false);
                     }}
-                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#14223E] text-[#FF5722] font-semibold"
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#14223E] text-[#00E5FF] font-semibold flex items-center gap-1.5"
                   >
-                    Vista Cabina Motorizado
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Manual de Marca
                   </button>
-                </>
-              )}
-              {onOpenBrandModal && (
-                <button
-                  onClick={() => {
-                    onOpenBrandModal();
-                    setIsDropdownOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#14223E] text-[#00E5FF] font-semibold flex items-center gap-1.5"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Manual de Marca
-                </button>
-              )}
-              {onLogout && (
-                <button
-                  onClick={() => {
-                    onLogout();
-                    setIsDropdownOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-xl bg-red-950/40 text-red-300 font-bold mt-2"
-                >
-                  Cerrar Sesión
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+                )}
+                {onLogout && (
+                  <button
+                    onClick={() => {
+                      onLogout();
+                      setIsDropdownOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl bg-red-950/40 text-red-300 font-bold mt-2"
+                  >
+                    Cerrar Sesión
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </header>
   );

@@ -14,12 +14,18 @@ export const DEFAULT_PAYROLL_SETTINGS: PayrollSettings = {
   ratingBonusThreshold: 4.5,
   ratingBonusAmount: 20000,
   basePay: 0,
+  fuelCostPerKm: 280,
   updatedAt: new Date().toISOString(),
 };
 
+/** Jornada laboral esperada del motorizado (horas). */
+export const EXPECTED_SHIFT_HOURS = 8;
+/** COP / km para estimado de gasolina si no hay setting. */
+export const DEFAULT_FUEL_COP_PER_KM = 280;
+
 export const DEFAULT_DISPATCH_SETTINGS: DispatchSettings = {
   id: 'dispatch',
-  searchRadiusKm: 5,
+  searchRadiusKm: 15,
   baseFee: 3000,
   perKmRate: 800,
   autoAssignEnabled: true,

@@ -154,6 +154,28 @@ export interface AttendancePunch {
   lng?: number;
   method: 'webauthn';
   credentialId: string;
+  /** Kilometraje del odómetro al marcar (km reales de la moto). */
+  odometerKm?: number;
+  /** Foto del tablero / odómetro. */
+  odometerPhotoUrl?: string;
+}
+
+/** Resumen del turno laboral del día (entrada + salida + km). */
+export interface WorkShiftDay {
+  driverId: string;
+  driverName: string;
+  dateKey: string;
+  inAt?: string;
+  outAt?: string;
+  kmIn?: number;
+  kmOut?: number;
+  kmDriven: number;
+  hoursWorked: number;
+  expectedHours: number;
+  fuelEstimateCop: number;
+  photoInUrl?: string;
+  photoOutUrl?: string;
+  open: boolean;
 }
 
 export interface DriverReview {
@@ -182,6 +204,8 @@ export interface PayrollSettings {
   ratingBonusAmount: number;
   /** Base fija del periodo (COP), opcional */
   basePay: number;
+  /** Costo estimado de gasolina por km (COP). Uso empresa vs personal. */
+  fuelCostPerKm?: number;
   updatedAt: string;
 }
 
@@ -235,6 +259,27 @@ export interface ChatRoom {
   lastMessageTime: string;
   unreadByAdmin: boolean;
   unreadByDriver: boolean;
+}
+
+/** Incidencia operativa (retraso, cliente ausente, etc.). Solo admin resuelve. */
+export type IncidentStatus = 'open' | 'resolved';
+
+export interface OpsIncident {
+  id: string;
+  orderId?: string;
+  trackingCode?: string;
+  driverId?: string;
+  driverName?: string;
+  reportedByRole: 'admin' | 'driver';
+  reportedByName: string;
+  title: string;
+  description: string;
+  status: IncidentStatus;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolutionNote?: string;
 }
 
 export interface VillavicencioPoint {

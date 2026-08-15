@@ -11,7 +11,9 @@ import {
 } from '../lib/geo';
 import {
   computeShippingQuote,
+  estimateTravelMinutes,
   formatCOP,
+  MIN_SCHEDULE_LEAD_MIN,
   MIN_SHIPPING_FEE_COP,
   parseDatetimeLocal,
   resolveScheduledFor,
@@ -87,7 +89,30 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
     return computeShippingQuote(routeKm, whenForPrice);
   }, [pickup, delivery, routeKm, whenForPrice]);
 
-  const scheduleBounds = useMemo(() => scheduleWindow(), []);
+  /** Minutos mínimos para programar = viaje (km÷60|75) + buffer. */
+  const scheduleLeadMin = useMemo(() => {
+    if (routeKm <= 0) return estimateTravelMinutes(0).totalMin || 5;
+    return estimateTravelMinutes(routeKm, new Date()).totalMin;
+  }, [routeKm]);
+
+  const scheduleBounds = useMemo(
+    () => scheduleWindow(new Date(), scheduleLeadMin),
+    [scheduleLeadMin],
+  );
+
+  // Mantener la hora programada al menos en el lead (ETA) calculado
+  useEffect(() => {
+    const { min } = scheduleBounds;
+    const current = parseDatetimeLocal(values.scheduledFor);
+    if (!current || current.getTime() < min.getTime()) {
+      setValues((prev) => ({ ...prev, scheduledFor: toDatetimeLocalValue(min) }));
+    }
+  }, [scheduleBounds.min.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Mostrar ETA operativo (no el de Google/OSRM)
+  useEffect(() => {
+    if (quote?.durationMin) setRouteMin(quote.durationMin);
+  }, [quote?.durationMin]);
 
   useEffect(() => {
     pickupRef.current = pickup;
@@ -277,13 +302,13 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       return;
     }
 
-    const scheduleErr = validateScheduledFor(values.scheduledFor);
+    const scheduleErr = validateScheduledFor(values.scheduledFor, new Date(), scheduleLeadMin);
     if (scheduleErr) {
       setError(scheduleErr);
       return;
     }
 
-    const scheduled = resolveScheduledFor(values.scheduledFor);
+    const scheduled = resolveScheduledFor(values.scheduledFor, new Date(), scheduleLeadMin);
     if (!scheduled) {
       setError('Elige una fecha/hora de entrega válida (hasta 15 días).');
       return;
@@ -322,7 +347,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         customerPhotoURL: profile.photoURL || undefined,
         shippingFee: quote.shippingFee,
         routeDistanceKm: quote.distanceKm,
-        routeDurationMin: routeMin,
+        routeDurationMin: quote.durationMin,
         pricingBand: quote.band,
         pricePerKm: quote.pricePerKm,
         peakMultiplier: quote.multiplier,
@@ -333,7 +358,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         throw new Error('El pedido se creó pero no devolvió código de seguimiento');
       }
 
-      const { min } = scheduleWindow();
+      const { min } = scheduleWindow(new Date(), MIN_SCHEDULE_LEAD_MIN);
       setValues({
         ...INITIAL,
         customerName: profile.displayName || '',
@@ -569,7 +594,8 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             onChange={(e) => update('scheduledFor', e.target.value)}
           />
           <span className="mt-1 block text-[11px] text-[var(--domi-muted)]">
-            Mínimo 5 minutos · máximo 15 días. La tarifa usa hora pico/normal (zona Bogotá).
+            Mínimo ~{scheduleBounds.leadMin} min (viaje + margen según km y hora pico/normal a 60–75
+            km/h) · máximo 15 días.
           </span>
         </label>
 
@@ -622,7 +648,9 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           </p>
           <p className="mt-1 text-sm text-[var(--domi-muted)]">
             {quote.formula}
-            {geoBusy ? ' · recalculando…' : ` · ~${routeMin} min`}
+            {geoBusy
+              ? ' · recalculando…'
+              : ` · ~${quote.durationMin} min (${quote.travelMin} viaje @ ${quote.speedKmh} km/h + ${quote.bufferMin} margen)`}
             {routeProvider === 'google'
               ? ' · Google Directions'
               : routeProvider === 'osrm'

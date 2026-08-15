@@ -141,6 +141,12 @@
   100% { transform: scale(1.35); opacity: 0; }
 }
 
+@keyframes domiGpsPulse {
+  0% { transform: scale(0.7); opacity: 0.7; }
+  70% { transform: scale(1.55); opacity: 0; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+
 .marker-pulse-ring {
   animation: pulse-ring 1.8s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
 }

@@ -69,9 +69,12 @@ export type RouteEstimate = {
 
 function approxRoute(from: LatLng, to: LatLng): RouteEstimate {
   const fallbackKm = haversineKm(from, to) * ROAD_FACTOR;
+  const km = Math.round(fallbackKm * 100) / 100;
+  // ETA operativo: se recalcula en pricing con hora pico; aquí floor a ~75 km/h + buffer 10
+  const travelMin = Math.max(1, Math.ceil((km / 75) * 60));
   return {
-    distanceKm: Math.round(fallbackKm * 100) / 100,
-    durationMin: Math.max(8, Math.ceil(fallbackKm * 3.5)),
+    distanceKm: km,
+    durationMin: travelMin + 10,
     path: [from, to],
     provider: 'approx',
   };

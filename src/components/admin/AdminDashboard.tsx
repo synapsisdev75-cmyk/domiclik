@@ -1,14 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { MotorizadoDriver, DeliveryOrder, AdminAccount, DispatchSettings } from '../../types';
+import React, { useState } from 'react';
+import { MotorizadoDriver, DeliveryOrder, AdminAccount } from '../../types';
 import { MapComponent, MapStyleType } from '../MapComponent';
 import { GoogleMapRadar, getGoogleMapsApiKey } from '../GoogleMapRadar';
 import { BrandIcon } from '../brand/BrandAssets';
 import { ChatWindow } from '../chat/ChatWindow';
 import { CreateOrderModal } from './CreateOrderModal';
 import { AdminSection, AdminSectionPanels } from './AdminSectionPanels';
-import { BANNER_HERO_VIDEO_URL, subscribeDispatchSettings } from '../../lib/firebase';
-import { DEFAULT_DISPATCH_SETTINGS } from '../../lib/adminMetrics';
-import { dispatchAllPendingOrders } from '../../lib/autoDispatch';
+import { BANNER_HERO_VIDEO_URL } from '../../lib/firebase';
 import { Plus, MapPin, MessageSquare, ShieldCheck, PictureInPicture2 } from 'lucide-react';
 import {
   DomiMotoIcon,
@@ -39,48 +37,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [selectedDriverForChat, setSelectedDriverForChat] = useState<MotorizadoDriver | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [mapStyleToggle, setMapStyleToggle] = useState<'map' | 'satellite'>('map');
-  const [dispatchSettings, setDispatchSettings] = useState<DispatchSettings>(DEFAULT_DISPATCH_SETTINGS);
-  const dispatchingRef = useRef(false);
   const radarMapStyle: MapStyleType =
     mapStyleToggle === 'satellite' ? 'google_satellite' : 'dark';
   const googleMapsKey = getGoogleMapsApiKey();
   const useGoogleMaps = Boolean(googleMapsKey) && mapStyleToggle === 'map';
-
-  useEffect(() => subscribeDispatchSettings(setDispatchSettings), []);
-
-  // Reintento de auto-despacho cuando hay pending y flota activa con GPS
-  useEffect(() => {
-    if (!dispatchSettings.autoAssignEnabled) return;
-    const pending = orders.filter((o) => o.status === 'pending' && !o.assignedDriverId);
-    if (pending.length === 0) return;
-    const hasEligible = drivers.some(
-      (d) =>
-        d.status === 'approved' &&
-        d.isActive &&
-        !d.suspended &&
-        d.location?.lat &&
-        d.location?.lng
-    );
-    if (!hasEligible || dispatchingRef.current) return;
-
-    let cancelled = false;
-    const t = window.setTimeout(async () => {
-      if (cancelled || dispatchingRef.current) return;
-      dispatchingRef.current = true;
-      try {
-        await dispatchAllPendingOrders(orders, drivers, dispatchSettings);
-      } catch (err) {
-        console.warn('[auto-dispatch]', err);
-      } finally {
-        dispatchingRef.current = false;
-      }
-    }, 1200);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
-    };
-  }, [orders, drivers, dispatchSettings]);
 
   const go = (s: AdminSection) => onNavigate?.(s);
 
@@ -655,7 +615,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </>
       )}
 
-      <CreateOrderModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} />
+      <CreateOrderModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        orders={orders}
+        drivers={drivers}
+      />
     </div>
   );
 };

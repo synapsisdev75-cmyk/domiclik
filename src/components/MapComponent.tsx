@@ -27,6 +27,8 @@ import {
   Key,
   CheckCircle2,
   AlertTriangle,
+  Crosshair,
+  Loader2,
 } from 'lucide-react';
 import { BRAND } from './brand/BrandAssets';
 
@@ -49,6 +51,14 @@ interface MapComponentProps {
   mapStyle?: MapStyleType;
   /** Hide internal chrome when embedded in Admin radar */
   compactChrome?: boolean;
+  /** Centra el mapa en el conductor seleccionado cada vez que mueve el GPS. */
+  followSelectedDriver?: boolean;
+  /** Botón flotante «Mi ubicación» (GPS preciso + pin). */
+  showMyLocationButton?: boolean;
+  /** Callback al obtener fix preciso (p. ej. subir a Firebase). */
+  onPreciseLocation?: (lat: number, lng: number, accuracyM: number) => void;
+  /** Última ubicación conocida (fallback si getCurrentPosition falla). */
+  fallbackLocation?: { lat: number; lng: number } | null;
 }
 
 const TILE_LAYERS: Record<MapStyleType, { url: string; attribution: string; name: string; icon: string; subdomains?: string }> = {
@@ -108,6 +118,10 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   showFilters = true,
   mapStyle,
   compactChrome = false,
+  followSelectedDriver = false,
+  showMyLocationButton = false,
+  onPreciseLocation,
+  fallbackLocation = null,
 }) => {
   // Map Container & Instance Refs
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -121,6 +135,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   const routeEndMarkerRef = useRef<L.Marker | null>(null);
   const trafficPolylinesRef = useRef<L.Polyline[]>([]);
   const simMarkerRef = useRef<L.Marker | null>(null);
+  const myLocationMarkerRef = useRef<L.Marker | null>(null);
+  const myAccuracyCircleRef = useRef<L.Circle | null>(null);
 
   // States — default night ops dark map (matches design)
   const [currentStyle, setCurrentStyle] = useState<MapStyleType>(mapStyle || 'dark');
@@ -128,6 +144,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [isRoutePanelOpen, setIsRoutePanelOpen] = useState<boolean>(false);
   const [isStylePickerOpen, setIsStylePickerOpen] = useState<boolean>(false);
+  const [locatingMe, setLocatingMe] = useState(false);
+  const [locateMsg, setLocateMsg] = useState<string | null>(null);
 
   // Sync style from parent (Vista Mapa / Satélite)
   useEffect(() => {
@@ -208,6 +226,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     mapInstanceRef.current = map;
 
     return () => {
+      myLocationMarkerRef.current = null;
+      myAccuracyCircleRef.current = null;
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -312,19 +332,24 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       const isSelected = selectedDriverId === driver.id;
       const glow = driver.isActive ? '#00E676' : '#2B6CFF';
       const label = driver.isActive ? 'ACTIVO' : 'EN RUTA';
+      const pulse =
+        isSelected || driver.isActive
+          ? `<span style="position:absolute;inset:-6px;border-radius:50%;border:2px solid ${glow};opacity:.55;animation:domiGpsPulse 1.4s ease-out infinite"></span>`
+          : '';
 
       const customIcon = L.divIcon({
         className: 'custom-driver-marker',
         html: `
-          <div style="position:relative;width:20px;height:20px;transform:${isSelected ? 'scale(1.25)' : 'scale(1)'};transition:transform .15s">
-            <div style="width:14px;height:14px;margin:3px;border-radius:50%;background:${glow};box-shadow:0 0 0 1.5px ${glow},0 1px 4px rgba(0,0,0,.55);border:2px solid #fff"></div>
-            <div style="position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:3px;white-space:nowrap;background:rgba(8,12,22,.92);border:1px solid ${glow}55;color:#fff;font:700 8px JetBrains Mono,monospace;padding:1px 5px;border-radius:5px;pointer-events:none">
+          <div style="position:relative;width:22px;height:22px;transform:${isSelected ? 'scale(1.35)' : 'scale(1)'};transition:transform .15s">
+            ${pulse}
+            <div style="width:14px;height:14px;margin:4px;border-radius:50%;background:${glow};box-shadow:0 0 0 2px #fff,0 0 12px ${glow};border:0"></div>
+            <div style="position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:4px;white-space:nowrap;background:rgba(8,12,22,.92);border:1px solid ${glow}55;color:#fff;font:700 8px JetBrains Mono,monospace;padding:1px 5px;border-radius:5px;pointer-events:none">
               ${driver.fullName.split(' ')[0]} · ${label}
             </div>
           </div>
         `,
-        iconSize: [20, 20],
-        iconAnchor: [10, 10],
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
       });
 
       if (markersRef.current[driver.id]) {
@@ -382,17 +407,24 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   }, [filteredDrivers, selectedDriverId, onSelectDriver, orders]);
 
   // 5. Center map on selected driver
+  // Seguir conductor seleccionado (GPS en vivo)
   useEffect(() => {
     if (!selectedDriverId || !mapInstanceRef.current) return;
     const targetDriver = drivers.find((d) => d.id === selectedDriverId);
-    if (targetDriver && targetDriver.location.lat && targetDriver.location.lng) {
-      mapInstanceRef.current.flyTo(
-        [targetDriver.location.lat, targetDriver.location.lng],
-        16,
-        { duration: 1.2 }
-      );
+    if (!targetDriver?.location?.lat || !targetDriver?.location?.lng) return;
+    const map = mapInstanceRef.current;
+    const { lat, lng } = targetDriver.location;
+    if (followSelectedDriver) {
+      map.panTo([lat, lng], { animate: true, duration: 0.4 });
+    } else {
+      map.flyTo([lat, lng], Math.max(map.getZoom(), 15), { duration: 1.0 });
     }
-  }, [selectedDriverId, drivers]);
+  }, [
+    selectedDriverId,
+    followSelectedDriver,
+    drivers.find((d) => d.id === selectedDriverId)?.location?.lat,
+    drivers.find((d) => d.id === selectedDriverId)?.location?.lng,
+  ]);
 
   // 6. Handle Selected Order Auto-Route Calculation
   useEffect(() => {
@@ -610,10 +642,171 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     }
   };
 
+  const placePrecisePin = (lat: number, lng: number, accuracyM: number) => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const pinIcon = L.divIcon({
+      className: 'my-gps-precise-pin',
+      html: `
+        <div style="position:relative;width:28px;height:36px;">
+          <span style="position:absolute;left:50%;top:8px;width:28px;height:28px;margin-left:-14px;margin-top:-8px;border-radius:50%;border:2px solid #00E676;opacity:.45;animation:domiGpsPulse 1.3s ease-out infinite"></span>
+          <svg width="28" height="36" viewBox="0 0 28 36" style="filter:drop-shadow(0 2px 6px rgba(0,0,0,.55))">
+            <path d="M14 0C7.4 0 2 5.4 2 12.1C2 20.3 14 36 14 36S26 20.3 26 12.1C26 5.4 20.6 0 14 0Z" fill="#FF5722"/>
+            <circle cx="14" cy="12" r="5.5" fill="#fff"/>
+            <circle cx="14" cy="12" r="2.8" fill="#00E676"/>
+          </svg>
+        </div>
+      `,
+      iconSize: [28, 36],
+      iconAnchor: [14, 36],
+    });
+
+    if (myLocationMarkerRef.current) {
+      myLocationMarkerRef.current.setLatLng([lat, lng]);
+      myLocationMarkerRef.current.setIcon(pinIcon);
+    } else {
+      myLocationMarkerRef.current = L.marker([lat, lng], {
+        icon: pinIcon,
+        zIndexOffset: 2000,
+      })
+        .addTo(map)
+        .bindTooltip('Tu ubicación GPS precisa', { direction: 'top', offset: [0, -28] });
+    }
+
+    const radius = Math.max(12, Math.min(accuracyM || 25, 120));
+    if (myAccuracyCircleRef.current) {
+      myAccuracyCircleRef.current.setLatLng([lat, lng]);
+      myAccuracyCircleRef.current.setRadius(radius);
+    } else {
+      myAccuracyCircleRef.current = L.circle([lat, lng], {
+        radius,
+        color: '#00E676',
+        weight: 1.5,
+        fillColor: '#00E676',
+        fillOpacity: 0.12,
+      }).addTo(map);
+    }
+
+    map.flyTo([lat, lng], 18, { duration: 0.9 });
+  };
+
+  const handleLocateMe = () => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      setLocateMsg('GPS solo en https:// o localhost. Cambia la URL.');
+      return;
+    }
+    if (!('geolocation' in navigator)) {
+      setLocateMsg('Este dispositivo no tiene GPS.');
+      return;
+    }
+
+    setLocatingMe(true);
+    setLocateMsg('Pidiendo permiso / GPS preciso…');
+
+    const apply = (lat: number, lng: number, accuracy: number, label: string) => {
+      placePrecisePin(lat, lng, accuracy);
+      onPreciseLocation?.(lat, lng, accuracy);
+      setLocateMsg(label);
+      setLocatingMe(false);
+    };
+
+    const tryLowAccuracy = () => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude, accuracy } = pos.coords;
+          apply(
+            latitude,
+            longitude,
+            accuracy,
+            `Ubicación ±${Math.round(accuracy)} m · ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+          );
+        },
+        (err2) => {
+          // Fallback: última posición conocida del motorizado
+          if (fallbackLocation?.lat && fallbackLocation?.lng) {
+            apply(
+              fallbackLocation.lat,
+              fallbackLocation.lng,
+              40,
+              `Pin con última posición conocida · ${fallbackLocation.lat.toFixed(5)}, ${fallbackLocation.lng.toFixed(5)}`
+            );
+            return;
+          }
+          const selected = selectedDriverId
+            ? drivers.find((d) => d.id === selectedDriverId)
+            : null;
+          if (selected?.location?.lat && selected?.location?.lng) {
+            apply(
+              selected.location.lat,
+              selected.location.lng,
+              40,
+              `Pin con posición del perfil · ${selected.location.lat.toFixed(5)}, ${selected.location.lng.toFixed(5)}`
+            );
+            return;
+          }
+          setLocatingMe(false);
+          if (err2.code === 1) {
+            setLocateMsg(
+              'Ubicación bloqueada. Candado en la barra → Ubicación → Permitir → Recargar → pulsa otra vez.'
+            );
+          } else if (err2.code === 3) {
+            setLocateMsg('GPS tardó demasiado. Sal a zona abierta y pulsa de nuevo.');
+          } else {
+            setLocateMsg('Sin fix GPS. Activa ubicación del Windows/móvil y reintenta.');
+          }
+        },
+        { enableHighAccuracy: false, maximumAge: 60000, timeout: 12000 }
+      );
+    };
+
+    // 1) Alta precisión  2) baja precisión  3) última conocida
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        apply(
+          latitude,
+          longitude,
+          accuracy,
+          `Ubicación precisa ±${Math.round(accuracy)} m · ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+        );
+      },
+      () => tryLowAccuracy(),
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 12000 }
+    );
+  };
+
   return (
     <div className={`relative ${height} w-full overflow-hidden bg-[#0a0e16] ${compactChrome ? '' : 'rounded-2xl border border-[#1a2744] shadow-2xl'}`}>
       {/* Map Container */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
+
+      {showMyLocationButton && (
+        <div className="absolute bottom-20 right-3 z-[500] flex flex-col items-end gap-2 pointer-events-none">
+          {locateMsg && (
+            <div className="pointer-events-auto max-w-[220px] bg-[#0a101c]/95 border border-[#00E676]/40 text-[10px] text-slate-200 font-mono px-2.5 py-1.5 rounded-xl shadow-lg">
+              {locateMsg}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={handleLocateMe}
+            disabled={locatingMe}
+            title="Ubicarme con GPS preciso"
+            className="pointer-events-auto flex items-center gap-2 bg-[#FF5722] hover:bg-[#E64A19] disabled:opacity-70 text-white font-black text-xs font-mono px-3.5 py-3 rounded-2xl border border-[#FF8A65] shadow-[0_0_22px_rgba(255,87,34,0.45)]"
+          >
+            {locatingMe ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Crosshair className="w-4 h-4" />
+            )}
+            {locatingMe ? 'Localizando…' : 'Mi ubicación'}
+          </button>
+        </div>
+      )}
 
       {/* Top Left Header & Mode Badge */}
       {!compactChrome && (

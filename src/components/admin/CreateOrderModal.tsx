@@ -1,15 +1,23 @@
 import React, { useState } from 'react';
 import { X, Plus, MapPin, Phone, User } from 'lucide-react';
 import { createOrder, fetchAllDrivers, fetchDispatchSettings } from '../../lib/firebase';
-import { dispatchPendingOrder } from '../../lib/autoDispatch';
+import { dispatchPendingOrder, getBusyDriverIds } from '../../lib/autoDispatch';
 import { DomiCargoIcon } from '../ui/CustomIcons';
+import type { DeliveryOrder, MotorizadoDriver } from '../../types';
 
 interface CreateOrderModalProps {
   isOpen: boolean;
   onClose: () => void;
+  orders?: DeliveryOrder[];
+  drivers?: MotorizadoDriver[];
 }
 
-export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({ isOpen, onClose }) => {
+export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
+  isOpen,
+  onClose,
+  orders = [],
+  drivers: driversProp,
+}) => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [pickupAddress, setPickupAddress] = useState('Dulce Sorpresa, CC Unicentro');
@@ -43,17 +51,21 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({ isOpen, onCl
         deliveryCoords: { lat: 4.135, lng: -73.625, addressName: deliveryAddress },
       });
 
-      setStatusMsg('Calculando ruta y asignando al más cercano…');
-      const drivers = await fetchAllDrivers();
+      setStatusMsg('Asignando al conductor activo libre más cercano…');
+      const drivers = driversProp?.length ? driversProp : await fetchAllDrivers();
       const settings = await fetchDispatchSettings();
-      const result = await dispatchPendingOrder(order, drivers, settings);
+      const result = await dispatchPendingOrder(order, drivers, settings, {
+        busyDriverIds: getBusyDriverIds(orders),
+      });
       if (result.assigned) {
         setStatusMsg(
-          `Asignado a ${result.driverName} · ${result.routeDistanceKm?.toFixed(1)} km · $${result.routePrice?.toLocaleString('es-CO')}`
+          `Asignado a ${result.driverName} · ${result.assignedDistanceKm?.toFixed(1)} km · $${result.routePrice?.toLocaleString('es-CO')}`
         );
       } else {
         setStatusMsg(
-          `Pedido creado. Precio admin: $${result.routePrice?.toLocaleString('es-CO') || '—'} · Sin motorizado en radio (${settings.searchRadiusKm} km)`
+          result.reason === 'no_free_active_driver'
+            ? `Pedido creado. Sin conductor activo y libre cerca (radio ${settings.searchRadiusKm} km).`
+            : `Pedido creado. Precio: $${result.routePrice?.toLocaleString('es-CO') || '—'} · ${result.reason || 'pendiente'}`
         );
       }
       setTimeout(() => onClose(), 900);

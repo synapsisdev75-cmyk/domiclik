@@ -8,6 +8,7 @@ import {
   getDocs,
   onSnapshot,
   updateDoc,
+  deleteDoc,
   query,
   where,
   increment,
@@ -15,6 +16,7 @@ import {
   limit,
   memoryLocalCache,
   enableNetwork,
+  writeBatch,
 } from 'firebase/firestore';
 import {
   getAuth,
@@ -42,6 +44,7 @@ import {
   DispatchSettings,
   AttendancePunch,
   AttendancePunchType,
+  OpsIncident,
 } from '../types';
 import { DEFAULT_PAYROLL_SETTINGS, DEFAULT_DISPATCH_SETTINGS, toDateKey } from './adminMetrics';
 
@@ -146,6 +149,19 @@ export async function uploadOrderPhoto(file: File, orderId: string): Promise<str
   return getDownloadURL(storageRef);
 }
 
+/** Foto del odómetro al entrar / salir (uso empresa). */
+export async function uploadOdometerPhoto(
+  file: File,
+  driverId: string,
+  punchType: 'in' | 'out'
+): Promise<string> {
+  const safeName = (file.name || 'odometro.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `drivers/${driverId}/odometer/${punchType}_${Date.now()}_${safeName}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
+  return getDownloadURL(storageRef);
+}
+
 export async function uploadBrandLogoFromUrl(localPath: string, storagePath: string): Promise<string> {
   const response = await fetch(localPath);
   const blob = await response.blob();
@@ -155,37 +171,44 @@ export async function uploadBrandLogoFromUrl(localPath: string, storagePath: str
 }
 
 export async function uploadBrandAssetsToStorage(): Promise<Record<string, string>> {
+  // Los iconos ya viven en /public/brand. Subir a Storage es opcional y suele fallar
+  // (403) si las reglas de Storage en Firebase Console no están igual a storage.rules.
+  if (typeof localStorage !== 'undefined') {
+    if (localStorage.getItem('domiclick_brand_upload_skip') === '1') {
+      return {};
+    }
+  }
+
   const files: { local: string; remote: string }[] = [
     { local: '/brand/logo-mark.png', remote: 'brand/logo-mark.png' },
     { local: '/brand/logo-wordmark.png', remote: 'brand/logo-wordmark.png' },
     { local: '/brand/logo-neon.png', remote: 'brand/logo-neon.png' },
     { local: '/brand/logo-192.png', remote: 'brand/logo-192.png' },
     { local: '/brand/favicon.png', remote: 'brand/favicon.png' },
-    { local: '/brand/icons/operadores.png', remote: 'brand/icons/operadores.png' },
-    { local: '/brand/icons/misiones.png', remote: 'brand/icons/misiones.png' },
-    { local: '/brand/icons/operaciones.png', remote: 'brand/icons/operaciones.png' },
-    { local: '/brand/icons/eventos.png', remote: 'brand/icons/eventos.png' },
-    { local: '/brand/icons/rastreo.png', remote: 'brand/icons/rastreo.png' },
-    { local: '/brand/icons/cobertura.png', remote: 'brand/icons/cobertura.png' },
-    { local: '/brand/icons/gps.png', remote: 'brand/icons/gps.png' },
-    { local: '/brand/icons/servidor.png', remote: 'brand/icons/servidor.png' },
-    { local: '/brand/icons/incidentes.png', remote: 'brand/icons/incidentes.png' },
-    { local: '/brand/icons/historial.png', remote: 'brand/icons/historial.png' },
-    { local: '/brand/icons/estadisticas.png', remote: 'brand/icons/estadisticas.png' },
-    { local: '/brand/icons/alertas.png', remote: 'brand/icons/alertas.png' },
-    { local: '/brand/icons/metricas.png', remote: 'brand/icons/metricas.png' },
-    { local: '/brand/icons/en-curso.png', remote: 'brand/icons/en-curso.png' },
-    { local: '/brand/icons/nueva-mision.png', remote: 'brand/icons/nueva-mision.png' },
-    { local: '/brand/icons/configuracion.png', remote: 'brand/icons/configuracion.png' },
   ];
 
   const urls: Record<string, string> = {};
+  let unauthorized = false;
   for (const file of files) {
     try {
       urls[file.remote] = await uploadBrandLogoFromUrl(file.local, file.remote);
-    } catch (err) {
-      console.warn('Brand upload failed for', file.remote, err);
+    } catch (err: unknown) {
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code?: string }).code)
+          : '';
+      if (code.includes('unauthorized') || code.includes('permission')) {
+        unauthorized = true;
+        break;
+      }
     }
+  }
+
+  if (unauthorized && typeof localStorage !== 'undefined') {
+    localStorage.setItem('domiclick_brand_upload_skip', '1');
+    console.info(
+      '[DomiClick] Brand Storage no autorizado (403). Se usan iconos locales /public/brand. Despliega storage.rules o ignora este aviso.'
+    );
   }
   return urls;
 }
@@ -566,6 +589,9 @@ export async function updateOrderStatus(
       'Usa confirmDeliveryWithCode: la entrega requiere el PIN del cliente.'
     );
   }
+  if (status === 'cancelled') {
+    throw new Error('Usa cancelOrder: solo el administrador puede cancelar pedidos.');
+  }
   const updateData: Partial<DeliveryOrder> = {
     status,
     updatedAt: new Date().toISOString(),
@@ -587,6 +613,19 @@ export async function updateOrderFields(
     if (val !== undefined) payload[key] = val;
   });
   await updateDoc(doc(db, 'orders', orderId), payload);
+}
+
+/** Solo admin (UI): cancela el pedido sin borrarlo. */
+export async function cancelOrder(orderId: string): Promise<void> {
+  await updateDoc(doc(db, 'orders', orderId), {
+    status: 'cancelled',
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/** Solo admin (UI): elimina el pedido de Firestore. */
+export async function deleteOrder(orderId: string): Promise<void> {
+  await deleteDoc(doc(db, 'orders', orderId));
 }
 
 // ----------------- CHAT (Firestore onSnapshot) ----------------- //
@@ -670,6 +709,98 @@ export async function sendChatMessage(msgData: Omit<ChatMessage, 'id' | 'timesta
     { merge: true }
   );
   return newMsg;
+}
+
+/** Solo admin (UI): borra un mensaje de chat. */
+export async function deleteChatMessage(messageId: string): Promise<void> {
+  await deleteDoc(doc(db, 'messages', messageId));
+}
+
+/** Solo admin (UI): limpia todos los mensajes de un canal. */
+export async function clearChatMessages(chatId: string): Promise<void> {
+  const snap = await getDocs(query(collection(db, 'messages'), where('chatId', '==', chatId)));
+  const docs = snap.docs;
+  const CHUNK = 400;
+  for (let i = 0; i < docs.length; i += CHUNK) {
+    const batch = writeBatch(db);
+    docs.slice(i, i + CHUNK).forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+  await setDoc(
+    doc(db, 'chats', chatId),
+    {
+      lastMessage: '',
+      lastMessageTime: new Date().toISOString(),
+      unreadByAdmin: false,
+      unreadByDriver: false,
+    },
+    { merge: true }
+  );
+}
+
+// ----------------- INCIDENCIAS (solo admin resuelve / borra) ----------------- //
+
+export function subscribeIncidents(callback: (list: OpsIncident[]) => void) {
+  return onSnapshot(
+    collection(db, 'incidents'),
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      const list: OpsIncident[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as OpsIncident);
+      });
+      list.sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      emitSync({
+        collection: 'incidents',
+        fromCache: snapshot.metadata.fromCache,
+        hasPendingWrites: snapshot.metadata.hasPendingWrites,
+        live: !snapshot.metadata.fromCache,
+      });
+      callback(list);
+    },
+    (err) => {
+      console.error('[Firebase] incidents realtime error', err);
+      callback([]);
+    }
+  );
+}
+
+export async function createIncident(
+  data: Omit<OpsIncident, 'id' | 'status' | 'createdAt' | 'updatedAt'>
+): Promise<OpsIncident> {
+  const now = new Date().toISOString();
+  const full: OpsIncident = {
+    ...data,
+    id: 'inc_' + Date.now(),
+    status: 'open',
+    createdAt: now,
+    updatedAt: now,
+  };
+  await setDoc(doc(db, 'incidents', full.id), full);
+  return full;
+}
+
+/** Solo admin (UI): marca incidencia como resuelta. */
+export async function resolveIncident(
+  incidentId: string,
+  resolvedBy: string,
+  resolutionNote?: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  await updateDoc(doc(db, 'incidents', incidentId), {
+    status: 'resolved',
+    resolvedAt: now,
+    resolvedBy,
+    resolutionNote: resolutionNote || '',
+    updatedAt: now,
+  });
+}
+
+/** Solo admin (UI): elimina incidencia. */
+export async function deleteIncident(incidentId: string): Promise<void> {
+  await deleteDoc(doc(db, 'incidents', incidentId));
 }
 
 // ----------------- ADMIN CONTROL: RATINGS + PAYROLL ----------------- //
@@ -831,6 +962,8 @@ export async function recordAttendancePunch(params: {
   credentialId: string;
   lat?: number;
   lng?: number;
+  odometerKm?: number;
+  odometerPhotoUrl?: string;
 }): Promise<AttendancePunch> {
   const at = new Date().toISOString();
   const id = 'att_' + Date.now();
@@ -845,6 +978,8 @@ export async function recordAttendancePunch(params: {
     lng: params.lng,
     method: 'webauthn',
     credentialId: params.credentialId,
+    odometerKm: params.odometerKm,
+    odometerPhotoUrl: params.odometerPhotoUrl,
   };
   await setDoc(doc(db, 'attendance_punches', id), punch);
   await updateDoc(doc(db, 'drivers', params.driverId), {
@@ -867,6 +1002,25 @@ export function subscribeAttendancePunches(
       snapshot.forEach((docSnap) => {
         const data = { id: docSnap.id, ...docSnap.data() } as AttendancePunch;
         if (!data.dateKey || data.dateKey === target) list.push(data);
+      });
+      list.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      callback(list);
+    },
+    () => callback([])
+  );
+}
+
+export function subscribeDriverAttendancePunches(
+  driverId: string,
+  callback: (punches: AttendancePunch[]) => void
+) {
+  return onSnapshot(
+    collection(db, 'attendance_punches'),
+    (snapshot) => {
+      const list: AttendancePunch[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = { id: docSnap.id, ...docSnap.data() } as AttendancePunch;
+        if (data.driverId === driverId) list.push(data);
       });
       list.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
       callback(list);

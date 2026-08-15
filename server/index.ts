@@ -167,22 +167,30 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
 
     await setDoc(doc(db, 'orders', orderId), order);
 
-    // Auto-despacho inmediato solo si no está programado a más de 2h
+    // Pedidos programados a más de 2h: se dejan pending (Central los despacha después)
     const schedMs = scheduledFor ? new Date(scheduledFor).getTime() - Date.now() : 0;
     const deferAssign = Boolean(scheduledFor && schedMs > 2 * 60 * 60 * 1000);
 
     try {
       if (!deferAssign) {
-        const { dispatchPendingOrder } = await import('../src/lib/autoDispatch');
+        const { dispatchPendingOrder, getBusyDriverIds } = await import('../src/lib/autoDispatch');
         const { DEFAULT_DISPATCH_SETTINGS } = await import('../src/lib/adminMetrics');
         const driversSnap = await getDocs(collection(db, 'drivers'));
         const drivers: any[] = [];
         driversSnap.forEach((d) => drivers.push({ id: d.id, ...d.data() }));
+        const activeOrdersSnap = await getDocs(
+          query(collection(db, 'orders'), where('status', 'in', ['assigned', 'in_transit']))
+        );
+        const activeOrders: any[] = [];
+        activeOrdersSnap.forEach((d) => activeOrders.push({ id: d.id, ...d.data() }));
+        const busyDriverIds = getBusyDriverIds(activeOrders);
         const settingsSnap = await getDoc(doc(db, 'settings', 'dispatch'));
         const settings = settingsSnap.exists()
           ? { ...DEFAULT_DISPATCH_SETTINGS, ...settingsSnap.data(), id: 'dispatch' as const }
           : DEFAULT_DISPATCH_SETTINGS;
-        const result = await dispatchPendingOrder(order as any, drivers, settings);
+        const result = await dispatchPendingOrder(order as any, drivers, settings, {
+          busyDriverIds,
+        });
         return res.status(201).json({
           ok: true,
           orderId,

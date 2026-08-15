@@ -8,7 +8,27 @@ export const MIN_SHIPPING_FEE_COP = 5000;
 /** Factor carretera aproximado si no hay ruta OSRM. */
 export const ROAD_FACTOR = 1.3;
 
+/** Velocidad operativa moto: hora pico (más lento) … hora normal. */
+export const SPEED_KMH_PEAK = 60;
+export const SPEED_KMH_NORMAL = 75;
+/** Minutos fijos de margen (recolección + entrega) que se suman al viaje. */
+export const SERVICE_BUFFER_MIN = 10;
+/** Piso mínimo de anticipación al programar (minutos). */
+export const MIN_SCHEDULE_LEAD_MIN = 5;
+
 export type PricingBand = 'peak' | 'normal';
+
+export type TravelTimeEstimate = {
+  distanceKm: number;
+  band: PricingBand;
+  speedKmh: number;
+  /** Solo trayecto: km ÷ velocidad. */
+  travelMin: number;
+  /** Margen fijo de servicio. */
+  bufferMin: number;
+  /** Total = travelMin + bufferMin (variable que se suma bien). */
+  totalMin: number;
+};
 
 export type ShippingQuote = {
   distanceKm: number;
@@ -19,6 +39,11 @@ export type ShippingQuote = {
   shippingFee: number;
   label: string;
   formula: string;
+  /** ETA operativo (minutos totales). */
+  durationMin: number;
+  speedKmh: number;
+  travelMin: number;
+  bufferMin: number;
 };
 
 /** Zona horaria operativa. */
@@ -68,6 +93,35 @@ export function pricingBandFor(date: Date = new Date()): PricingBand {
   return isPeakHour(date) ? 'peak' : 'normal';
 }
 
+/** km/h según bandera: pico 60 · normal 75. */
+export function speedKmhForBand(band: PricingBand): number {
+  return band === 'peak' ? SPEED_KMH_PEAK : SPEED_KMH_NORMAL;
+}
+
+/**
+ * Tiempo estimado: (distancia ÷ velocidad) + buffer de servicio.
+ * En pico usa 60 km/h; en normal 75 km/h.
+ */
+export function estimateTravelMinutes(
+  distanceKm: number,
+  when: Date = new Date(),
+): TravelTimeEstimate {
+  const km = Math.max(0, Number(distanceKm) || 0);
+  const band = pricingBandFor(when);
+  const speedKmh = speedKmhForBand(band);
+  const travelMin = km > 0 ? Math.max(1, Math.ceil((km / speedKmh) * 60)) : 0;
+  const bufferMin = km > 0 ? SERVICE_BUFFER_MIN : 0;
+  const totalMin = travelMin + bufferMin;
+  return {
+    distanceKm: Math.round(km * 100) / 100,
+    band,
+    speedKmh,
+    travelMin,
+    bufferMin,
+    totalMin,
+  };
+}
+
 export function computeShippingQuote(
   distanceKm: number,
   when: Date = new Date(),
@@ -78,6 +132,7 @@ export function computeShippingQuote(
   const subtotal = km * PRICE_PER_KM_COP * multiplier;
   const shippingFee = Math.max(MIN_SHIPPING_FEE_COP, Math.round(subtotal));
   const label = band === 'peak' ? 'Hora pico' : 'Hora normal';
+  const eta = estimateTravelMinutes(km, when);
   const formula =
     band === 'peak'
       ? `${km.toFixed(2)} km × $${PRICE_PER_KM_COP.toLocaleString('es-CO')} × ${PEAK_MULTIPLIER} (${label})`
@@ -92,6 +147,10 @@ export function computeShippingQuote(
     shippingFee,
     label,
     formula,
+    durationMin: eta.totalMin,
+    speedKmh: eta.speedKmh,
+    travelMin: eta.travelMin,
+    bufferMin: eta.bufferMin,
   };
 }
 
@@ -103,11 +162,15 @@ export function formatCOP(value: number): string {
   }).format(Math.round(value || 0));
 }
 
-/** Ventana de programación: ahora+5min … +15 días. */
-export function scheduleWindow(now = new Date()) {
-  const min = new Date(now.getTime() + 5 * 60 * 1000);
+/**
+ * Ventana de programación: ahora + leadMin … +15 días.
+ * leadMin = ETA (viaje + buffer) o al menos MIN_SCHEDULE_LEAD_MIN.
+ */
+export function scheduleWindow(now = new Date(), leadMin = MIN_SCHEDULE_LEAD_MIN) {
+  const lead = Math.max(MIN_SCHEDULE_LEAD_MIN, Math.ceil(Number(leadMin) || 0));
+  const min = new Date(now.getTime() + lead * 60 * 1000);
   const max = new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000);
-  return { min, max };
+  return { min, max, leadMin: lead };
 }
 
 export function toDatetimeLocalValue(d: Date): string {
@@ -134,23 +197,31 @@ export function parseDatetimeLocal(value: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export function validateScheduledFor(value: string, now = new Date()): string | null {
+export function validateScheduledFor(
+  value: string,
+  now = new Date(),
+  leadMin = MIN_SCHEDULE_LEAD_MIN,
+): string | null {
   const d = parseDatetimeLocal(value);
   if (!d) return 'Elige fecha y hora de entrega';
-  const { min, max } = scheduleWindow(now);
+  const { min, max, leadMin: lead } = scheduleWindow(now, leadMin);
   // Gracia 3 min: el input no se actualiza solo mientras esperas
   if (d.getTime() < min.getTime() - 3 * 60 * 1000) {
-    return 'La entrega debe ser al menos en 5 minutos';
+    return `La entrega debe ser al menos en ${lead} minutos`;
   }
   if (d > max) return 'Solo se puede programar hasta 15 días de antelación';
   return null;
 }
 
 /** Si el horario quedó justo abajo del mínimo, lo sube automáticamente. */
-export function resolveScheduledFor(value: string, now = new Date()): Date | null {
+export function resolveScheduledFor(
+  value: string,
+  now = new Date(),
+  leadMin = MIN_SCHEDULE_LEAD_MIN,
+): Date | null {
   const d = parseDatetimeLocal(value);
   if (!d) return null;
-  const { min, max } = scheduleWindow(now);
+  const { min, max } = scheduleWindow(now, leadMin);
   if (d > max) return null;
   if (d.getTime() < min.getTime()) return min;
   return d;

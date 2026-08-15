@@ -11,9 +11,13 @@ import {
   subscribeAdmins,
   requestAdminAccess,
   connectFirestore,
+  subscribeDispatchSettings,
   RealtimeSyncMeta,
 } from './lib/firebase';
 import { alertDeliveryComplete, alertOrderAssigned } from './lib/alerts';
+import { dispatchAllPendingOrders } from './lib/autoDispatch';
+import { DEFAULT_DISPATCH_SETTINGS } from './lib/adminMetrics';
+import type { DispatchSettings } from './types';
 import { HeaderBar } from './components/HeaderBar';
 import { Sidebar } from './components/Sidebar';
 import { AdminDashboard } from './components/admin/AdminDashboard';
@@ -34,7 +38,7 @@ export default function App() {
 
 function MainApp() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [currentRole, setCurrentRole] = useState<UserRole>('admin');
+  const [currentRole, setCurrentRole] = useState<UserRole>('driver');
   const [activeSidebarTab, setActiveSidebarTab] = useState<string>('dashboard');
   const [drivers, setDrivers] = useState<MotorizadoDriver[]>([]);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
@@ -45,8 +49,12 @@ function MainApp() {
   const [realtimeMeta, setRealtimeMeta] = useState<RealtimeSyncMeta | null>(null);
   const [adminAccounts, setAdminAccounts] = useState<AdminAccount[]>([]);
   const [requestedRole, setRequestedRole] = useState<UserRole>('driver');
+  const [dispatchSettings, setDispatchSettings] = useState<DispatchSettings>(
+    DEFAULT_DISPATCH_SETTINGS
+  );
   const prevOrdersRef = useRef<Map<string, string>>(new Map());
   const alertsReadyRef = useRef(false);
+  const autoDispatchingRef = useRef(false);
 
   // Limpia caches locales/SW que podían mostrar demos borrados en Firebase
   useEffect(() => {
@@ -85,6 +93,58 @@ function MainApp() {
       unsubAdmins?.();
     };
   }, []);
+
+  // Config de despacho (radio, auto-asignar, tarifas)
+  useEffect(() => subscribeDispatchSettings(setDispatchSettings), []);
+
+  // Torre: asigna automáticamente al conductor activo + libre más cercano
+  useEffect(() => {
+    if (currentRole !== 'admin') return;
+    if (!dispatchSettings.autoAssignEnabled) return;
+
+    const pending = orders.filter((o) => o.status === 'pending' && !o.assignedDriverId);
+    if (pending.length === 0) return;
+
+    const hasFreeActive = drivers.some(
+      (d) =>
+        d.status === 'approved' &&
+        d.isActive &&
+        !d.suspended &&
+        d.location?.lat &&
+        d.location?.lng &&
+        !orders.some(
+          (o) =>
+            (o.status === 'assigned' || o.status === 'in_transit') &&
+            o.assignedDriverId === d.id
+        )
+    );
+    if (!hasFreeActive || autoDispatchingRef.current) return;
+
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      if (cancelled || autoDispatchingRef.current) return;
+      autoDispatchingRef.current = true;
+      try {
+        const results = await dispatchAllPendingOrders(orders, drivers, dispatchSettings);
+        const assigned = results.filter((r) => r.assigned);
+        if (assigned.length > 0) {
+          console.info(
+            `[torre] auto-asignados ${assigned.length}:`,
+            assigned.map((r) => `${r.orderId}→${r.driverName}`).join(', ')
+          );
+        }
+      } catch (err) {
+        console.warn('[torre] auto-dispatch', err);
+      } finally {
+        autoDispatchingRef.current = false;
+      }
+    }, 800);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [orders, drivers, dispatchSettings, currentRole]);
 
   // Alertas: entrega finalizada / asignación (salta la primera carga)
   useEffect(() => {
@@ -148,18 +208,20 @@ function MainApp() {
     return () => unsubAuth();
   }, []);
 
-  // Upload brand logo + icons to Firebase Storage once per browser
+  // Brand: solo intenta una vez; si Storage niega (403), usa /public/brand y no reintenta
   useEffect(() => {
     if (localStorage.getItem('domiclick_brand_uploaded_v2')) return;
+    if (localStorage.getItem('domiclick_brand_upload_skip') === '1') return;
     uploadBrandAssetsToStorage()
       .then((urls) => {
         if (Object.keys(urls).length > 0) {
           localStorage.setItem('domiclick_brand_uploaded_v2', '1');
           localStorage.setItem('domiclick_brand_urls', JSON.stringify(urls));
-          console.info('DomiClick brand assets uploaded to Firebase Storage', urls);
         }
       })
-      .catch((err) => console.warn('Brand Storage upload skipped', err));
+      .catch(() => {
+        localStorage.setItem('domiclick_brand_upload_skip', '1');
+      });
   }, []);
 
   const myAdmin = adminAccounts.find(
@@ -201,16 +263,72 @@ function MainApp() {
     }
   }, [myAdmin?.status, currentUserEmail]);
 
-  // Active driver profile when in driver mode (solo aprobado + vinculado al email)
-  const activeApprovedDriver =
+  /** Perfil de motorizado vinculado al email autenticado (sin fallback a otro). */
+  const myDriverProfile =
     drivers.find(
       (d) =>
-        d.status === 'approved' &&
-        currentUserEmail &&
-        d.email?.toLowerCase() === currentUserEmail.toLowerCase()
-    ) ||
-    drivers.find((d) => d.status === 'approved') ||
-    null;
+        Boolean(currentUserEmail) &&
+        d.email?.toLowerCase() === currentUserEmail!.toLowerCase()
+    ) || null;
+
+  const activeApprovedDriver =
+    myDriverProfile?.status === 'approved' ? myDriverProfile : null;
+
+  // Auto-detectar rol: admin activo → torre; repartidor aprobado → cabina (sin dropdown)
+  useEffect(() => {
+    if (!isAuthenticated || !currentUserEmail) return;
+    // Esperar a que carguen listas (evita flash incorrecto)
+    if (adminAccounts.length === 0 && drivers.length === 0) return;
+
+    if (isActiveAdmin) {
+      if (currentRole !== 'admin') {
+        setRequestedRole('admin');
+        setCurrentRole('admin');
+      }
+      return;
+    }
+
+    if (activeApprovedDriver) {
+      if (currentRole !== 'driver') {
+        setRequestedRole('driver');
+        setCurrentRole('driver');
+      }
+      return;
+    }
+
+    if (myDriverProfile?.status === 'pending') {
+      if (currentRole !== 'pending_driver') {
+        setRequestedRole('pending_driver');
+        setCurrentRole('pending_driver');
+      }
+      return;
+    }
+
+    // Pidió admin y no es activo → pendiente admin
+    if (requestedRole === 'admin' || requestedRole === 'pending_admin') {
+      if (currentRole !== 'pending_admin') setCurrentRole('pending_admin');
+      return;
+    }
+
+    // Sin perfil de flota: prerregistro
+    if (currentRole !== 'pending_driver' && currentRole !== 'pending_admin') {
+      setRequestedRole('pending_driver');
+      setCurrentRole('pending_driver');
+    }
+  }, [
+    isAuthenticated,
+    currentUserEmail,
+    isActiveAdmin,
+    activeApprovedDriver?.id,
+    myDriverProfile?.status,
+    adminAccounts.length,
+    drivers.length,
+    requestedRole,
+    currentRole,
+  ]);
+
+  const isDriverCabin =
+    currentRole === 'driver' || currentRole === 'pending_driver';
 
   const handleToggleDriverStatus = (isActive: boolean) => {
     if (activeApprovedDriver) {
@@ -249,17 +367,13 @@ function MainApp() {
     <div className="min-h-screen bg-[#05080f] text-[#e8eef9] flex flex-col font-sans selection:bg-[#FF5722] selection:text-white">
       <HeaderBar
         currentUserEmail={currentUserEmail}
-        onOpenBrandModal={() => setIsBrandModalOpen(true)}
+        onOpenBrandModal={
+          currentRole === 'admin' || currentRole === 'pending_admin'
+            ? () => setIsBrandModalOpen(true)
+            : undefined
+        }
         onLogout={handleLogout}
-        onSelectRole={(role) => {
-          if (role === 'admin' && !isActiveAdmin) {
-            setRequestedRole('admin');
-            setCurrentRole('pending_admin');
-            return;
-          }
-          setRequestedRole(role);
-          setCurrentRole(role);
-        }}
+        onSelectRole={undefined}
         canAccessAdmin={isActiveAdmin}
         roleLabel={
           currentRole === 'admin'
@@ -267,27 +381,35 @@ function MainApp() {
             : currentRole === 'pending_admin'
               ? 'Admin pendiente'
               : currentRole === 'driver'
-                ? 'Transportista'
+                ? activeApprovedDriver?.fullName || 'Transportista'
                 : 'Preregistro'
         }
+        compact={isDriverCabin}
+        hideRoleMenu
         realtimeLive={realtimeMeta?.live}
         realtimeLabel={
-          realtimeMeta?.error
-            ? 'Firebase error'
-            : realtimeMeta?.live
-              ? 'EN VIVO · Firebase'
-              : realtimeMeta?.fromCache
-                ? 'Sincronizando…'
-                : 'Conectando Firebase…'
+          isDriverCabin
+            ? realtimeMeta?.live
+              ? 'EN LÍNEA'
+              : 'CONECTANDO…'
+            : realtimeMeta?.error
+              ? 'Firebase error'
+              : realtimeMeta?.live
+                ? 'EN VIVO · Firebase'
+                : realtimeMeta?.fromCache
+                  ? 'Sincronizando…'
+                  : 'Conectando Firebase…'
         }
       />
 
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar
-          activeTab={activeSidebarTab}
-          onSelectTab={(tab) => setActiveSidebarTab(tab)}
-          onLogout={handleLogout}
-        />
+        {(currentRole === 'admin' || currentRole === 'pending_admin') && (
+          <Sidebar
+            activeTab={activeSidebarTab}
+            onSelectTab={(tab) => setActiveSidebarTab(tab)}
+            onLogout={handleLogout}
+          />
+        )}
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 bg-transparent">
           {currentRole === 'admin' && isActiveAdmin && (

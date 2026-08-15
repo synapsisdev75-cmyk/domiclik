@@ -35,17 +35,35 @@ export type NearestDriverResult = {
   distanceKm: number;
 };
 
-/** Motorizado aprobado, activo, no suspendido, con GPS, dentro del radio del pickup. */
+/** Conductores ocupados: ya tienen pedido assigned o in_transit. */
+export function getBusyDriverIds(orders: DeliveryOrder[]): Set<string> {
+  const busy = new Set<string>();
+  for (const o of orders) {
+    if (
+      (o.status === 'assigned' || o.status === 'in_transit') &&
+      o.assignedDriverId
+    ) {
+      busy.add(o.assignedDriverId);
+    }
+  }
+  return busy;
+}
+
+/**
+ * Motorizado: aprobado + activo (cabina ON) + no suspendido + con GPS + libre + dentro del radio.
+ */
 export function findNearestEligibleDriver(
   drivers: MotorizadoDriver[],
   pickup: LocationCoords,
-  radiusKm: number
+  radiusKm: number,
+  busyDriverIds: Set<string> = new Set()
 ): NearestDriverResult | null {
   let best: NearestDriverResult | null = null;
   for (const driver of drivers) {
     if (driver.status !== 'approved') continue;
     if (!driver.isActive) continue;
     if (driver.suspended) continue;
+    if (busyDriverIds.has(driver.id)) continue;
     if (!driver.location?.lat || !driver.location?.lng) continue;
     const distanceKm = haversineKm(driver.location, pickup);
     if (distanceKm > radiusKm) continue;
@@ -69,19 +87,38 @@ export type DispatchResult = {
   reason?: string;
 };
 
+export type DispatchOptions = {
+  busyDriverIds?: Set<string>;
+  /** Radio ampliado si nadie está en el radio base (km). Default 30. */
+  expandRadiusKm?: number;
+};
+
+function shouldDeferScheduled(order: DeliveryOrder): boolean {
+  if (!order.scheduledFor) return false;
+  const ms = new Date(order.scheduledFor).getTime() - Date.now();
+  return Number.isFinite(ms) && ms > 2 * 60 * 60 * 1000;
+}
+
 /**
- * Calcula ruta + precio (admin) y asigna al activo más cercano dentro del radio.
+ * Calcula ruta/precio y asigna automáticamente al activo libre más cercano.
  */
 export async function dispatchPendingOrder(
   order: DeliveryOrder,
   drivers: MotorizadoDriver[],
-  settings: DispatchSettings = DEFAULT_DISPATCH_SETTINGS
+  settings: DispatchSettings = DEFAULT_DISPATCH_SETTINGS,
+  options: DispatchOptions = {}
 ): Promise<DispatchResult> {
   if (order.status !== 'pending') {
     return { orderId: order.id, priced: false, assigned: false, reason: 'not_pending' };
   }
+  if (order.assignedDriverId) {
+    return { orderId: order.id, priced: false, assigned: false, reason: 'already_assigned' };
+  }
   if (!order.pickupCoords?.lat || !order.deliveryCoords?.lat) {
     return { orderId: order.id, priced: false, assigned: false, reason: 'missing_coords' };
+  }
+  if (shouldDeferScheduled(order)) {
+    return { orderId: order.id, priced: false, assigned: false, reason: 'scheduled_deferred' };
   }
 
   let routeDistanceKm = order.routeDistanceKm;
@@ -138,11 +175,31 @@ export async function dispatchPendingOrder(
     };
   }
 
-  const nearest = findNearestEligibleDriver(
+  const busy = options.busyDriverIds ?? new Set<string>();
+  const baseRadius = Math.max(1, Number(settings.searchRadiusKm) || 15);
+  const expandRadius = Math.max(
+    baseRadius,
+    options.expandRadiusKm ?? Math.max(30, baseRadius * 3)
+  );
+
+  let nearest = findNearestEligibleDriver(
     drivers,
     order.pickupCoords,
-    settings.searchRadiusKm
+    baseRadius,
+    busy
   );
+  let usedRadius = baseRadius;
+
+  // Si nadie en el radio base: buscar en radio ampliado (ciudad)
+  if (!nearest) {
+    nearest = findNearestEligibleDriver(
+      drivers,
+      order.pickupCoords,
+      expandRadius,
+      busy
+    );
+    usedRadius = expandRadius;
+  }
 
   if (!nearest) {
     return {
@@ -152,7 +209,7 @@ export async function dispatchPendingOrder(
       routeDistanceKm,
       routeDurationMin,
       routePrice,
-      reason: 'no_driver_in_radius',
+      reason: 'no_free_active_driver',
     };
   }
 
@@ -167,8 +224,13 @@ export async function dispatchPendingOrder(
     autoAssignedAt: now,
     assignedDistanceKm: Math.round(nearest.distanceKm * 100) / 100,
     assignedDriverPhone: nearest.driver.phone || null,
+    dispatchRadiusKm: usedRadius,
     updatedAt: now,
   });
+
+  console.info(
+    `[auto-dispatch] ${order.trackingCode || order.id} → ${nearest.driver.fullName} (${nearest.distanceKm.toFixed(2)} km)`
+  );
 
   return {
     orderId: order.id,
@@ -183,16 +245,33 @@ export async function dispatchPendingOrder(
   };
 }
 
-/** Reintenta despacho de todos los pending. */
+/**
+ * Despacha todos los pending: el más cercano activo y libre.
+ * Asignaciones secuenciales para no dar el mismo conductor a dos pedidos.
+ */
 export async function dispatchAllPendingOrders(
   orders: DeliveryOrder[],
   drivers: MotorizadoDriver[],
   settings: DispatchSettings
 ): Promise<DispatchResult[]> {
-  const pending = orders.filter((o) => o.status === 'pending' && !o.assignedDriverId);
+  const pending = orders
+    .filter((o) => o.status === 'pending' && !o.assignedDriverId)
+    .sort(
+      (a, b) =>
+        new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+    );
+
+  const busy = getBusyDriverIds(orders);
   const results: DispatchResult[] = [];
+
   for (const order of pending) {
-    results.push(await dispatchPendingOrder(order, drivers, settings));
+    const result = await dispatchPendingOrder(order, drivers, settings, {
+      busyDriverIds: busy,
+    });
+    if (result.assigned && result.driverId) {
+      busy.add(result.driverId);
+    }
+    results.push(result);
   }
   return results;
 }

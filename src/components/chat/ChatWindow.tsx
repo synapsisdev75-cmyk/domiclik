@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage, MotorizadoDriver } from '../../types';
-import { subscribeMessages, sendChatMessage } from '../../lib/firebase';
+import {
+  subscribeMessages,
+  sendChatMessage,
+  deleteChatMessage,
+  clearChatMessages,
+} from '../../lib/firebase';
 import { alertNewMessage } from '../../lib/alerts';
-import { Send, Clock, CheckCheck, Radio, Shield, Activity } from 'lucide-react';
-import { DomiChatRadioIcon, DomiMotoIcon, DomiTowerIcon } from '../ui/CustomIcons';
+import { Send, Trash2, Eraser } from 'lucide-react';
+import { DomiChatRadioIcon } from '../ui/CustomIcons';
 
 interface ChatWindowProps {
   chatId: string;
@@ -28,9 +33,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [textInput, setTextInput] = useState('');
+  const [busy, setBusy] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastMsgIdRef = useRef<string | null>(null);
   const primedRef = useRef(false);
+  const isAdmin = currentRole === 'admin';
 
   useEffect(() => {
     lastMsgIdRef.current = null;
@@ -46,7 +53,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       }
       if (last.id !== lastMsgIdRef.current) {
         lastMsgIdRef.current = last.id;
-        // Solo alerta si el mensaje viene del otro rol
         if (last.senderRole !== currentRole) {
           alertNewMessage();
         }
@@ -74,9 +80,36 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     });
   };
 
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!isAdmin) return;
+    if (!window.confirm('¿Borrar este mensaje? Solo administradores pueden hacerlo.')) return;
+    setBusy(true);
+    try {
+      await deleteChatMessage(messageId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleClearChat = async () => {
+    if (!isAdmin) return;
+    if (
+      !window.confirm(
+        '¿Limpiar todo el historial de este canal? Solo el administrador puede borrar mensajes.'
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await clearChatMessages(chatId);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-[520px] bg-[#070A12] border border-[#00F0FF]/30 rounded-2xl overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.8)]">
-      {/* Radio Channel Header */}
       <div className="bg-[#0D1322] p-3.5 border-b border-[#1E293B] flex items-center justify-between font-mono">
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -107,23 +140,37 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {isAdmin && messages.length > 0 && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void handleClearChat()}
+              className="text-[10px] bg-red-950/40 text-red-300 px-2.5 py-1 rounded-lg border border-red-500/40 font-black flex items-center gap-1 hover:bg-red-900/40"
+              title="Limpiar chat (solo admin)"
+            >
+              <Eraser className="w-3.5 h-3.5" />
+              Limpiar
+            </button>
+          )}
           <span className="text-[10px] bg-[#0B101D] text-[#00F0FF] px-2.5 py-1 rounded-lg border border-[#00F0FF]/40 font-black flex items-center gap-1.5 shadow-[0_0_10px_rgba(0,240,255,0.2)]">
             <DomiChatRadioIcon className="w-3.5 h-3.5" color="#00F0FF" />
-            <span>{currentRole === 'admin' ? 'TORRE CENTRAL' : 'PILOTO MOTO'}</span>
+            <span>{isAdmin ? 'TORRE CENTRAL' : 'PILOTO MOTO'}</span>
           </span>
         </div>
       </div>
 
-      {/* Messages Scroll Area */}
       <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#050811]/90 font-mono">
         {messages.length === 0 ? (
           <div className="text-center py-12 px-4">
             <div className="w-12 h-12 rounded-2xl bg-[#0B101D] border border-[#00F0FF]/30 flex items-center justify-center mx-auto mb-3 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
               <DomiChatRadioIcon className="w-6 h-6" color="#00F0FF" />
             </div>
-            <p className="text-xs font-black text-white uppercase tracking-wider">CANAL SEGURO ENCRIPATADO READY</p>
+            <p className="text-xs font-black text-white uppercase tracking-wider">
+              CANAL SEGURO ENCRIPATADO READY
+            </p>
             <p className="text-[11px] text-slate-400 mt-1">
-              Frecuencia de radio en tiempo real entre Central DomiClick y el conductor en Villavicencio.
+              Frecuencia de radio en tiempo real entre Central DomiClick y el conductor en
+              Villavicencio.
             </p>
           </div>
         ) : (
@@ -138,7 +185,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
               >
                 <div
-                  className={`max-w-[80%] rounded-2xl p-3 text-xs leading-relaxed shadow-lg ${
+                  className={`max-w-[80%] rounded-2xl p-3 text-xs leading-relaxed shadow-lg relative group ${
                     isMe
                       ? 'bg-[#0052FF] text-white rounded-br-none border border-[#00F0FF] shadow-[0_0_15px_rgba(0,82,255,0.4)]'
                       : 'bg-[#0B101D] text-slate-100 rounded-bl-none border border-[#FF5722]/40 shadow-[0_0_15px_rgba(255,87,34,0.2)]'
@@ -154,6 +201,17 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     </span>
                   </div>
                   <p className="whitespace-pre-wrap font-sans text-xs">{msg.text}</p>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handleDeleteMessage(msg.id)}
+                      className="mt-2 inline-flex items-center gap-1 text-[10px] text-red-200/90 hover:text-white opacity-70 hover:opacity-100"
+                      title="Borrar mensaje (solo admin)"
+                    >
+                      <Trash2 className="w-3 h-3" /> Borrar
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -162,7 +220,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Quick Presets */}
       <div className="bg-[#0D1322] px-3 py-2 border-t border-[#1E293B] flex items-center gap-1.5 overflow-x-auto text-[11px] font-mono">
         <span className="text-[10px] text-[#FF5722] font-black shrink-0">RÁPIDOS:</span>
         {QUICK_PRESETS.map((preset, i) => (
@@ -176,7 +233,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         ))}
       </div>
 
-      {/* Input Form */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -189,7 +245,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           value={textInput}
           onChange={(e) => setTextInput(e.target.value)}
           placeholder={
-            currentRole === 'admin'
+            isAdmin
               ? 'Transmitir comando de radio al motorizado...'
               : 'Escribir reporte radial a la Central...'
           }
@@ -206,4 +262,3 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     </div>
   );
 };
-

@@ -121,7 +121,7 @@ const INTENTS: Intent[] = [
     keywords: ['pago', 'pagar', 'precio', 'tarifa', 'cuesta', 'costo', 'efectivo', 'transferencia', 'online', 'kilometro', 'km'],
     reply: () => ({
       text:
-        'La tarifa se calcula en el mapa: $2.300 COP por kilómetro. En hora pico (mañana, mediodía y tarde en días hábiles) se aplica ×1.35. Hay un mínimo de $5.000. Puedes programar la entrega hasta 15 días adelante.',
+        'La tarifa se calcula en el mapa: $2.300 COP por kilómetro. En hora pico se aplica ×1.35 y el tiempo usa 60 km/h; en hora normal 75 km/h, sumando un margen de servicio. Hay un mínimo de $5.000. Puedes programar la entrega hasta 15 días adelante.',
       suggestions: ['Hablar con Central', '¿Cómo solicito?'],
     }),
   },

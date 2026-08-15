@@ -148,7 +148,7 @@ function VillavicencioGpsBackdrop() {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
-  const [role, setRole] = useState<LoginRole>('admin');
+  const [role, setRole] = useState<LoginRole>('driver');
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

@@ -1,11 +1,28 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { MotorizadoDriver, DeliveryOrder, OrderStatus, AdminAccount, DispatchSettings } from '../../types';
+import {
+  MotorizadoDriver,
+  DeliveryOrder,
+  OrderStatus,
+  AdminAccount,
+  DispatchSettings,
+  OpsIncident,
+} from '../../types';
 import { MapComponent, MapStyleType } from '../MapComponent';
 import { GoogleMapRadar, getGoogleMapsApiKey } from '../GoogleMapRadar';
 import { ChatWindow } from '../chat/ChatWindow';
 import { DriverRouteHistoryView } from './DriverRouteHistoryView';
 import { DriverApprovalModal } from './DriverApprovalModal';
-import { updateOrderStatus, saveDispatchSettings, subscribeDispatchSettings } from '../../lib/firebase';
+import { DriverFleetProfile } from './DriverFleetProfile';
+import {
+  updateOrderStatus,
+  saveDispatchSettings,
+  subscribeDispatchSettings,
+  cancelOrder,
+  deleteOrder,
+  subscribeIncidents,
+  resolveIncident,
+  deleteIncident,
+} from '../../lib/firebase';
 import { AdminControlCenter } from './AdminControlCenter';
 import { AdminStaffPanel } from './AdminStaffPanel';
 import { AttendancePanel } from './AttendancePanel';
@@ -22,6 +39,10 @@ import {
   Radio,
   ArrowRight,
   PictureInPicture2,
+  Trash2,
+  Ban,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   DomiCargoIcon,
@@ -35,6 +56,7 @@ export type AdminSection =
   | 'solicitudes'
   | 'flota'
   | 'envios'
+  | 'incidentes'
   | 'rutas'
   | 'historial'
   | 'reportes'
@@ -112,9 +134,13 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
 
   const [search, setSearch] = useState('');
   const [selectedDriverForChat, setSelectedDriverForChat] = useState<MotorizadoDriver | null>(null);
+  const [profileDriver, setProfileDriver] = useState<MotorizadoDriver | null>(null);
   const [approvalDriver, setApprovalDriver] = useState<MotorizadoDriver | null>(null);
   const [mapStyleToggle, setMapStyleToggle] = useState<'map' | 'satellite'>('map');
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [orderBusyId, setOrderBusyId] = useState<string | null>(null);
+  const [incidents, setIncidents] = useState<OpsIncident[]>([]);
+  const [incidentBusyId, setIncidentBusyId] = useState<string | null>(null);
   const [dispatchDraft, setDispatchDraft] = useState<DispatchSettings>(DEFAULT_DISPATCH_SETTINGS);
   const [dispatchSaving, setDispatchSaving] = useState(false);
   const [dispatchSaved, setDispatchSaved] = useState(false);
@@ -124,6 +150,8 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
       setDispatchDraft(s);
     });
   }, []);
+
+  useEffect(() => subscribeIncidents(setIncidents), []);
 
   const googleMapsKey = getGoogleMapsApiKey();
   const useGoogleMaps = Boolean(googleMapsKey) && mapStyleToggle === 'map';
@@ -177,6 +205,64 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
       setAssigningId(null);
     }
   };
+
+  const handleCancelOrder = async (orderId: string, tracking?: string) => {
+    if (
+      !window.confirm(
+        `¿Cancelar el pedido ${tracking || orderId}? Solo administradores pueden hacerlo.`
+      )
+    ) {
+      return;
+    }
+    setOrderBusyId(orderId);
+    try {
+      await cancelOrder(orderId);
+    } finally {
+      setOrderBusyId(null);
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string, tracking?: string) => {
+    if (
+      !window.confirm(
+        `¿BORRAR definitivamente el pedido ${tracking || orderId}? Esta acción no se puede deshacer.`
+      )
+    ) {
+      return;
+    }
+    setOrderBusyId(orderId);
+    try {
+      await deleteOrder(orderId);
+    } finally {
+      setOrderBusyId(null);
+    }
+  };
+
+  const handleResolveIncident = async (inc: OpsIncident) => {
+    const note =
+      window.prompt('Nota de resolución (opcional):', 'Incidencia solucionada por torre') || '';
+    setIncidentBusyId(inc.id);
+    try {
+      await resolveIncident(inc.id, currentAdminEmail || 'admin', note);
+    } finally {
+      setIncidentBusyId(null);
+    }
+  };
+
+  const handleDeleteIncident = async (inc: OpsIncident) => {
+    if (!window.confirm(`¿Borrar la incidencia «${inc.title}»?`)) return;
+    setIncidentBusyId(inc.id);
+    try {
+      await deleteIncident(inc.id);
+    } finally {
+      setIncidentBusyId(null);
+    }
+  };
+
+  const openIncidents = useMemo(
+    () => incidents.filter((i) => i.status === 'open'),
+    [incidents]
+  );
 
   const OrderRow: React.FC<{
     ord: DeliveryOrder;
@@ -236,6 +322,26 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             ))}
           </select>
         )}
+        {ord.status !== 'cancelled' && ord.status !== 'delivered' && (
+          <button
+            type="button"
+            title="Cancelar pedido (solo admin)"
+            disabled={orderBusyId === ord.id}
+            onClick={() => handleCancelOrder(ord.id, ord.trackingCode)}
+            className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1.5 rounded-lg border border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+          >
+            <Ban className="w-3.5 h-3.5" /> Cancelar
+          </button>
+        )}
+        <button
+          type="button"
+          title="Borrar pedido (solo admin)"
+          disabled={orderBusyId === ord.id}
+          onClick={() => handleDeleteOrder(ord.id, ord.trackingCode)}
+          className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1.5 rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10"
+        >
+          <Trash2 className="w-3.5 h-3.5" /> Borrar
+        </button>
       </div>
     </div>
   );
@@ -286,7 +392,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
       <div className="space-y-5">
         <SectionHeader
           title="Flota de Motorizados"
-          subtitle={`${activeDrivers.length} activos · ${approvedDrivers.length} aprobados · Firebase en vivo`}
+          subtitle={`${activeDrivers.length} activos · ${approvedDrivers.length} aprobados · Clic en el perfil para ver km y asistencia`}
         />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="bg-[#0A1020] border border-[#FF5722]/40 rounded-2xl p-4">
@@ -312,7 +418,12 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             {approvedDrivers.map((drv) => (
               <div
                 key={drv.id}
-                className="bg-[#0A1020] border border-[#162748] rounded-2xl p-3.5 flex items-center justify-between gap-3"
+                className={`bg-[#0A1020] border rounded-2xl p-3.5 flex items-center justify-between gap-3 cursor-pointer transition ${
+                  profileDriver?.id === drv.id
+                    ? 'border-[#FF5722]/60'
+                    : 'border-[#162748] hover:border-[#FF5722]/40'
+                }`}
+                onClick={() => setProfileDriver(drv)}
               >
                 <div className="flex items-center gap-3">
                   <div
@@ -320,10 +431,18 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                       drv.isActive ? 'border-[#00E676]/50' : 'border-[#2B6CFF]/40'
                     }`}
                   >
-                    <DomiHelmetIcon
-                      className="w-6 h-6"
-                      color={drv.isActive ? '#00E676' : '#2B6CFF'}
-                    />
+                    {drv.photoUrl ? (
+                      <img
+                        src={drv.photoUrl}
+                        alt=""
+                        className="w-11 h-11 rounded-full object-cover"
+                      />
+                    ) : (
+                      <DomiHelmetIcon
+                        className="w-6 h-6"
+                        color={drv.isActive ? '#00E676' : '#2B6CFF'}
+                      />
+                    )}
                   </div>
                   <div>
                     <div className="text-sm font-bold text-white">{drv.fullName}</div>
@@ -335,7 +454,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                   <span
                     className={`text-[10px] font-tech font-bold px-2 py-1 rounded-lg border ${
                       drv.isActive
@@ -347,6 +466,15 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                   </span>
                   <button
                     type="button"
+                    onClick={() => {
+                      setProfileDriver(drv);
+                    }}
+                    className="text-[10px] text-slate-200 font-tech font-bold flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[#1a2744] hover:border-[#FF5722]/50"
+                  >
+                    Perfil
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setSelectedDriverForChat(drv)}
                     className="text-[10px] text-[#00E5FF] font-tech font-bold flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[#1a2744] hover:border-[#00E5FF]/50"
                   >
@@ -356,6 +484,15 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
               </div>
             ))}
           </div>
+        )}
+        {profileDriver && (
+          <DriverFleetProfile
+            driver={profileDriver}
+            onClose={() => setProfileDriver(null)}
+            onOpenChat={() => {
+              setSelectedDriverForChat(profileDriver);
+            }}
+          />
         )}
         {selectedDriverForChat && (
           <div className="bg-[#070B16] border border-[#142340] rounded-3xl p-4">
@@ -423,6 +560,92 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             ))}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (section === 'incidentes') {
+    return (
+      <div className="space-y-5">
+        <SectionHeader
+          title="Incidentes"
+          subtitle={`${openIncidents.length} abiertos · solo el administrador puede resolver o borrar`}
+        />
+        {incidents.length === 0 ? (
+          <EmptyState
+            title="Sin incidencias"
+            text="Los transportistas pueden reportar problemas desde su cabina. Aquí los resuelves."
+          />
+        ) : (
+          <div className="space-y-2.5">
+            {incidents.map((inc) => (
+              <div
+                key={inc.id}
+                className={`bg-[#0A1020] border rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-start justify-between gap-3 ${
+                  inc.status === 'open'
+                    ? 'border-amber-500/40'
+                    : 'border-[#162748]'
+                }`}
+              >
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white font-tech">{inc.title}</div>
+                    <p className="text-[11px] text-slate-400 mt-0.5 whitespace-pre-wrap">
+                      {inc.description}
+                    </p>
+                    <div className="text-[10px] text-slate-500 mt-1 font-tech space-x-2">
+                      <span>
+                        {inc.reportedByRole === 'driver' ? 'Motorizado' : 'Admin'}:{' '}
+                        {inc.reportedByName}
+                      </span>
+                      {inc.trackingCode && <span>· {inc.trackingCode}</span>}
+                      {inc.driverName && <span>· {inc.driverName}</span>}
+                      <span>· {new Date(inc.createdAt).toLocaleString('es-CO')}</span>
+                    </div>
+                    {inc.status === 'resolved' && (
+                      <div className="text-[10px] text-emerald-400 mt-1">
+                        Resuelto por {inc.resolvedBy}
+                        {inc.resolutionNote ? ` · ${inc.resolutionNote}` : ''}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`text-[10px] font-tech font-bold px-2.5 py-1 rounded-lg border ${
+                      inc.status === 'open'
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    }`}
+                  >
+                    {inc.status === 'open' ? 'ABIERTA' : 'RESUELTA'}
+                  </span>
+                  {inc.status === 'open' && (
+                    <button
+                      type="button"
+                      disabled={incidentBusyId === inc.id}
+                      onClick={() => handleResolveIncident(inc)}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Resolver
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={incidentBusyId === inc.id}
+                    onClick={() => handleDeleteIncident(inc)}
+                    className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1.5 rounded-lg border border-red-500/40 text-red-300 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Borrar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
