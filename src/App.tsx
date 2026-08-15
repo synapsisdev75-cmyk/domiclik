@@ -188,7 +188,7 @@ function MainApp() {
     }
   }, [orders, currentRole, currentUserEmail, drivers]);
 
-  // Auth state listener (incluye retorno de Google redirect)
+  // Auth state listener (incluye retorno de Google en la misma pestaña)
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       if (user && user.email) {

@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { auth, LOGIN_ROLE_KEY } from '../../lib/firebase';
-import { signInWithGoogleAccount, describeAuthError } from '../../lib/googleAuth';
+import {
+  startGoogleSignInRedirect,
+  completeGoogleSignInFromRedirect,
+  isGoogleOAuthReturn,
+  describeAuthError,
+} from '../../lib/googleAuth';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -151,9 +156,41 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() =>
+    typeof window !== 'undefined' ? isGoogleOAuthReturn() : false
+  );
+  const [googleBusy, setGoogleBusy] = useState(() =>
+    typeof window !== 'undefined' ? isGoogleOAuthReturn() : false
+  );
   const [authError, setAuthError] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
+  const googleReturn = typeof window !== 'undefined' && isGoogleOAuthReturn();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!isGoogleOAuthReturn()) return;
+      setLoading(true);
+      setGoogleBusy(true);
+      try {
+        const user = await completeGoogleSignInFromRedirect();
+        if (cancelled || !user?.email) return;
+        const saved =
+          (sessionStorage.getItem(LOGIN_ROLE_KEY) as LoginRole) || role;
+        sessionStorage.removeItem(LOGIN_ROLE_KEY);
+        onLoginSuccess(user.email, saved);
+      } catch (err: unknown) {
+        if (!cancelled) {
+          setLoading(false);
+          setGoogleBusy(false);
+          setAuthError(describeAuthError(err));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -203,20 +240,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   };
 
   const handleGoogleSignIn = async () => {
-    setLoading(true);
+    setGoogleBusy(true);
     setAuthError('');
     setInfoMsg('');
     sessionStorage.setItem(LOGIN_ROLE_KEY, role);
     try {
-      const user = await signInWithGoogleAccount();
-      if (user.email) {
-        sessionStorage.removeItem(LOGIN_ROLE_KEY);
-        onLoginSuccess(user.email, role);
-      }
+      await startGoogleSignInRedirect();
     } catch (err: unknown) {
+      setGoogleBusy(false);
       setAuthError(describeAuthError(err));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -228,6 +260,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
   return (
     <div className="login-screen min-h-screen min-h-dvh bg-[#05080f] text-[#e8eef9] overflow-x-hidden selection:bg-[#2B6CFF] selection:text-white">
+      {(googleBusy || googleReturn) && (
+        <div className="fixed inset-0 z-[80] bg-[#05080f]/85 backdrop-blur-sm flex flex-col items-center justify-center gap-3 px-6 text-center">
+          <div className="h-10 w-10 rounded-full border-2 border-[#2B6CFF] border-t-transparent animate-spin" />
+          <p className="text-sm font-semibold text-white">
+            {googleReturn ? 'Entrando con Google…' : 'Abriendo Google…'}
+          </p>
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-2 min-h-screen min-h-dvh">
         {/* LEFT — brand + video loop */}
         <section className="relative hidden lg:flex flex-col justify-between px-10 xl:px-16 py-10 overflow-hidden">

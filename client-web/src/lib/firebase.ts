@@ -57,6 +57,10 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 googleProvider.addScope('email');
 googleProvider.addScope('profile');
 
+function oauthClientId() {
+  return env('VITE_FIREBASE_OAUTH_CLIENT_ID') || fallback.oAuthClientId || '';
+}
+
 declare global {
   interface Window {
     google?: {
@@ -74,26 +78,29 @@ declare global {
   }
 }
 
-function loadGisScript(): Promise<void> {
-  if (window.google?.accounts?.oauth2) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const existing = document.getElementById('google-gis-client');
-    if (existing) {
-      existing.addEventListener('load', () => resolve());
-      existing.addEventListener('error', () =>
-        reject(new Error('No se pudo cargar Google'))
-      );
-      return;
+let completingRedirect = false;
+
+export async function completeGoogleRedirect(): Promise<User | null> {
+  if (completingRedirect || typeof window === 'undefined') return null;
+  const hash = window.location.hash?.replace(/^#/, '');
+  if (!hash) return null;
+  const params = new URLSearchParams(hash);
+  const oauthError = params.get('error');
+  const idToken = params.get('id_token');
+  if (!oauthError && !idToken) return null;
+
+  completingRedirect = true;
+  window.history.replaceState({}, document.title, window.location.pathname);
+  try {
+    if (oauthError) {
+      throw new Error(params.get('error_description') || oauthError);
     }
-    const s = document.createElement('script');
-    s.id = 'google-gis-client';
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true;
-    s.defer = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('No se pudo cargar Google Identity'));
-    document.head.appendChild(s);
-  });
+    const credential = GoogleAuthProvider.credential(idToken);
+    const result = await signInWithCredential(auth, credential);
+    return result.user;
+  } finally {
+    completingRedirect = false;
+  }
 }
 
 export type CustomerProfile = {
@@ -138,19 +145,20 @@ export function userToProfile(user: User): CustomerProfile {
 }
 
 export async function signInWithGoogle(): Promise<User> {
-  const clientId =
-    env('VITE_FIREBASE_OAUTH_CLIENT_ID') || fallback.oAuthClientId || '';
+  const clientId = oauthClientId();
   if (!clientId) {
     throw new Error('Falta el OAuth Client ID de Google.');
   }
-  await loadGisScript();
-  if (!window.google?.accounts?.oauth2) {
-    throw new Error('Google Identity no está disponible en este navegador.');
+  const oauth2 = window.google?.accounts?.oauth2;
+  if (!oauth2) {
+    throw new Error(
+      'Google aún se está cargando. Espera un segundo y vuelve a iniciar sesión.'
+    );
   }
   const accessToken = await new Promise<string>((resolve, reject) => {
-    const client = window.google!.accounts!.oauth2!.initTokenClient({
+    const client = oauth2.initTokenClient({
       client_id: clientId,
-      scope: 'email profile openid',
+      scope: 'openid email profile',
       callback: (res) => {
         if (res.error || !res.access_token) {
           reject(new Error(res.error || 'Google no devolvió token'));

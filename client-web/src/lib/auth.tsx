@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { User } from 'firebase/auth';
 import {
+  completeGoogleRedirect,
   saveCustomerPhone,
   signInWithGoogle,
   signOutCustomer,
@@ -38,6 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    void completeGoogleRedirect().catch((err) => {
+      console.warn('[auth] Google redirect', err);
+    });
     const unsub = subscribeAuth(async (next) => {
       setUser(next);
       if (next) {
