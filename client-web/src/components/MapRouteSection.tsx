@@ -47,7 +47,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
   } = props;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 overflow-visible">
       <div className="flex flex-wrap items-center gap-2">
         <MapPinned className="h-4 w-4 text-[var(--domi-cyan)]" aria-hidden />
         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
@@ -84,7 +84,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
         required
         accent="pickup"
         value={pickupAddress}
-        placeholder="Escribe: Unicentro, calle, barrio, hospital…"
+        placeholder="Empieza a escribir: Unicentro, universidad, calle…"
         onQueryChange={onPickupAddressChange}
         onPlacePicked={onPickupPicked}
       />
@@ -94,7 +94,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
         required
         accent="delivery"
         value={deliveryAddress}
-        placeholder="Escribe: urbanización, clínica, avenida…"
+        placeholder="Empieza a escribir: hospital, barrio, urbanización…"
         onQueryChange={onDeliveryAddressChange}
         onPlacePicked={onDeliveryPicked}
       />
@@ -128,8 +128,8 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
         </div>
       ) : (
         <p className="text-xs text-[var(--domi-muted)]">
-          Escribe y elige una sugerencia: el pin se marca en el mapa. También puedes tocar Ubicar,
-          el mapa o arrastrar A / B.
+          Escribe y elige una sugerencia del listado: el pin se marca en el mapa. También puedes
+          tocar Buscar, el mapa o arrastrar A / B.
         </p>
       )}
     </div>

@@ -291,7 +291,7 @@ export function RouteMapPickerInner(props: RouteMapPickerProps) {
 
   return (
     <div
-      className={`relative ${heightClass} w-full overflow-hidden rounded-xl border border-[var(--domi-border)] bg-[#0a0e16]`}
+      className={`relative z-0 ${heightClass} w-full overflow-hidden rounded-xl border border-[var(--domi-border)] bg-[#0a0e16]`}
       role="application"
       aria-label="Mapa Google DomiClick"
     >

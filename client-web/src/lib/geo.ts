@@ -1,5 +1,6 @@
 import { ROAD_FACTOR } from './pricing';
 import { GOOGLE_MAPS_API_KEY } from './config';
+import { searchLocalPlaces } from './villavicencioPlaces';
 
 export const VILLAVICENCIO_CENTER = { lat: 4.142, lng: -73.6266 };
 
@@ -22,7 +23,7 @@ export type PlaceSuggestion = {
   label: string;
   secondary: string;
   kind: string;
-  source: 'google' | 'nominatim';
+  source: 'google' | 'nominatim' | 'local';
   placeId?: string;
   lat?: number;
   lng?: number;
@@ -91,12 +92,13 @@ async function searchGooglePlaces(
   places: typeof google.maps.places,
   q: string,
 ): Promise<PlaceSuggestion[]> {
+  const biased = q.toLowerCase().includes('villavicencio') ? q : `${q} Villavicencio`;
   const service = new places.AutocompleteService();
   const predictions = await new Promise<google.maps.places.AutocompletePrediction[]>(
     (resolve) => {
       service.getPlacePredictions(
         {
-          input: q,
+          input: biased,
           componentRestrictions: { country: 'co' },
           locationBias: {
             center: VILLAVICENCIO_CENTER,
@@ -128,59 +130,94 @@ async function searchGooglePlaces(
   }));
 }
 
-async function searchPhoton(query: string): Promise<PlaceSuggestion[]> {
-  const url =
-    'https://photon.komoot.io/api/?' +
-    new URLSearchParams({
-      q: `${query}, Villavicencio, Meta`,
-      lat: String(VILLAVICENCIO_CENTER.lat),
-      lon: String(VILLAVICENCIO_CENTER.lng),
-      limit: '8',
-      lang: 'es',
-    });
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = (await res.json()) as {
-      features?: Array<{
-        properties?: Record<string, string | undefined>;
-        geometry?: { coordinates?: [number, number] };
-      }>;
-    };
-    return (data.features || [])
-      .map((f) => {
-        const p = f.properties || {};
-        const coords = f.geometry?.coordinates;
-        if (!coords?.length) return null;
-        const [lng, lat] = coords;
-        const label =
-          p.name ||
-          p.street ||
-          p.city ||
-          [p.street, p.housenumber].filter(Boolean).join(' ') ||
-          'Lugar';
-        const secondary = [
-          p.street,
-          p.district || p.suburb,
-          p.city || 'Villavicencio',
-          p.state || 'Meta',
-        ]
-          .filter(Boolean)
-          .join(', ');
-        return {
-          id: `photon-${lng}-${lat}-${label}`,
-          label,
-          secondary: secondary || 'Villavicencio, Meta',
-          kind: nominatimKind(undefined, p.osm_value),
-          source: 'nominatim' as const,
-          lat,
-          lng,
-        } satisfies PlaceSuggestion;
-      })
-      .filter(Boolean) as PlaceSuggestion[];
-  } catch {
-    return [];
+function foldKey(s: string) {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function mergeSuggestions(groups: PlaceSuggestion[][]): PlaceSuggestion[] {
+  const seen = new Set<string>();
+  const out: PlaceSuggestion[] = [];
+  for (const group of groups) {
+    for (const hit of group) {
+      const key = foldKey(`${hit.label} ${hit.lat?.toFixed(4) || ''} ${hit.lng?.toFixed(4) || ''}`);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(hit);
+      if (out.length >= 8) return out;
+    }
   }
+  return out;
+}
+
+async function searchPhoton(query: string): Promise<PlaceSuggestion[]> {
+  const queries = [`${query} Villavicencio`, query];
+  const batches = await Promise.all(
+    queries.map(async (q) => {
+      const url =
+        'https://photon.komoot.io/api/?' +
+        new URLSearchParams({
+          q,
+          lat: String(VILLAVICENCIO_CENTER.lat),
+          lon: String(VILLAVICENCIO_CENTER.lng),
+          limit: '8',
+          lang: 'es',
+        });
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return [] as PlaceSuggestion[];
+        const data = (await res.json()) as {
+          features?: Array<{
+            properties?: Record<string, string | undefined>;
+            geometry?: { coordinates?: [number, number] };
+          }>;
+        };
+        return (data.features || [])
+          .map((f) => {
+            const p = f.properties || {};
+            const coords = f.geometry?.coordinates;
+            if (!coords?.length) return null;
+            const [lng, lat] = coords;
+            const city = (p.city || p.district || '').toLowerCase();
+            if (city && !city.includes('villavicencio') && !city.includes('meta')) {
+              const dist = haversineKm({ lat, lng }, VILLAVICENCIO_CENTER);
+              if (dist > 40) return null;
+            }
+            const label =
+              p.name ||
+              p.street ||
+              p.city ||
+              [p.street, p.housenumber].filter(Boolean).join(' ') ||
+              'Lugar';
+            const secondary = [
+              p.street,
+              p.district || p.suburb || p.locality,
+              p.city || 'Villavicencio',
+              p.state || 'Meta',
+            ]
+              .filter(Boolean)
+              .join(', ');
+            return {
+              id: `photon-${lng}-${lat}-${label}`,
+              label,
+              secondary: secondary || 'Villavicencio, Meta',
+              kind: nominatimKind(undefined, p.osm_value),
+              source: 'nominatim' as const,
+              lat,
+              lng,
+            } satisfies PlaceSuggestion;
+          })
+          .filter(Boolean) as PlaceSuggestion[];
+      } catch {
+        return [] as PlaceSuggestion[];
+      }
+    }),
+  );
+  return mergeSuggestions(batches);
 }
 
 export async function searchPlaceSuggestions(
@@ -190,17 +227,18 @@ export async function searchPlaceSuggestions(
   const q = query.trim();
   if (q.length < 2) return [];
 
-  const places = placesFromLib(placesLib);
-  if (places?.AutocompleteService) {
-    try {
-      const googleHits = await searchGooglePlaces(places, q);
-      if (googleHits.length) return googleHits;
-    } catch (err) {
-      console.warn('[DomiClick] Places autocomplete', err);
-    }
-  }
+  const localHits = searchLocalPlaces(q);
 
-  return searchPhoton(q);
+  const places = placesFromLib(placesLib);
+  const googlePromise = places?.AutocompleteService
+    ? searchGooglePlaces(places, q).catch((err) => {
+        console.warn('[DomiClick] Places autocomplete', err);
+        return [] as PlaceSuggestion[];
+      })
+    : Promise.resolve([] as PlaceSuggestion[]);
+
+  const [googleHits, photonHits] = await Promise.all([googlePromise, searchPhoton(q)]);
+  return mergeSuggestions([localHits, googleHits, photonHits]);
 }
 
 export async function resolvePlaceSuggestion(
@@ -211,7 +249,9 @@ export async function resolvePlaceSuggestion(
     return {
       lat: suggestion.lat,
       lng: suggestion.lng,
-      label: suggestion.secondary || suggestion.label,
+      label: suggestion.secondary
+        ? `${suggestion.label}, ${suggestion.secondary}`
+        : suggestion.label,
     };
   }
   if (suggestion.placeId) {

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { Loader2, MapPin, Navigation, Search } from 'lucide-react';
+import { Loader2, MapPin, Search, Sparkles } from 'lucide-react';
 import { useMapsLibrary } from '@vis.gl/react-google-maps';
 import {
   geocodeAddress,
@@ -18,6 +18,20 @@ type PlaceSearchFieldProps = {
   onQueryChange: (value: string) => void;
   onPlacePicked: (hit: LatLng & { label: string }) => void;
 };
+
+function highlightMatch(text: string, query: string) {
+  const q = query.trim();
+  if (q.length < 2) return text;
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="rounded-sm bg-[#FF5722]/25 px-0.5 text-inherit">{text.slice(idx, idx + q.length)}</mark>
+      {text.slice(idx + q.length)}
+    </>
+  );
+}
 
 export function PlaceSearchField({
   label,
@@ -38,11 +52,13 @@ export function PlaceSearchField({
   const [active, setActive] = useState(0);
   const [hint, setHint] = useState('');
   const skipSearch = useRef(false);
+  const typing = value.trim().length >= 2;
 
+  const accentColor = accent === 'pickup' ? '#2B6CFF' : '#FF5722';
   const ring =
     accent === 'pickup'
-      ? 'focus-within:border-[#2B6CFF]'
-      : 'focus-within:border-[#FF5722]';
+      ? 'focus-within:border-[#2B6CFF] focus-within:shadow-[0_0_0_3px_rgba(43,108,255,0.18)]'
+      : 'focus-within:border-[#FF5722] focus-within:shadow-[0_0_0_3px_rgba(255,87,34,0.18)]';
 
   useEffect(() => {
     if (skipSearch.current) {
@@ -61,19 +77,19 @@ export function PlaceSearchField({
     let cancelled = false;
     setLoading(true);
     setHint('');
+    setOpen(true);
 
     const t = window.setTimeout(() => {
       void searchPlaceSuggestions(q, placesLib || undefined).then((hits) => {
         if (cancelled) return;
         setItems(hits);
         setActive(0);
-        setOpen(hits.length > 0);
         setLoading(false);
         if (!hits.length) {
-          setHint('Sin coincidencias — prueba otro nombre o toca Ubicar.');
+          setHint('Sigue escribiendo o toca Buscar para fijar el punto.');
         }
       });
-    }, 180);
+    }, 140);
 
     return () => {
       cancelled = true;
@@ -96,7 +112,7 @@ export function PlaceSearchField({
     try {
       const hit = await resolvePlaceSuggestion(item, placesLib || undefined);
       if (!hit) {
-        setHint('No se pudo ubicar ese lugar. Intenta otra sugerencia.');
+        setHint('No se pudo marcar ese lugar. Prueba otra sugerencia.');
         return;
       }
       skipSearch.current = true;
@@ -109,8 +125,12 @@ export function PlaceSearchField({
 
   async function locateTyped() {
     const q = value.trim();
-    if (q.length < 3) {
-      setHint('Escribe al menos 3 letras para ubicar.');
+    if (q.length < 2) {
+      setHint('Escribe al menos 2 letras para buscar.');
+      return;
+    }
+    if (items[0]) {
+      await pick(items[0]);
       return;
     }
     setResolving(true);
@@ -119,7 +139,7 @@ export function PlaceSearchField({
     try {
       const hit = await geocodeAddress(q, placesLib || undefined);
       if (!hit) {
-        setHint('No encontramos esa dirección. Elige una sugerencia de la lista.');
+        setHint('No encontramos esa dirección. Prueba universidad, Unicentro, hospital…');
         return;
       }
       skipSearch.current = true;
@@ -130,22 +150,23 @@ export function PlaceSearchField({
     }
   }
 
+  const showDrop = open && typing;
+
   return (
-    <div ref={wrapRef} className="relative block sm:col-span-2">
+    <div ref={wrapRef} className="relative z-40 block sm:col-span-2">
       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
         {label}
       </span>
       <div
-        className={`flex items-center gap-2 rounded-xl border border-[var(--domi-border)] bg-[#0a101c] px-3 ${ring}`}
+        className={`flex items-center gap-2 rounded-2xl border border-[var(--domi-border)] bg-[#0a101c] px-3 py-1 ${ring}`}
       >
-        <Search className="h-4 w-4 shrink-0 text-[var(--domi-muted)]" aria-hidden />
         <input
-          className="field-input min-w-0 flex-1 !border-0 !bg-transparent !px-0 !shadow-none"
+          className="field-input min-w-0 flex-1 !border-0 !bg-transparent !px-1 !py-2 !shadow-none"
           required={required}
           value={value}
           autoComplete="off"
           role="combobox"
-          aria-expanded={open}
+          aria-expanded={showDrop}
           aria-controls={listId}
           aria-autocomplete="list"
           placeholder={placeholder}
@@ -154,15 +175,15 @@ export function PlaceSearchField({
             setOpen(true);
           }}
           onFocus={() => {
-            if (items.length) setOpen(true);
+            if (typing) setOpen(true);
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && (!open || !items.length)) {
+            if (e.key === 'Enter' && (!showDrop || !items.length)) {
               e.preventDefault();
               void locateTyped();
               return;
             }
-            if (!open || !items.length) return;
+            if (!showDrop || !items.length) return;
             if (e.key === 'ArrowDown') {
               e.preventDefault();
               setActive((i) => (i + 1) % items.length);
@@ -182,59 +203,77 @@ export function PlaceSearchField({
         ) : null}
         <button
           type="button"
-          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/5 px-2.5 py-1.5 text-[11px] font-bold text-[var(--domi-cyan)] hover:bg-white/10"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-extrabold text-white"
+          style={{ background: accentColor }}
           onClick={() => void locateTyped()}
-          disabled={resolving || value.trim().length < 3}
+          disabled={resolving || value.trim().length < 2}
         >
-          <Navigation className="h-3.5 w-3.5" aria-hidden />
-          Ubicar
+          <Search className="h-3.5 w-3.5" aria-hidden />
+          Buscar
         </button>
       </div>
 
-      {!placesLib && value.trim().length >= 2 && !loading ? (
-        <p className="mt-1 text-[11px] text-[var(--domi-muted)]">Cargando buscador…</p>
+      {showDrop ? (
+        <div
+          id={listId}
+          role="listbox"
+          className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-[var(--domi-border)] bg-[#0b1220]/97 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.75)] backdrop-blur-md"
+        >
+          <div className="flex items-center gap-1.5 border-b border-white/5 px-3 py-2 text-[11px] text-[var(--domi-muted)]">
+            <Sparkles className="h-3.5 w-3.5 text-[#FF5722]" aria-hidden />
+            {loading ? 'Adivinando lugares en Villavicencio…' : '¿Es alguno de estos? Toca para marcar el pin.'}
+          </div>
+
+          {loading && !items.length ? (
+            <div className="space-y-2 px-3 py-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-10 animate-pulse rounded-xl bg-white/5" />
+              ))}
+            </div>
+          ) : null}
+
+          {items.length > 0 ? (
+            <ul className="max-h-72 overflow-auto py-1">
+              {items.map((item, i) => (
+                <li key={item.id} role="option" aria-selected={i === active}>
+                  <button
+                    type="button"
+                    className={`flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition ${
+                      i === active ? 'bg-white/10' : 'hover:bg-white/5'
+                    }`}
+                    onMouseEnter={() => setActive(i)}
+                    onClick={() => void pick(item)}
+                  >
+                    <span
+                      className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+                      style={{ background: `${accentColor}22`, color: accentColor }}
+                    >
+                      <MapPin className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-white">
+                        {highlightMatch(item.label, value)}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[11px] text-[var(--domi-muted)]">
+                        {item.kind} · {item.secondary}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : !loading ? (
+            <p className="px-3 py-3 text-sm text-[var(--domi-muted)]">
+              Sin coincidencias aún. Sigue escribiendo o toca <strong className="text-white">Buscar</strong>.
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
-      {hint ? (
+      {hint && !showDrop ? (
         <p className="mt-1 text-[11px] text-amber-200/90" role="status">
           {hint}
         </p>
-      ) : null}
-
-      {open && items.length > 0 ? (
-        <ul
-          id={listId}
-          role="listbox"
-          className="absolute z-50 mt-1 max-h-72 w-full overflow-auto rounded-xl border border-[var(--domi-border)] bg-[#0a101c] py-1 shadow-2xl"
-        >
-          {items.map((item, i) => (
-            <li key={item.id} role="option" aria-selected={i === active}>
-              <button
-                type="button"
-                className={`flex w-full items-start gap-2 px-3 py-2 text-left ${
-                  i === active ? 'bg-white/10' : 'hover:bg-white/5'
-                }`}
-                onMouseEnter={() => setActive(i)}
-                onClick={() => void pick(item)}
-              >
-                <MapPin
-                  className={`mt-0.5 h-4 w-4 shrink-0 ${
-                    accent === 'pickup' ? 'text-[#2B6CFF]' : 'text-[#FF5722]'
-                  }`}
-                  aria-hidden
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold text-white">
-                    {item.label}
-                  </span>
-                  <span className="block truncate text-[11px] text-[var(--domi-muted)]">
-                    {item.kind} · {item.secondary}
-                  </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
       ) : null}
     </div>
   );
