@@ -2,7 +2,9 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithCredential,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   type User,
@@ -61,43 +63,39 @@ function oauthClientId() {
   return env('VITE_FIREBASE_OAUTH_CLIENT_ID') || fallback.oAuthClientId || '';
 }
 
-declare global {
-  interface Window {
-    google?: {
-      accounts?: {
-        oauth2?: {
-          initTokenClient: (cfg: {
-            client_id: string;
-            scope: string;
-            callback: (res: { access_token?: string; error?: string }) => void;
-            error_callback?: (err: { type?: string; message?: string }) => void;
-          }) => { requestAccessToken: (opts?: { prompt?: string }) => void };
-        };
-      };
-    };
+function isMobileBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+function describeGoogleAuthError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  if (/origin_mismatch|unauthorized|invalid_client/i.test(message)) {
+    return (
+      `Google bloqueó el login desde ${origin || 'este dominio'}. ` +
+      'En Google Cloud Console → Credenciales → Client ID OAuth web, agrega ese origen en ' +
+      '"Orígenes de JavaScript autorizados" y en Firebase Auth → Dominios autorizados.'
+    );
   }
+  if (/popup|blocked|closed|canceled|cancelled/i.test(message)) {
+    return 'Ventana de Google cerrada o bloqueada. Intenta de nuevo.';
+  }
+  return message || 'No se pudo iniciar sesión con Google';
 }
 
 let completingRedirect = false;
 
+/** Completa el retorno de signInWithRedirect (Firebase Auth). */
 export async function completeGoogleRedirect(): Promise<User | null> {
   if (completingRedirect || typeof window === 'undefined') return null;
-  const hash = window.location.hash?.replace(/^#/, '');
-  if (!hash) return null;
-  const params = new URLSearchParams(hash);
-  const oauthError = params.get('error');
-  const idToken = params.get('id_token');
-  if (!oauthError && !idToken) return null;
-
   completingRedirect = true;
-  window.history.replaceState({}, document.title, window.location.pathname);
   try {
-    if (oauthError) {
-      throw new Error(params.get('error_description') || oauthError);
-    }
-    const credential = GoogleAuthProvider.credential(idToken);
-    const result = await signInWithCredential(auth, credential);
-    return result.user;
+    const result = await getRedirectResult(auth);
+    return result?.user ?? null;
+  } catch (err) {
+    console.warn('[DomiClick] Google redirect', err);
+    throw new Error(describeGoogleAuthError(err));
   } finally {
     completingRedirect = false;
   }
@@ -145,36 +143,37 @@ export function userToProfile(user: User): CustomerProfile {
 }
 
 export async function signInWithGoogle(): Promise<User> {
-  const clientId = oauthClientId();
-  if (!clientId) {
-    throw new Error('Falta el OAuth Client ID de Google.');
+  if (!oauthClientId()) {
+    throw new Error('Falta el OAuth Client ID de Google (VITE_FIREBASE_OAUTH_CLIENT_ID).');
   }
-  const oauth2 = window.google?.accounts?.oauth2;
-  if (!oauth2) {
-    throw new Error(
-      'Google aún se está cargando. Espera un segundo y vuelve a iniciar sesión.'
-    );
+
+  try {
+    const pending = await getRedirectResult(auth);
+    if (pending?.user) return pending.user;
+  } catch (err) {
+    throw new Error(describeGoogleAuthError(err));
   }
-  const accessToken = await new Promise<string>((resolve, reject) => {
-    const client = oauth2.initTokenClient({
-      client_id: clientId,
-      scope: 'openid email profile',
-      callback: (res) => {
-        if (res.error || !res.access_token) {
-          reject(new Error(res.error || 'Google no devolvió token'));
-          return;
-        }
-        resolve(res.access_token);
-      },
-      error_callback: (err) => {
-        reject(new Error(err?.message || err?.type || 'Login Google cancelado'));
-      },
+
+  if (isMobileBrowser()) {
+    await signInWithRedirect(auth, googleProvider);
+    return new Promise(() => {
+      /* La página redirige a Google y vuelve sola */
     });
-    client.requestAccessToken({ prompt: 'select_account' });
-  });
-  const credential = GoogleAuthProvider.credential(null, accessToken);
-  const result = await signInWithCredential(auth, credential);
-  return result.user;
+  }
+
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/popup|blocked|closed|canceled|cancelled/i.test(message)) {
+      await signInWithRedirect(auth, googleProvider);
+      return new Promise(() => {
+        /* fallback redirect */
+      });
+    }
+    throw new Error(describeGoogleAuthError(err));
+  }
 }
 
 export async function signOutCustomer() {

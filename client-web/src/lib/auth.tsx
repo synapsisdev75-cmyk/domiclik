@@ -39,9 +39,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void completeGoogleRedirect().catch((err) => {
-      console.warn('[auth] Google redirect', err);
-    });
+    void completeGoogleRedirect()
+      .then((user) => {
+        if (user) setError(null);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Error al volver de Google');
+      });
     const unsub = subscribeAuth(async (next) => {
       setUser(next);
       if (next) {
