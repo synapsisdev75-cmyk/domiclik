@@ -67,7 +67,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   const [delivery, setDelivery] = useState<LatLng | null>(null);
   const [path, setPath] = useState<LatLng[]>([]);
   const [routeKm, setRouteKm] = useState(0);
-  const [routeMin, setRouteMin] = useState(0);
+  const [, setRouteMin] = useState(0);
   const [routeProvider, setRouteProvider] = useState<'google' | 'osrm' | 'approx' | null>(null);
   const [pickMode, setPickMode] = useState<MapPickMode>('pickup');
   const [geoBusy, setGeoBusy] = useState(false);

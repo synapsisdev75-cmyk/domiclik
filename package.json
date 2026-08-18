@@ -10,6 +10,10 @@
     "purge:demo": "tsx scripts/purge-demo-data.ts",
     "build": "vite build",
     "build:client": "npm run build --prefix client-web",
+    "build:all": "npm run build && npm run build:client",
+    "deploy:hosting": "npm run build:all && npx firebase deploy --only hosting",
+    "deploy:firebase": "npm run build:all && npm --prefix functions install && npx firebase deploy",
+    "deploy:rules": "npx firebase deploy --only firestore:rules,storage",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
@@ -37,6 +41,7 @@
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "firebase-tools": "^15.27.0",
     "sharp": "^0.35.3",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
