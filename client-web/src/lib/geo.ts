@@ -4,6 +4,14 @@ import { searchLocalPlaces } from './villavicencioPlaces';
 
 export const VILLAVICENCIO_CENTER = { lat: 4.142, lng: -73.6266 };
 
+/** Villavicencio + Restrepo, Acacías, Cumaral y vía Puerto López. */
+export const VILLAVICENCIO_MAP_BOUNDS = {
+  south: 3.95,
+  west: -73.88,
+  north: 4.32,
+  east: -73.38,
+};
+
 export type LatLng = { lat: number; lng: number };
 
 export function haversineKm(a: LatLng, b: LatLng): number {

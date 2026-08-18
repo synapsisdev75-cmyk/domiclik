@@ -6,7 +6,7 @@ import {
   useMap,
 } from '@vis.gl/react-google-maps';
 import type { LatLng } from '../lib/geo';
-import { VILLAVICENCIO_CENTER } from '../lib/geo';
+import { VILLAVICENCIO_CENTER, VILLAVICENCIO_MAP_BOUNDS } from '../lib/geo';
 import { GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_MAP_ID } from '../lib/config';
 
 export type MapPickMode = 'pickup' | 'delivery' | null;
@@ -227,7 +227,17 @@ function InnerMap(props: RouteMapPickerProps) {
   return (
     <Map
       defaultCenter={{ lat: center.lat, lng: center.lng }}
-      defaultZoom={13}
+      defaultZoom={12}
+      minZoom={10}
+      restriction={{
+        latLngBounds: {
+          north: VILLAVICENCIO_MAP_BOUNDS.north,
+          south: VILLAVICENCIO_MAP_BOUNDS.south,
+          east: VILLAVICENCIO_MAP_BOUNDS.east,
+          west: VILLAVICENCIO_MAP_BOUNDS.west,
+        },
+        strictBounds: false,
+      }}
       mapId={GOOGLE_MAPS_MAP_ID}
       colorScheme="DARK"
       gestureHandling="greedy"

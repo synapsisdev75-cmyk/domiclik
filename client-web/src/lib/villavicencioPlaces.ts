@@ -1,4 +1,14 @@
 import type { PlaceSuggestion } from './geo';
+import gazetteer from '../data/villavicencio-map.json' with { type: 'json' };
+
+type NamedPlace = {
+  label: string;
+  secondary: string;
+  kind: string;
+  aliases?: string[];
+  lat: number;
+  lng: number;
+};
 
 /** Sitios frecuentes de Villavicencio para adivinar mientras el usuario escribe. */
 export const VILLAVICENCIO_PLACES: Array<{
@@ -242,34 +252,51 @@ function fold(s: string) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+const MAP_INDEX: NamedPlace[] = (gazetteer.places as NamedPlace[]).map((p) => ({
+  ...p,
+  aliases: [],
+}));
+
+function scorePlace(place: NamedPlace, q: string): number {
+  const label = fold(place.label);
+  const hay = fold([place.label, place.secondary, place.kind, ...(place.aliases || [])].join(' '));
+  if (label === q) return 120;
+  if (label.startsWith(q) || (place.aliases || []).some((a) => fold(a).startsWith(q))) return 100;
+  if ((place.aliases || []).some((a) => fold(a) === q || fold(a).includes(q))) return 80;
+  if (hay.includes(q)) return 50;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const hits = tokens.filter((t) => hay.includes(t)).length;
+  if (hits) return 20 + hits * 10;
+  return 0;
+}
+
 export function searchLocalPlaces(query: string): PlaceSuggestion[] {
   const q = fold(query.trim());
   if (q.length < 2) return [];
 
-  const scored = VILLAVICENCIO_PLACES.map((place, i) => {
-    const hay = fold([place.label, place.secondary, place.kind, ...place.aliases].join(' '));
-    let score = 0;
-    if (fold(place.label).startsWith(q) || place.aliases.some((a) => fold(a).startsWith(q))) score = 100;
-    else if (place.aliases.some((a) => fold(a) === q || fold(a).includes(q))) score = 80;
-    else if (hay.includes(q)) score = 50;
-    else {
-      const tokens = q.split(/\s+/).filter(Boolean);
-      const hits = tokens.filter((t) => hay.includes(t)).length;
-      if (hits) score = 20 + hits * 10;
-    }
-    return { place, score, i };
-  })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score || a.i - b.i)
-    .slice(0, 8);
+  const pool = [...VILLAVICENCIO_PLACES, ...MAP_INDEX];
+  const seen = new Set<string>();
+  const scored: Array<{ place: NamedPlace; score: number; i: number }> = [];
 
-  return scored.map(({ place }) => ({
-    id: `local-${place.lat}-${place.lng}-${place.label}`,
-    label: place.label,
-    secondary: place.secondary,
-    kind: place.kind,
-    source: 'local' as const,
-    lat: place.lat,
-    lng: place.lng,
-  }));
+  pool.forEach((place, i) => {
+    const score = scorePlace(place, q);
+    if (!score) return;
+    const key = `${fold(place.label)}|${place.lat.toFixed(3)}|${place.lng.toFixed(3)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    scored.push({ place, score, i });
+  });
+
+  return scored
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .slice(0, 8)
+    .map(({ place }) => ({
+      id: `local-${place.lat}-${place.lng}-${place.label}`,
+      label: place.label,
+      secondary: place.secondary,
+      kind: place.kind,
+      source: 'local' as const,
+      lat: place.lat,
+      lng: place.lng,
+    }));
 }

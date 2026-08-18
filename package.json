@@ -8,6 +8,7 @@
     "dev:client": "npm run dev --prefix client-web",
     "server": "tsx server/index.ts",
     "purge:demo": "tsx scripts/purge-demo-data.ts",
+    "map:villavicencio": "node scripts/download-villavicencio-map.mjs",
     "build": "vite build",
     "build:client": "npm run build --prefix client-web",
     "build:all": "npm run build && npm run build:client",
