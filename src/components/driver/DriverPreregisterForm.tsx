@@ -188,7 +188,7 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
           Solicitud de Ingreso para Transporte Moto
         </h2>
         <p className="text-xs text-slate-300 mt-1">
-          Completa tus datos personales y de tu motocicleta. Un administrador evaluará tu perfil para autorizar tu cuenta en el sistema de mensajería y paquetería de Villavicencio.
+          Completa tus datos personales y de tu motocicleta. Un administrador evaluará tu perfil para autorizar tu cuenta en Domiclick.
         </p>
       </div>
 

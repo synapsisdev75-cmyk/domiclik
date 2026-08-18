@@ -16,6 +16,7 @@ import {
   setDriverSuspended,
   toggleDriverActiveState,
 } from '../../lib/firebase';
+import { isLiveOrderStatus } from '../../lib/orderFlow';
 import {
   DEFAULT_PAYROLL_SETTINGS,
   buildDailySeries,
@@ -239,7 +240,7 @@ export const AdminControlCenter: React.FC<Props> = ({
 
   const delivered = scopedOrders.filter((o) => o.status === 'delivered').length;
   const pending = scopedOrders.filter((o) => o.status === 'pending').length;
-  const transit = scopedOrders.filter((o) => o.status === 'in_transit' || o.status === 'assigned').length;
+  const transit = scopedOrders.filter((o) => isLiveOrderStatus(o.status)).length;
   const cancelled = scopedOrders.filter((o) => o.status === 'cancelled').length;
   const revenue = scopedOrders
     .filter((o) => o.status === 'delivered')

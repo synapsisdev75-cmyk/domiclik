@@ -305,20 +305,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
               <div className="mt-6 inline-flex items-center rounded-full border border-[#2B6CFF]/25 bg-[#0b1220]/70 px-3.5 py-1.5">
                 <span className="text-[10px] font-semibold tracking-[0.16em] text-[#7aa2ff] uppercase">
-                  Plataforma logística inteligente
+                  Plataforma de operación Domiclick
                 </span>
               </div>
             </div>
 
             <div className="space-y-4">
               <h1 className="text-[40px] xl:text-[46px] font-extrabold leading-[1.12] tracking-tight text-white">
-                <span className="text-[#2B6CFF]">Logística</span> y mensajería
+                <span className="text-[#2B6CFF]">Encargos</span> locales
                 <br />
                 <span className="text-[#FF5722]">a un click.</span>
               </h1>
               <p className="text-[15px] text-slate-400 font-normal max-w-md leading-relaxed">
-                Gestiona despachos, monitorea tu flota y controla cada entrega desde una sola
-                plataforma.
+                Software para conectar mandados prepagados con la flota de Domiclick en Villavicencio.
               </p>
             </div>
 
@@ -358,7 +357,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           <div className="relative z-10 login-left-enter" style={{ animationDelay: '0.12s' }}>
             <div className="inline-flex items-center gap-2 rounded-full border border-[#1a2744] bg-[#0b1220]/80 px-3.5 py-2 text-[12px] text-slate-300">
               <MapPin className="w-3.5 h-3.5 text-[#2B6CFF]" />
-              <span>Servicio logístico en Villavicencio</span>
+              <span>Operación en Villavicencio</span>
             </div>
           </div>
         </section>

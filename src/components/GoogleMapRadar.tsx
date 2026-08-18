@@ -4,6 +4,7 @@ import { MotorizadoDriver, DeliveryOrder } from '../types';
 import { VILLAVICENCIO_CENTER } from '../data/villavicencio';
 import { BRAND } from './brand/BrandAssets';
 import { calculateOptimalRoute } from '../utils/routing';
+import { isLiveOrderStatus } from '../lib/orderFlow';
 
 const MAP_ID =
   (typeof import.meta !== 'undefined' &&
@@ -27,8 +28,8 @@ type RouteKind = 'solicitud' | 'proceso';
 
 function routeKind(status: DeliveryOrder['status']): RouteKind | null {
   if (status === 'pending') return 'solicitud';
-  if (status === 'assigned' || status === 'in_transit') return 'proceso';
-  return null;
+  if (status === 'cancelled' || status === 'delivered') return null;
+  return 'proceso';
 }
 
 function routeColor(kind: RouteKind) {
@@ -62,9 +63,7 @@ function StreetRoutesLayer({ orders }: { orders: DeliveryOrder[] }) {
     const solicitudes = withCoords
       .filter((o) => o.status === 'pending')
       .slice(0, 8);
-    const proceso = withCoords.filter(
-      (o) => o.status === 'assigned' || o.status === 'in_transit'
-    );
+    const proceso = withCoords.filter((o) => o.status !== 'pending');
     // En proceso primero (prioridad visual), luego solicitudes
     return [...proceso, ...solicitudes];
   }, [orders]);
@@ -186,9 +185,7 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
   const approved = drivers.filter((d) => d.status === 'approved');
 
   const solicitudCount = orders.filter((o) => o.status === 'pending').length;
-  const procesoCount = orders.filter(
-    (o) => o.status === 'assigned' || o.status === 'in_transit'
-  ).length;
+  const procesoCount = orders.filter((o) => isLiveOrderStatus(o.status)).length;
 
   return (
     <div className={`relative ${height} w-full overflow-hidden bg-[#0a0e16]`}>

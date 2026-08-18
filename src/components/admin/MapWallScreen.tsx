@@ -13,6 +13,7 @@ import { GoogleMapRadar, getGoogleMapsApiKey } from '../GoogleMapRadar';
 import { BrandIcon } from '../brand/BrandAssets';
 import { DomiMotoIcon, DomiTowerIcon, DomiCargoIcon, DomiRadarIcon } from '../ui/CustomIcons';
 import { MapPin, MonitorSmartphone } from 'lucide-react';
+import { isLiveOrderStatus } from '../../lib/orderFlow';
 
 export function isMapWallView(): boolean {
   if (typeof window === 'undefined') return false;
@@ -48,7 +49,7 @@ export const MapWallScreen: React.FC = () => {
   useEffect(() => {
     document.title = 'DomiClick · Radar (pantalla)';
     return () => {
-      document.title = 'DomiClick - Logística & Mensajería en Villavicencio';
+      document.title = 'DomiClick — Central de operación';
     };
   }, []);
 
@@ -100,7 +101,7 @@ export const MapWallScreen: React.FC = () => {
   const activeDrivers = approvedDrivers.filter((d) => d.isActive);
   const pendingOrders = orders.filter((o) => o.status === 'pending').length;
   const transitOrders = orders.filter(
-    (o) => o.status === 'in_transit' || o.status === 'assigned'
+    (o) => isLiveOrderStatus(o.status)
   ).length;
   const todayKey = new Date().toISOString().split('T')[0];
   const deliveredToday = orders.filter(

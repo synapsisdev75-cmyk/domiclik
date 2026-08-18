@@ -77,6 +77,8 @@ export async function submitOrder(
     pricePerKm: payload.pricePerKm,
     peakMultiplier: payload.peakMultiplier,
     scheduledFor: payload.scheduledFor,
+    invoiceNumber: payload.invoiceNumber,
+    invoicePhotoUrl: payload.invoicePhotoUrl,
     sourceSiteId: SITE_ID,
   });
 }

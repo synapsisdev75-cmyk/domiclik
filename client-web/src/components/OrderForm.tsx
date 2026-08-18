@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { CalendarClock, Loader2, MapPinned, Navigation, Package } from 'lucide-react';
+import { CalendarClock, Loader2, MapPinned, Package } from 'lucide-react';
 import { submitOrder } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   estimateRoute,
   estimateRouteWithGoogle,
-  geocodeAddress,
   reverseGeocode,
   type LatLng,
 } from '../lib/geo';
@@ -23,6 +22,7 @@ import {
   type ShippingQuote,
 } from '../lib/pricing';
 import type { IngestOrderResponse } from '../contracts/salesIngest';
+import { PlaceSearchField } from './PlaceSearchField';
 import { RouteMapPicker, type MapPickMode } from './RouteMapPicker';
 
 export type OrderFormValues = {
@@ -35,6 +35,7 @@ export type OrderFormValues = {
   declaredValue: string;
   notes: string;
   scheduledFor: string;
+  invoiceNumber: string;
 };
 
 const INITIAL: OrderFormValues = {
@@ -47,6 +48,7 @@ const INITIAL: OrderFormValues = {
   declaredValue: '',
   notes: '',
   scheduledFor: '',
+  invoiceNumber: '',
 };
 
 interface OrderFormProps {
@@ -259,31 +261,6 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
     });
   }, []);
 
-  async function geocodeField(kind: 'pickup' | 'delivery') {
-    const text = kind === 'pickup' ? values.pickupAddress : values.deliveryAddress;
-    setError(null);
-    setGeoBusy(true);
-    try {
-      const hit = await geocodeAddress(text);
-      if (!hit) {
-        setError(
-          `No encontramos esa dirección. Márcala en el mapa (${kind === 'pickup' ? 'recolección' : 'entrega'}).`,
-        );
-        return;
-      }
-      setPath([]);
-      if (kind === 'pickup') {
-        setPickup({ lat: hit.lat, lng: hit.lng });
-        update('pickupAddress', hit.label);
-      } else {
-        setDelivery({ lat: hit.lat, lng: hit.lng });
-        update('deliveryAddress', hit.label);
-      }
-    } finally {
-      setGeoBusy(false);
-    }
-  }
-
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -352,6 +329,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         pricePerKm: quote.pricePerKm,
         peakMultiplier: quote.multiplier,
         scheduledFor: scheduled.toISOString(),
+        invoiceNumber: values.invoiceNumber.trim() || undefined,
       });
 
       if (!result.trackingCode) {
@@ -365,6 +343,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         customerEmail: profile.email || '',
         customerPhone: phone,
         scheduledFor: toDatetimeLocalValue(min),
+        invoiceNumber: '',
       });
       setPickup(null);
       setDelivery(null);
@@ -495,6 +474,38 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             </div>
           </div>
 
+          <PlaceSearchField
+            label="Punto de recolección (A) *"
+            required
+            accent="pickup"
+            value={values.pickupAddress}
+            placeholder="Busca calle, barrio, parque, hospital, Unicentro…"
+            onQueryChange={(v) => update('pickupAddress', v)}
+            onPlacePicked={(hit) => {
+              draggingRef.current = false;
+              setPath([]);
+              setPickup({ lat: hit.lat, lng: hit.lng });
+              setPickMode('delivery');
+              setError(null);
+            }}
+          />
+
+          <PlaceSearchField
+            label="Punto de entrega (B) *"
+            required
+            accent="delivery"
+            value={values.deliveryAddress}
+            placeholder="Busca avenida, urbanización, colegio, clínica…"
+            onQueryChange={(v) => update('deliveryAddress', v)}
+            onPlacePicked={(hit) => {
+              draggingRef.current = false;
+              setPath([]);
+              setDelivery({ lat: hit.lat, lng: hit.lng });
+              setPickMode(null);
+              setError(null);
+            }}
+          />
+
           <RouteMapPicker
             pickup={pickup}
             delivery={delivery}
@@ -524,60 +535,11 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             </div>
           ) : (
             <p className="text-xs text-[var(--domi-muted)]">
-              Marca <span className="text-white">A (recolección)</span> y{' '}
-              <span className="text-white">B (entrega)</span>. Arrastra los pines: la ruta se
-              recalcula al soltar.
+              Escribe y elige una sugerencia: el pin se marca en el mapa. También puedes tocar el
+              mapa o arrastrar A / B.
             </p>
           )}
         </div>
-
-        <label className="block sm:col-span-2">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Dirección de recolección (A) *
-          </span>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              className="field-input"
-              required
-              value={values.pickupAddress}
-              onChange={(e) => update('pickupAddress', e.target.value)}
-              placeholder="Ej. C.C. Unicentro, punto de salida"
-            />
-            <button
-              type="button"
-              className="cta-ghost shrink-0"
-              disabled={geoBusy || values.pickupAddress.trim().length < 4}
-              onClick={() => void geocodeField('pickup')}
-            >
-              <Navigation className="h-4 w-4" aria-hidden />
-              Ubicar
-            </button>
-          </div>
-        </label>
-
-        <label className="block sm:col-span-2">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Dirección de entrega (B) *
-          </span>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              className="field-input"
-              required
-              value={values.deliveryAddress}
-              onChange={(e) => update('deliveryAddress', e.target.value)}
-              placeholder="Calle 38 # 29-10, Barzal"
-            />
-            <button
-              type="button"
-              className="cta-ghost shrink-0"
-              disabled={geoBusy || values.deliveryAddress.trim().length < 4}
-              onClick={() => void geocodeField('delivery')}
-            >
-              <Navigation className="h-4 w-4" aria-hidden />
-              Ubicar
-            </button>
-          </div>
-        </label>
 
         <label className="block sm:col-span-2">
           <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
@@ -596,6 +558,22 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           <span className="mt-1 block text-[11px] text-[var(--domi-muted)]">
             Mínimo ~{scheduleBounds.leadMin} min (viaje + margen según km y hora pico/normal a 60–75
             km/h) · máximo 15 días.
+          </span>
+        </label>
+
+        <label className="block sm:col-span-2">
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+            Número de factura o orden de compra *
+          </span>
+          <input
+            className="field-input"
+            required
+            value={values.invoiceNumber}
+            onChange={(e) => update('invoiceNumber', e.target.value)}
+            placeholder="Ej. FAC-1024 / número de pedido del restaurante"
+          />
+          <span className="mt-1 block text-[11px] text-[var(--domi-muted)]">
+            El repartidor lo valida en el establecimiento. Adjunta también notas si hay foto o referencia.
           </span>
         </label>
 

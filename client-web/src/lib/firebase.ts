@@ -218,16 +218,26 @@ export type PublicOrderTracking = {
   createdAt?: string;
   updatedAt?: string;
   etaText?: string;
+  assignedDriverPhone?: string | null;
+  timeline?: Array<{ at?: string; to?: string; note?: string }>;
 };
 
 function etaForStatus(status: string): string {
   switch (status) {
     case 'pending':
-      return 'Central está asignando un repartidor';
+      return 'Central está asignando un Domiclick';
     case 'assigned':
-      return 'Repartidor asignado · en preparación';
+    case 'accepted':
+      return 'Tu Domiclick ya va al establecimiento';
+    case 'en_route_origin':
+      return 'En camino al punto de recogida';
+    case 'at_origin':
+      return 'Validando tu número de compra en el sitio';
+    case 'picked_up':
     case 'in_transit':
-      return 'En camino · llegada estimada en minutos';
+      return 'Pedido en camino · llegada en minutos';
+    case 'at_destination':
+      return 'Está a pocos minutos de tu dirección';
     case 'delivered':
       return 'Entrega completada';
     case 'cancelled':
@@ -265,6 +275,8 @@ export async function findOrderByTrackingCode(code: string): Promise<PublicOrder
     description: data.description,
     assignedDriverId: data.assignedDriverId || null,
     assignedDriverName: data.assignedDriverName || null,
+    assignedDriverPhone: data.assignedDriverPhone || null,
+    timeline: Array.isArray(data.timeline) ? data.timeline : [],
     serviceRating: data.serviceRating,
     ratingComment: data.ratingComment,
     ratedAt: data.ratedAt,
@@ -356,6 +368,8 @@ export type ClientOrderInput = {
   peakMultiplier?: number;
   scheduledFor?: string;
   sourceSiteId: string;
+  invoiceNumber?: string;
+  invoicePhotoUrl?: string;
 };
 
 /**
@@ -407,6 +421,9 @@ export async function createClientOrder(input: ClientOrderInput) {
     assignedDriverId: null,
     assignedDriverName: null,
     notes: input.notes || '',
+    invoiceNumber: input.invoiceNumber || '',
+    invoicePhotoUrl: input.invoicePhotoUrl || '',
+    timeline: [{ at: now, to: 'pending', byRole: 'customer', note: 'Solicitud creada' }],
     sourceSiteId: input.sourceSiteId,
     externalOrderId: '',
     createdAt: now,

@@ -57,7 +57,17 @@ export interface MotorizadoDriver {
   updatedAt?: string;
 }
 
-export type OrderStatus = 'pending' | 'assigned' | 'in_transit' | 'delivered' | 'cancelled';
+export type OrderStatus =
+  | 'pending'
+  | 'assigned'
+  | 'accepted'
+  | 'en_route_origin'
+  | 'at_origin'
+  | 'picked_up'
+  | 'in_transit'
+  | 'at_destination'
+  | 'delivered'
+  | 'cancelled';
 
 /** Pedido entrante desde página de ventas autorizada (tubo / webhook) */
 export interface SalesInboundOrderPayload {
@@ -107,6 +117,19 @@ export interface DeliveryOrder {
   assignedDriverName: string | null;
   assignedDriverPhone?: string | null;
   notes?: string;
+  /** Número de factura / orden de compra prepagada */
+  invoiceNumber?: string;
+  /** Foto de la factura para validar en el establecimiento */
+  invoicePhotoUrl?: string;
+  /** Trazabilidad de estados (matriz maestra) */
+  timeline?: Array<{
+    at: string;
+    from?: string;
+    to: string;
+    byRole?: string;
+    byName?: string;
+    note?: string;
+  }>;
   /**
    * PIN aleatorio que el cliente da al repartidor.
    * Obligatorio para marcar entrega exitosa.
@@ -272,6 +295,7 @@ export interface OpsIncident {
   driverName?: string;
   reportedByRole: 'admin' | 'driver';
   reportedByName: string;
+  category?: string;
   title: string;
   description: string;
   status: IncidentStatus;

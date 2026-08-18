@@ -5,8 +5,7 @@
   "targets": {
     "gen-lang-client-0954482957": {
       "hosting": {
-        "landing": ["domiclick-96bd8"],
-        "ops": ["gen-lang-client-0954482957"]
+        "landing": ["gen-lang-client-0954482957"]
       }
     }
   }

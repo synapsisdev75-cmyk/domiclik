@@ -1,5 +1,6 @@
 import { ArrowRight, MapPin } from 'lucide-react';
 import { BRAND } from './BrandLogo';
+import { BRAND_SUBLINE, BRAND_TAGLINE, BRAND_WELCOME } from '../lib/brandCopy';
 
 function HeroRouteOverlay() {
   return (
@@ -67,10 +68,10 @@ export function Hero({ onCtaClick }: HeroProps) {
             Villavicencio, Meta
           </p>
           <h1 className="animate-fade-up-delay font-display text-4xl font-extrabold leading-[1.05] tracking-tight text-white sm:text-5xl md:text-6xl">
-            Tu entrega, a un click
+            {BRAND_TAGLINE}
           </h1>
           <p className="animate-fade-up-delay-2 mt-4 max-w-xl text-base leading-relaxed text-[var(--domi-muted)] sm:text-lg">
-            Solicita mensajería y paquetería en moto. Seguimiento simple con tu código DomiClick.
+            {BRAND_WELCOME} {BRAND_SUBLINE}
           </p>
           <div className="animate-fade-up-delay-2 mt-8 flex flex-wrap gap-3">
             <button type="button" className="cta-primary" onClick={onCtaClick}>

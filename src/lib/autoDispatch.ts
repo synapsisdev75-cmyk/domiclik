@@ -5,6 +5,7 @@ import {
   MotorizadoDriver,
 } from '../types';
 import { DEFAULT_DISPATCH_SETTINGS } from './adminMetrics';
+import { isLiveOrderStatus } from './orderFlow';
 import { calculateOptimalRoute } from '../utils/routing';
 import { updateOrderFields, updateOrderStatus } from './firebase';
 
@@ -39,10 +40,7 @@ export type NearestDriverResult = {
 export function getBusyDriverIds(orders: DeliveryOrder[]): Set<string> {
   const busy = new Set<string>();
   for (const o of orders) {
-    if (
-      (o.status === 'assigned' || o.status === 'in_transit') &&
-      o.assignedDriverId
-    ) {
+    if (isLiveOrderStatus(o.status) && o.assignedDriverId) {
       busy.add(o.assignedDriverId);
     }
   }

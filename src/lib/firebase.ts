@@ -17,6 +17,7 @@ import {
   memoryLocalCache,
   enableNetwork,
   writeBatch,
+  arrayUnion,
 } from 'firebase/firestore';
 import {
   initializeAuth,
@@ -583,6 +584,13 @@ export async function confirmDeliveryWithCode(
     status: 'delivered',
     deliveryConfirmedAt: now,
     updatedAt: now,
+    timeline: arrayUnion({
+      at: now,
+      from: order.status,
+      to: 'delivered',
+      byRole: 'driver',
+      note: 'PIN validado',
+    }),
   });
 
   if (order.assignedDriverId) {
@@ -608,9 +616,15 @@ export async function updateOrderStatus(
   if (status === 'cancelled') {
     throw new Error('Usa cancelOrder: solo el administrador puede cancelar pedidos.');
   }
-  const updateData: Partial<DeliveryOrder> = {
+  const now = new Date().toISOString();
+  const updateData: Record<string, unknown> = {
     status,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
+    timeline: arrayUnion({
+      at: now,
+      to: status,
+      byName: driverName || '',
+    }),
   };
   if (driverId !== undefined) updateData.assignedDriverId = driverId;
   if (driverName !== undefined) updateData.assignedDriverName = driverName;

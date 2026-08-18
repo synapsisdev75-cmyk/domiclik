@@ -6,6 +6,7 @@ import {
   PayrollSettings,
   DispatchSettings,
 } from '../types';
+import { isLiveOrderStatus } from './orderFlow';
 
 export const DEFAULT_PAYROLL_SETTINGS: PayrollSettings = {
   id: 'payroll',
@@ -98,9 +99,7 @@ export function buildDriverStats(
       const mine = rangeOrders.filter((o) => o.assignedDriverId === driver.id);
       const delivered = mine.filter((o) => o.status === 'delivered');
       const cancelled = mine.filter((o) => o.status === 'cancelled');
-      const inProgress = mine.filter(
-        (o) => o.status === 'assigned' || o.status === 'in_transit'
-      );
+      const inProgress = mine.filter((o) => isLiveOrderStatus(o.status));
       const revenue = delivered.reduce((s, o) => s + (Number(o.shippingFee) || 0), 0);
       const drvReviews = reviews.filter((r) => r.driverId === driver.id);
       const reviewAvg =

@@ -15,6 +15,7 @@ import {
   DomiCargoIcon,
   DomiHelmetIcon,
 } from '../ui/CustomIcons';
+import { ORDER_STATUS_LABEL, isLiveOrderStatus } from '../../lib/orderFlow';
 import { openMapWallWindow } from './MapWallScreen';
 
 interface AdminDashboardProps {
@@ -48,7 +49,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const activeDrivers = approvedDrivers.filter((d) => d.isActive);
   const pendingOrders = orders.filter((o) => o.status === 'pending').length;
   const transitOrders = orders.filter(
-    (o) => o.status === 'in_transit' || o.status === 'assigned'
+    (o) => isLiveOrderStatus(o.status)
   ).length;
   const todayKey = new Date().toISOString().split('T')[0];
   const deliveredToday = orders.filter(
@@ -355,16 +356,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 ) : (
                   displayOrders.slice(0, 8).map((ord) => {
                     let badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-                    let badgeLabel = 'Pendiente';
-                    if (ord.status === 'assigned') {
-                      badgeColor = 'bg-blue-500/20 text-blue-300 border-blue-500/40';
-                      badgeLabel = 'En Asignación';
-                    } else if (ord.status === 'in_transit') {
-                      badgeColor = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
-                      badgeLabel = 'En Tránsito';
-                    } else if (ord.status === 'delivered') {
+                    const badgeLabel = ORDER_STATUS_LABEL[ord.status] || ord.status;
+                    if (ord.status === 'delivered') {
                       badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
-                      badgeLabel = 'Entregado';
+                    } else if (ord.status === 'cancelled') {
+                      badgeColor = 'bg-red-500/20 text-red-300 border-red-500/40';
+                    } else if (isLiveOrderStatus(ord.status)) {
+                      badgeColor = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
                     }
                     return (
                       <button

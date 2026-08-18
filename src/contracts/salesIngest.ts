@@ -37,6 +37,8 @@ export type IngestOrderBody = {
   pricePerKm?: number;
   peakMultiplier?: number;
   scheduledFor?: string;
+  invoiceNumber?: string;
+  invoicePhotoUrl?: string;
 };
 
 export type IngestOrderResponse = {

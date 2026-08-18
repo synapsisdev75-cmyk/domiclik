@@ -32,6 +32,8 @@ import {
   Camera,
   Gauge,
 } from 'lucide-react';
+import { INCIDENT_REASONS } from '../../lib/brandCopy';
+import { DRIVER_NEXT_ACTION, ORDER_STATUS_LABEL } from '../../lib/orderFlow';
 import { parseOdometerKm, summarizeDriverShift } from '../../lib/workShift';
 
 interface DriverDashboardProps {
@@ -61,6 +63,7 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
   const [deliveryBusy, setDeliveryBusy] = useState(false);
   const [incidentBusy, setIncidentBusy] = useState(false);
   const [incidentMsg, setIncidentMsg] = useState('');
+  const [incidentCategory, setIncidentCategory] = useState<string>(INCIDENT_REASONS[0]);
   const [gpsError, setGpsError] = useState('');
   const [liveCoords, setLiveCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsPermission, setGpsPermission] = useState<'unknown' | 'prompt' | 'granted' | 'denied'>(
@@ -345,16 +348,14 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
     }
   };
 
-  const handleReportIncident = async () => {
+  const handleReportIncident = async (panic = false) => {
     if (!currentActiveOrder) return;
-    const title =
-      window.prompt(
-        'Título de la incidencia (ej: Cliente no responde):',
-        'Problema en la entrega'
-      ) || '';
-    if (!title.trim()) return;
-    const description = window.prompt('Describe el problema para la torre:') || '';
-    if (!description.trim()) return;
+    const category = panic ? 'Accidente / incidente' : incidentCategory;
+    const title = panic ? 'Botón de pánico' : category;
+    const description = panic
+      ? 'El repartidor activó el botón de pánico. Contactar de inmediato.'
+      : window.prompt('Describe el problema para la torre:') || '';
+    if (!panic && !description.trim()) return;
     setIncidentBusy(true);
     setIncidentMsg('');
     try {
@@ -365,10 +366,15 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
         driverName: driver.fullName,
         reportedByRole: 'driver',
         reportedByName: driver.fullName,
-        title: title.trim(),
-        description: description.trim(),
+        category,
+        title,
+        description: description.trim() || title,
       });
-      setIncidentMsg('Incidencia enviada a la torre. El administrador la resolverá.');
+      setIncidentMsg(
+        panic
+          ? 'Alerta de pánico enviada a la torre.'
+          : 'Incidencia enviada a la torre. El administrador la resolverá.'
+      );
     } catch (err: any) {
       setIncidentMsg(err?.message || 'No se pudo reportar la incidencia.');
     } finally {
@@ -519,6 +525,14 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                     {currentActiveOrder.trackingCode}
                   </span>
                   <h3 className="text-lg font-bold text-white mt-1">{currentActiveOrder.description}</h3>
+                  <p className="text-[11px] text-cyan-300 font-semibold mt-1">
+                    {ORDER_STATUS_LABEL[currentActiveOrder.status]}
+                  </p>
+                  {currentActiveOrder.invoiceNumber ? (
+                    <p className="text-[11px] text-amber-200 mt-1">
+                      Factura / orden: {currentActiveOrder.invoiceNumber}
+                    </p>
+                  ) : null}
                   {currentActiveOrder.routeDistanceKm != null && (
                     <p className="text-[11px] text-slate-400 font-tech mt-1">
                       Ruta ~{currentActiveOrder.routeDistanceKm.toFixed(1)} km
@@ -562,20 +576,47 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                 <button
                   type="button"
                   disabled={incidentBusy}
-                  onClick={() => void handleReportIncident()}
+                  onClick={() => void handleReportIncident(true)}
+                  className="bg-red-600 text-white font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" /> Pánico
+                </button>
+                <select
+                  value={incidentCategory}
+                  onChange={(e) => setIncidentCategory(e.target.value)}
+                  className="bg-[#11141a] border border-[#2d3139] rounded-xl px-2 py-1.5 text-[10px] text-slate-200"
+                >
+                  {INCIDENT_REASONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={incidentBusy}
+                  onClick={() => void handleReportIncident(false)}
                   className="bg-amber-500/15 text-amber-300 border border-amber-500/40 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1"
                 >
                   <AlertTriangle className="w-3.5 h-3.5" /> Reportar incidencia
                 </button>
-                {currentActiveOrder.status === 'assigned' && (
+                {DRIVER_NEXT_ACTION[currentActiveOrder.status] && (
                   <button
-                    onClick={() => updateOrderStatus(currentActiveOrder.id, 'in_transit')}
+                    onClick={() =>
+                      updateOrderStatus(
+                        currentActiveOrder.id,
+                        DRIVER_NEXT_ACTION[currentActiveOrder.status]!.next,
+                        driver.id,
+                        driver.fullName
+                      )
+                    }
                     className="bg-emerald-500 text-black font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-1.5"
                   >
-                    <CheckCircle2 className="w-4 h-4" /> Iniciar tránsito
+                    <CheckCircle2 className="w-4 h-4" />
+                    {DRIVER_NEXT_ACTION[currentActiveOrder.status]!.label}
                   </button>
                 )}
-                {currentActiveOrder.status === 'in_transit' && (
+                {currentActiveOrder.status === 'at_destination' && (
                   <div className="w-full space-y-2">
                     <label className="block text-[10px] font-bold uppercase tracking-wide text-slate-400">
                       PIN del cliente (entrega exitosa)
@@ -606,7 +647,7 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                               deliveryPin
                             );
                             if (!res.ok) {
-                              setDeliveryPinError(res.error);
+                              setDeliveryPinError(res.ok === false ? res.error : 'PIN inválido');
                               return;
                             }
                             setDeliveryPin('');

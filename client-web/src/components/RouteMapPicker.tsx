@@ -140,6 +140,41 @@ function RoadPolyline({ path, fit }: { path: LatLng[]; fit: boolean }) {
   return null;
 }
 
+function FocusPins({
+  pickup,
+  delivery,
+  skipFit,
+}: {
+  pickup: LatLng | null;
+  delivery: LatLng | null;
+  skipFit: boolean;
+}) {
+  const map = useMap();
+  const last = useRef('');
+
+  useEffect(() => {
+    if (!map || skipFit) return;
+    const key = `${pickup?.lat},${pickup?.lng}|${delivery?.lat},${delivery?.lng}`;
+    if (key === last.current) return;
+    last.current = key;
+
+    if (pickup && delivery) {
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend(pickup);
+      bounds.extend(delivery);
+      map.fitBounds(bounds, 80);
+      return;
+    }
+    const one = pickup || delivery;
+    if (one) {
+      map.panTo(one);
+      if ((map.getZoom() || 13) < 15) map.setZoom(16);
+    }
+  }, [map, pickup, delivery, skipFit]);
+
+  return null;
+}
+
 function MapClickHandler({
   pickMode,
   onPick,
@@ -205,6 +240,7 @@ function InnerMap(props: RouteMapPickerProps) {
       className="h-full w-full"
     >
       <MapClickHandler pickMode={pickMode} onPick={onPick} />
+      <FocusPins pickup={pickup} delivery={delivery} skipFit={Boolean(routing)} />
       <RoadPolyline path={roadPath} fit={!routing} />
 
       {pickup ? (

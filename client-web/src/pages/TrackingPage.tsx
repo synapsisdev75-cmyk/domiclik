@@ -7,11 +7,17 @@ import { RatingForm } from '../components/RatingForm';
 import { AuthButton } from '../components/AuthButton';
 import { findOrderByTrackingCode, type PublicOrderTracking } from '../lib/firebase';
 import { useAuth } from '../lib/auth';
+import { pushForStatus } from '../lib/brandCopy';
 
 const STATUS_LABEL: Record<TrackingStatus, string> = {
   pending: 'Pendiente de asignación',
   assigned: 'Asignado a repartidor',
-  in_transit: 'En camino',
+  accepted: 'Repartidor aceptó',
+  en_route_origin: 'En camino al origen',
+  at_origin: 'En el establecimiento',
+  picked_up: 'Pedido recogido',
+  in_transit: 'En camino a ti',
+  at_destination: 'Muy cerca de tu dirección',
   delivered: 'Entregado',
   cancelled: 'Cancelado',
 };
@@ -19,7 +25,12 @@ const STATUS_LABEL: Record<TrackingStatus, string> = {
 const STATUS_COLOR: Record<TrackingStatus, string> = {
   pending: 'text-amber-300',
   assigned: 'text-[var(--domi-cyan)]',
+  accepted: 'text-[var(--domi-cyan)]',
+  en_route_origin: 'text-[var(--domi-cyan)]',
+  at_origin: 'text-[var(--domi-orange)]',
+  picked_up: 'text-[var(--domi-orange)]',
   in_transit: 'text-[var(--domi-orange)]',
+  at_destination: 'text-[var(--domi-green)]',
   delivered: 'text-[var(--domi-green)]',
   cancelled: 'text-red-300',
 };
@@ -87,6 +98,7 @@ export function TrackingPage() {
   }
 
   const status = data ? asStatus(data.status) : null;
+  const push = status ? pushForStatus(status) : null;
 
   return (
     <div className="min-h-screen">
@@ -168,6 +180,20 @@ export function TrackingPage() {
               {data.trackingCode}
             </p>
 
+            {push ? (
+              <div className="mt-5 rounded-xl border border-[rgba(43,108,255,0.35)] bg-[rgba(43,108,255,0.08)] px-4 py-4">
+                <p className="text-base font-bold text-white">{push.title}</p>
+                <p className="mt-1 text-sm text-[var(--domi-muted)]">{push.body}</p>
+              </div>
+            ) : null}
+
+            {data.assignedDriverName && status !== 'pending' && status !== 'cancelled' ? (
+              <p className="mt-4 text-sm text-[var(--domi-muted)]">
+                Domiclick:{' '}
+                <span className="text-white">{data.assignedDriverName}</span>
+              </p>
+            ) : null}
+
             {data.deliveryConfirmCode && status !== 'delivered' && status !== 'cancelled' ? (
               <div className="mt-5 rounded-xl border border-[rgba(255,87,34,0.35)] bg-[rgba(255,87,34,0.08)] px-4 py-4 text-center">
                 <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--domi-orange)]">
@@ -212,6 +238,27 @@ export function TrackingPage() {
               <p className="mt-3 text-xs text-[var(--domi-muted)]">
                 Actualizado: {new Date(data.updatedAt).toLocaleString('es-CO')}
               </p>
+            ) : null}
+
+            {data.timeline && data.timeline.length > 0 ? (
+              <ol className="mt-6 space-y-2 border-t border-[var(--domi-border)] pt-4">
+                <li className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                  Trazabilidad
+                </li>
+                {[...data.timeline]
+                  .slice()
+                  .reverse()
+                  .map((event, idx) => (
+                    <li key={`${event.at || idx}-${event.to || idx}`} className="text-sm text-[var(--domi-muted)]">
+                      <span className="text-white">{STATUS_LABEL[asStatus(String(event.to || ''))]}</span>
+                      {event.at ? (
+                        <span className="ml-2 text-xs">
+                          {new Date(event.at).toLocaleString('es-CO')}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+              </ol>
             ) : null}
 
             <button

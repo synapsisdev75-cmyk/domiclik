@@ -85,7 +85,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {isRegister ? 'Crear Cuenta en DomiClick' : 'Acceso Restringido DomiClick'}
           </h3>
           <p className="text-xs text-slate-400 mt-1">
-            Plataforma de Logística y Transporte en Villavicencio
+            Plataforma digital de encargos en Villavicencio
           </p>
         </div>
 

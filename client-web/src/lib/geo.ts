@@ -17,9 +17,205 @@ export function haversineKm(a: LatLng, b: LatLng): number {
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-export async function geocodeAddress(query: string): Promise<(LatLng & { label: string }) | null> {
+export type PlaceSuggestion = {
+  id: string;
+  label: string;
+  secondary: string;
+  kind: string;
+  source: 'google' | 'nominatim';
+  placeId?: string;
+  lat?: number;
+  lng?: number;
+};
+
+const PLACE_KIND_ES: Record<string, string> = {
+  hospital: 'Hospital',
+  doctor: 'Salud',
+  school: 'Colegio',
+  university: 'Universidad',
+  park: 'Parque',
+  route: 'Calle / avenida',
+  street_address: 'Dirección',
+  neighborhood: 'Barrio',
+  sublocality: 'Barrio',
+  locality: 'Zona',
+  shopping_mall: 'Centro comercial',
+  supermarket: 'Supermercado',
+  store: 'Local',
+  restaurant: 'Restaurante',
+  cafe: 'Café',
+  church: 'Iglesia',
+  pharmacy: 'Farmacia',
+  gas_station: 'Estación',
+  bank: 'Banco',
+  police: 'Policía',
+  stadium: 'Estadio',
+  airport: 'Aeropuerto',
+  bus_station: 'Terminal',
+  premise: 'Urbanización',
+  point_of_interest: 'Sitio',
+  establishment: 'Sitio',
+};
+
+function kindFromTypes(types: string[] | undefined): string {
+  if (!types?.length) return 'Lugar';
+  for (const t of types) {
+    if (PLACE_KIND_ES[t]) return PLACE_KIND_ES[t];
+  }
+  return 'Lugar';
+}
+
+function nominatimKind(cls: string | undefined, type: string | undefined): string {
+  if (type && PLACE_KIND_ES[type]) return PLACE_KIND_ES[type];
+  if (cls === 'highway' || type === 'residential') return 'Calle / avenida';
+  if (cls === 'amenity' && type === 'hospital') return 'Hospital';
+  if (cls === 'amenity' && (type === 'school' || type === 'college')) return 'Colegio';
+  if (cls === 'leisure' && type === 'park') return 'Parque';
+  if (cls === 'place' && (type === 'suburb' || type === 'neighbourhood')) return 'Barrio';
+  if (cls === 'landuse' && type === 'residential') return 'Urbanización';
+  return 'Lugar';
+}
+
+function googlePlacesReady(): typeof google.maps.places | null {
+  return (window as unknown as { google?: typeof google }).google?.maps?.places || null;
+}
+
+export async function searchPlaceSuggestions(query: string): Promise<PlaceSuggestion[]> {
   const q = query.trim();
-  if (q.length < 4) return null;
+  if (q.length < 2) return [];
+
+  const places = googlePlacesReady();
+  if (places?.AutocompleteService) {
+    try {
+      const service = new places.AutocompleteService();
+      const predictions = await new Promise<google.maps.places.AutocompletePrediction[]>(
+        (resolve) => {
+          service.getPlacePredictions(
+            {
+              input: q,
+              componentRestrictions: { country: 'co' },
+              locationBias: {
+                center: VILLAVICENCIO_CENTER,
+                radius: 28000,
+              },
+            },
+            (res, status) => {
+              if (
+                status !== places.PlacesServiceStatus.OK &&
+                status !== places.PlacesServiceStatus.ZERO_RESULTS
+              ) {
+                resolve([]);
+                return;
+              }
+              resolve(res || []);
+            },
+          );
+        },
+      );
+      if (predictions.length) {
+        return predictions.slice(0, 8).map((p) => ({
+          id: p.place_id,
+          placeId: p.place_id,
+          label: p.structured_formatting?.main_text || p.description,
+          secondary: p.structured_formatting?.secondary_text || 'Villavicencio, Meta',
+          kind: kindFromTypes(p.types),
+          source: 'google' as const,
+        }));
+      }
+    } catch (err) {
+      console.warn('[DomiClick] Places autocomplete', err);
+    }
+  }
+
+  const url =
+    'https://nominatim.openstreetmap.org/search?' +
+    new URLSearchParams({
+      q: `${q}, Villavicencio, Meta, Colombia`,
+      format: 'json',
+      addressdetails: '1',
+      limit: '8',
+      countrycodes: 'co',
+      viewbox: '-73.80,4.22,-73.50,4.04',
+      bounded: '0',
+    });
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as Array<{
+      place_id: number;
+      lat: string;
+      lon: string;
+      display_name: string;
+      name?: string;
+      class?: string;
+      type?: string;
+    }>;
+    return (data || []).map((item) => ({
+      id: `osm-${item.place_id}`,
+      label: item.name || item.display_name.split(',')[0],
+      secondary: item.display_name,
+      kind: nominatimKind(item.class, item.type),
+      source: 'nominatim' as const,
+      lat: Number(item.lat),
+      lng: Number(item.lon),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function resolvePlaceSuggestion(
+  suggestion: PlaceSuggestion,
+): Promise<(LatLng & { label: string }) | null> {
+  if (suggestion.lat != null && suggestion.lng != null) {
+    return {
+      lat: suggestion.lat,
+      lng: suggestion.lng,
+      label: suggestion.secondary || suggestion.label,
+    };
+  }
+  if (suggestion.placeId) {
+    const places = googlePlacesReady();
+    if (places?.PlacesService) {
+      const host = document.createElement('div');
+      const svc = new places.PlacesService(host);
+      const details = await new Promise<google.maps.places.PlaceResult | null>((resolve) => {
+        svc.getDetails(
+          {
+            placeId: suggestion.placeId!,
+            fields: ['geometry', 'formatted_address', 'name', 'types'],
+            language: 'es',
+          },
+          (place, status) => {
+            if (status !== places.PlacesServiceStatus.OK || !place?.geometry?.location) {
+              resolve(null);
+              return;
+            }
+            resolve(place);
+          },
+        );
+      });
+      const loc = details?.geometry?.location;
+      if (loc) {
+        return {
+          lat: loc.lat(),
+          lng: loc.lng(),
+          label: details.formatted_address || details.name || suggestion.label,
+        };
+      }
+    }
+  }
+  return geocodeAddressNominatim(qSafe(suggestion.label));
+}
+
+function qSafe(q: string) {
+  return q.trim();
+}
+
+async function geocodeAddressNominatim(q: string): Promise<(LatLng & { label: string }) | null> {
+  if (q.length < 3) return null;
   const url =
     'https://nominatim.openstreetmap.org/search?' +
     new URLSearchParams({
@@ -39,6 +235,17 @@ export async function geocodeAddress(query: string): Promise<(LatLng & { label: 
     lng: Number(data[0].lon),
     label: data[0].display_name,
   };
+}
+
+export async function geocodeAddress(query: string): Promise<(LatLng & { label: string }) | null> {
+  const q = query.trim();
+  if (q.length < 3) return null;
+  const hits = await searchPlaceSuggestions(q);
+  if (hits[0]) {
+    const resolved = await resolvePlaceSuggestion(hits[0]);
+    if (resolved) return resolved;
+  }
+  return geocodeAddressNominatim(q);
 }
 
 export async function reverseGeocode(lat: number, lng: number): Promise<string> {

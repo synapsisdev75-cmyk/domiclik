@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { MotorizadoDriver, DeliveryOrder } from '../types';
+import { isLiveOrderStatus } from '../lib/orderFlow';
 import { VILLAVICENCIO_CENTER, VILLAVICENCIO_KEY_POINTS } from '../data/villavicencio';
 import {
   calculateOptimalRoute,
@@ -381,7 +382,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       const color =
         order.status === 'delivered'
           ? '#FF5722'
-          : order.status === 'in_transit' || order.status === 'assigned'
+          : isLiveOrderStatus(order.status)
             ? '#2B6CFF'
             : '#FF8A00';
 
@@ -444,7 +445,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   useEffect(() => {
     if (!compactChrome || !mapInstanceRef.current) return;
     const routeOrder =
-      orders.find((o) => o.status === 'in_transit' && o.pickupCoords && o.deliveryCoords) ||
+      orders.find((o) => isLiveOrderStatus(o.status) && o.pickupCoords && o.deliveryCoords) ||
       orders.find((o) => o.pickupCoords && o.deliveryCoords);
     if (!routeOrder?.pickupCoords || !routeOrder?.deliveryCoords) return;
     const t = setTimeout(() => {

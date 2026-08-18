@@ -33,6 +33,8 @@ export type IngestOrderBody = {
   peakMultiplier?: number;
   /** ISO — entrega programada (máx. 15 días) */
   scheduledFor?: string;
+  invoiceNumber?: string;
+  invoicePhotoUrl?: string;
 };
 
 export type IngestOrderResponse = {
@@ -56,7 +58,12 @@ export type IngestErrorResponse = {
 export type TrackingStatus =
   | 'pending'
   | 'assigned'
+  | 'accepted'
+  | 'en_route_origin'
+  | 'at_origin'
+  | 'picked_up'
   | 'in_transit'
+  | 'at_destination'
   | 'delivered'
   | 'cancelled';
 

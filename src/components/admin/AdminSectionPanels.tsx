@@ -64,17 +64,18 @@ export type AdminSection =
   | 'usuarios'
   | 'ajustes';
 
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  pending: 'Pendiente',
-  assigned: 'En Asignación',
-  in_transit: 'En Tránsito',
-  delivered: 'Entregado',
-  cancelled: 'Cancelado',
-};
+import { ORDER_STATUS_LABEL, isLiveOrderStatus } from '../../lib/orderFlow';
 
 function statusBadge(status: OrderStatus) {
-  if (status === 'assigned') return 'bg-blue-500/20 text-blue-300 border-blue-500/40';
-  if (status === 'in_transit') return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
+  if (status === 'assigned' || status === 'accepted') return 'bg-blue-500/20 text-blue-300 border-blue-500/40';
+  if (
+    status === 'in_transit' ||
+    status === 'en_route_origin' ||
+    status === 'at_origin' ||
+    status === 'picked_up' ||
+    status === 'at_destination'
+  )
+    return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
   if (status === 'delivered') return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
   if (status === 'cancelled') return 'bg-red-500/20 text-red-300 border-red-500/40';
   return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
@@ -177,7 +178,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
   const transitOrders = useMemo(
     () =>
       orders
-        .filter((o) => o.status === 'in_transit' || o.status === 'assigned')
+        .filter((o) => isLiveOrderStatus(o.status))
         .filter(filterText),
     [orders, search]
   );
@@ -294,6 +295,11 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
               {ord.routeDurationMin != null ? ` · ~${ord.routeDurationMin} min` : ''}
             </div>
           )}
+          {ord.invoiceNumber ? (
+            <div className="text-[10px] text-amber-200/90 mt-0.5">
+              Factura / orden: {ord.invoiceNumber}
+            </div>
+          ) : null}
           {ord.sourceSiteId && (
             <div className="text-[10px] text-slate-500 font-tech">Origen: {ord.sourceSiteId}</div>
           )}
@@ -303,7 +309,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
         <span
           className={`text-[10px] font-tech font-bold px-2.5 py-1 rounded-lg border ${statusBadge(ord.status)}`}
         >
-          {STATUS_LABEL[ord.status]}
+          {ORDER_STATUS_LABEL[ord.status] || ord.status}
         </span>
         {showAssign && ord.status === 'pending' && approvedDrivers.length > 0 && (
           <select

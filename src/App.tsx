@@ -16,6 +16,7 @@ import {
 } from './lib/firebase';
 import { alertDeliveryComplete, alertOrderAssigned } from './lib/alerts';
 import { dispatchAllPendingOrders } from './lib/autoDispatch';
+import { isLiveOrderStatus } from './lib/orderFlow';
 import { DEFAULT_DISPATCH_SETTINGS } from './lib/adminMetrics';
 import type { DispatchSettings } from './types';
 import { HeaderBar } from './components/HeaderBar';
@@ -114,7 +115,7 @@ function MainApp() {
         d.location?.lng &&
         !orders.some(
           (o) =>
-            (o.status === 'assigned' || o.status === 'in_transit') &&
+            isLiveOrderStatus(o.status) &&
             o.assignedDriverId === d.id
         )
     );
