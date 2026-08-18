@@ -286,19 +286,8 @@ function InnerMap(props: RouteMapPickerProps) {
   );
 }
 
-export function RouteMapPicker(props: RouteMapPickerProps) {
+export function RouteMapPickerInner(props: RouteMapPickerProps) {
   const { heightClass = 'h-64 sm:h-80', routing } = props;
-
-  if (!GOOGLE_MAPS_API_KEY) {
-    return (
-      <div
-        className={`${heightClass} flex items-center justify-center rounded-xl border border-[var(--domi-border)] bg-[#0a0e16] px-4 text-center text-sm text-[var(--domi-muted)]`}
-      >
-        Falta <code className="text-[var(--domi-cyan)]">VITE_GOOGLE_MAPS_PLATFORM_KEY</code> en
-        client-web/.env
-      </div>
-    );
-  }
 
   return (
     <div
@@ -306,9 +295,7 @@ export function RouteMapPicker(props: RouteMapPickerProps) {
       role="application"
       aria-label="Mapa Google DomiClick"
     >
-      <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={['marker', 'routes', 'geometry', 'places']}>
-        <InnerMap {...props} />
-      </APIProvider>
+      <InnerMap {...props} />
 
       <div className="pointer-events-none absolute left-2 top-2 z-10 space-y-1 rounded-lg border border-[var(--domi-border)] bg-[#0a101c]/92 px-2 py-1.5 text-[10px]">
         <div className="font-bold text-[#2B6CFF]">A · Recolección (salida)</div>
@@ -330,5 +317,26 @@ export function RouteMapPicker(props: RouteMapPickerProps) {
         <div className="text-[8px] text-slate-400">Arrastra A / B · ruta se actualiza</div>
       </div>
     </div>
+  );
+}
+
+export function RouteMapPicker(props: RouteMapPickerProps) {
+  const { heightClass = 'h-64 sm:h-80' } = props;
+
+  if (!GOOGLE_MAPS_API_KEY) {
+    return (
+      <div
+        className={`${heightClass} flex items-center justify-center rounded-xl border border-[var(--domi-border)] bg-[#0a0e16] px-4 text-center text-sm text-[var(--domi-muted)]`}
+      >
+        Falta <code className="text-[var(--domi-cyan)]">VITE_GOOGLE_MAPS_PLATFORM_KEY</code> en
+        client-web/.env
+      </div>
+    );
+  }
+
+  return (
+    <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={['marker', 'routes', 'geometry', 'places']}>
+      <RouteMapPickerInner {...props} />
+    </APIProvider>
   );
 }

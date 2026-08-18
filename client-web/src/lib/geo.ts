@@ -80,94 +80,132 @@ function googlePlacesReady(): typeof google.maps.places | null {
   return (window as unknown as { google?: typeof google }).google?.maps?.places || null;
 }
 
-export async function searchPlaceSuggestions(query: string): Promise<PlaceSuggestion[]> {
-  const q = query.trim();
-  if (q.length < 2) return [];
+function placesFromLib(
+  placesLib?: google.maps.PlacesLibrary,
+): typeof google.maps.places | null {
+  if (placesLib) return placesLib as unknown as typeof google.maps.places;
+  return googlePlacesReady();
+}
 
-  const places = googlePlacesReady();
-  if (places?.AutocompleteService) {
-    try {
-      const service = new places.AutocompleteService();
-      const predictions = await new Promise<google.maps.places.AutocompletePrediction[]>(
-        (resolve) => {
-          service.getPlacePredictions(
-            {
-              input: q,
-              componentRestrictions: { country: 'co' },
-              locationBias: {
-                center: VILLAVICENCIO_CENTER,
-                radius: 28000,
-              },
-            },
-            (res, status) => {
-              if (
-                status !== places.PlacesServiceStatus.OK &&
-                status !== places.PlacesServiceStatus.ZERO_RESULTS
-              ) {
-                resolve([]);
-                return;
-              }
-              resolve(res || []);
-            },
-          );
+async function searchGooglePlaces(
+  places: typeof google.maps.places,
+  q: string,
+): Promise<PlaceSuggestion[]> {
+  const service = new places.AutocompleteService();
+  const predictions = await new Promise<google.maps.places.AutocompletePrediction[]>(
+    (resolve) => {
+      service.getPlacePredictions(
+        {
+          input: q,
+          componentRestrictions: { country: 'co' },
+          locationBias: {
+            center: VILLAVICENCIO_CENTER,
+            radius: 28000,
+          },
+        },
+        (res, status) => {
+          if (
+            status !== places.PlacesServiceStatus.OK &&
+            status !== places.PlacesServiceStatus.ZERO_RESULTS
+          ) {
+            console.warn('[DomiClick] Places autocomplete status:', status);
+            resolve([]);
+            return;
+          }
+          resolve(res || []);
         },
       );
-      if (predictions.length) {
-        return predictions.slice(0, 8).map((p) => ({
-          id: p.place_id,
-          placeId: p.place_id,
-          label: p.structured_formatting?.main_text || p.description,
-          secondary: p.structured_formatting?.secondary_text || 'Villavicencio, Meta',
-          kind: kindFromTypes(p.types),
-          source: 'google' as const,
-        }));
-      }
-    } catch (err) {
-      console.warn('[DomiClick] Places autocomplete', err);
-    }
-  }
+    },
+  );
+  if (!predictions.length) return [];
+  return predictions.slice(0, 8).map((p) => ({
+    id: p.place_id,
+    placeId: p.place_id,
+    label: p.structured_formatting?.main_text || p.description,
+    secondary: p.structured_formatting?.secondary_text || 'Villavicencio, Meta',
+    kind: kindFromTypes(p.types),
+    source: 'google' as const,
+  }));
+}
 
+async function searchPhoton(query: string): Promise<PlaceSuggestion[]> {
   const url =
-    'https://nominatim.openstreetmap.org/search?' +
+    'https://photon.komoot.io/api/?' +
     new URLSearchParams({
-      q: `${q}, Villavicencio, Meta, Colombia`,
-      format: 'json',
-      addressdetails: '1',
+      q: `${query}, Villavicencio, Meta`,
+      lat: String(VILLAVICENCIO_CENTER.lat),
+      lon: String(VILLAVICENCIO_CENTER.lng),
       limit: '8',
-      countrycodes: 'co',
-      viewbox: '-73.80,4.22,-73.50,4.04',
-      bounded: '0',
+      lang: 'es',
     });
   try {
-    const res = await fetch(url, {
-      headers: { Accept: 'application/json' },
-    });
+    const res = await fetch(url);
     if (!res.ok) return [];
-    const data = (await res.json()) as Array<{
-      place_id: number;
-      lat: string;
-      lon: string;
-      display_name: string;
-      name?: string;
-      class?: string;
-      type?: string;
-    }>;
-    return (data || []).map((item) => ({
-      id: `osm-${item.place_id}`,
-      label: item.name || item.display_name.split(',')[0],
-      secondary: item.display_name,
-      kind: nominatimKind(item.class, item.type),
-      source: 'nominatim' as const,
-      lat: Number(item.lat),
-      lng: Number(item.lon),
-    }));
+    const data = (await res.json()) as {
+      features?: Array<{
+        properties?: Record<string, string | undefined>;
+        geometry?: { coordinates?: [number, number] };
+      }>;
+    };
+    return (data.features || [])
+      .map((f) => {
+        const p = f.properties || {};
+        const coords = f.geometry?.coordinates;
+        if (!coords?.length) return null;
+        const [lng, lat] = coords;
+        const label =
+          p.name ||
+          p.street ||
+          p.city ||
+          [p.street, p.housenumber].filter(Boolean).join(' ') ||
+          'Lugar';
+        const secondary = [
+          p.street,
+          p.district || p.suburb,
+          p.city || 'Villavicencio',
+          p.state || 'Meta',
+        ]
+          .filter(Boolean)
+          .join(', ');
+        return {
+          id: `photon-${lng}-${lat}-${label}`,
+          label,
+          secondary: secondary || 'Villavicencio, Meta',
+          kind: nominatimKind(undefined, p.osm_value),
+          source: 'nominatim' as const,
+          lat,
+          lng,
+        } satisfies PlaceSuggestion;
+      })
+      .filter(Boolean) as PlaceSuggestion[];
   } catch {
     return [];
   }
 }
 
+export async function searchPlaceSuggestions(
+  query: string,
+  placesLib?: google.maps.PlacesLibrary,
+): Promise<PlaceSuggestion[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const places = placesFromLib(placesLib);
+  if (places?.AutocompleteService) {
+    try {
+      const googleHits = await searchGooglePlaces(places, q);
+      if (googleHits.length) return googleHits;
+    } catch (err) {
+      console.warn('[DomiClick] Places autocomplete', err);
+    }
+  }
+
+  return searchPhoton(q);
+}
+
 export async function resolvePlaceSuggestion(
   suggestion: PlaceSuggestion,
+  placesLib?: google.maps.PlacesLibrary,
 ): Promise<(LatLng & { label: string }) | null> {
   if (suggestion.lat != null && suggestion.lng != null) {
     return {
@@ -177,7 +215,7 @@ export async function resolvePlaceSuggestion(
     };
   }
   if (suggestion.placeId) {
-    const places = googlePlacesReady();
+    const places = placesFromLib(placesLib);
     if (places?.PlacesService) {
       const host = document.createElement('div');
       const svc = new places.PlacesService(host);
@@ -237,12 +275,15 @@ async function geocodeAddressNominatim(q: string): Promise<(LatLng & { label: st
   };
 }
 
-export async function geocodeAddress(query: string): Promise<(LatLng & { label: string }) | null> {
+export async function geocodeAddress(
+  query: string,
+  placesLib?: google.maps.PlacesLibrary,
+): Promise<(LatLng & { label: string }) | null> {
   const q = query.trim();
   if (q.length < 3) return null;
-  const hits = await searchPlaceSuggestions(q);
+  const hits = await searchPlaceSuggestions(q, placesLib);
   if (hits[0]) {
-    const resolved = await resolvePlaceSuggestion(hits[0]);
+    const resolved = await resolvePlaceSuggestion(hits[0], placesLib);
     if (resolved) return resolved;
   }
   return geocodeAddressNominatim(q);

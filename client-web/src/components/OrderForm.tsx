@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { CalendarClock, Loader2, MapPinned, Package } from 'lucide-react';
+import { CalendarClock, Loader2, Package } from 'lucide-react';
 import { submitOrder } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
@@ -22,8 +22,8 @@ import {
   type ShippingQuote,
 } from '../lib/pricing';
 import type { IngestOrderResponse } from '../contracts/salesIngest';
-import { PlaceSearchField } from './PlaceSearchField';
-import { RouteMapPicker, type MapPickMode } from './RouteMapPicker';
+import { MapRouteSection } from './MapRouteSection';
+import type { MapPickMode } from './RouteMapPicker';
 
 export type OrderFormValues = {
   customerName: string;
@@ -442,103 +442,38 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           />
         </label>
 
-        <div className="sm:col-span-2 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <MapPinned className="h-4 w-4 text-[var(--domi-cyan)]" aria-hidden />
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-              Ruta en el mapa
-            </p>
-            <div className="ml-auto flex flex-wrap gap-2">
-              <button
-                type="button"
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
-                  pickMode === 'pickup'
-                    ? 'bg-[var(--domi-blue)] text-white'
-                    : 'bg-white/5 text-[var(--domi-muted)]'
-                }`}
-                onClick={() => setPickMode('pickup')}
-              >
-                A · Recolección
-              </button>
-              <button
-                type="button"
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
-                  pickMode === 'delivery'
-                    ? 'bg-[var(--domi-orange)] text-white'
-                    : 'bg-white/5 text-[var(--domi-muted)]'
-                }`}
-                onClick={() => setPickMode('delivery')}
-              >
-                B · Entrega
-              </button>
-            </div>
-          </div>
-
-          <PlaceSearchField
-            label="Punto de recolección (A) *"
-            required
-            accent="pickup"
-            value={values.pickupAddress}
-            placeholder="Busca calle, barrio, parque, hospital, Unicentro…"
-            onQueryChange={(v) => update('pickupAddress', v)}
-            onPlacePicked={(hit) => {
+        <div className="sm:col-span-2">
+          <MapRouteSection
+            pickMode={pickMode}
+            onPickModeChange={setPickMode}
+            pickupAddress={values.pickupAddress}
+            deliveryAddress={values.deliveryAddress}
+            onPickupAddressChange={(v) => update('pickupAddress', v)}
+            onDeliveryAddressChange={(v) => update('deliveryAddress', v)}
+            onPickupPicked={(hit) => {
               draggingRef.current = false;
               setPath([]);
               setPickup({ lat: hit.lat, lng: hit.lng });
               setPickMode('delivery');
               setError(null);
             }}
-          />
-
-          <PlaceSearchField
-            label="Punto de entrega (B) *"
-            required
-            accent="delivery"
-            value={values.deliveryAddress}
-            placeholder="Busca avenida, urbanización, colegio, clínica…"
-            onQueryChange={(v) => update('deliveryAddress', v)}
-            onPlacePicked={(hit) => {
+            onDeliveryPicked={(hit) => {
               draggingRef.current = false;
               setPath([]);
               setDelivery({ lat: hit.lat, lng: hit.lng });
               setPickMode(null);
               setError(null);
             }}
-          />
-
-          <RouteMapPicker
             pickup={pickup}
             delivery={delivery}
             path={path}
-            pickMode={pickMode}
-            routing={geoBusy}
-            onPick={onMapPick}
+            geoBusy={geoBusy}
+            onMapPick={onMapPick}
             onDragPickup={onDragPickup}
             onDragDelivery={onDragDelivery}
             onLiveDragPickup={onLiveDragPickup}
             onLiveDragDelivery={onLiveDragDelivery}
           />
-
-          {pickup && delivery ? (
-            <div className="space-y-1 rounded-xl border border-[rgba(0,229,255,0.25)] bg-[rgba(0,229,255,0.06)] px-3 py-2 text-sm text-white">
-              <p>
-                <span className="font-semibold text-[var(--domi-cyan)]">A · Recolección:</span>{' '}
-                {values.pickupAddress || 'Punto de salida'}
-              </p>
-              <p>
-                <span className="font-semibold text-[var(--domi-orange)]">B · Entrega:</span>{' '}
-                {values.deliveryAddress || 'Punto de llegada'}
-              </p>
-              {geoBusy ? (
-                <p className="text-xs text-[var(--domi-muted)]">Recalculando ruta óptima…</p>
-              ) : null}
-            </div>
-          ) : (
-            <p className="text-xs text-[var(--domi-muted)]">
-              Escribe y elige una sugerencia: el pin se marca en el mapa. También puedes tocar el
-              mapa o arrastrar A / B.
-            </p>
-          )}
         </div>
 
         <label className="block sm:col-span-2">
