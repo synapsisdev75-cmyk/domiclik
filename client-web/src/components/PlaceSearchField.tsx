@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { Loader2, MapPin, Search, Sparkles } from 'lucide-react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Loader2, MapPin, Search } from 'lucide-react';
 import { useMapsLibrary } from '@vis.gl/react-google-maps';
 import {
   geocodeAddress,
@@ -44,6 +45,7 @@ export function PlaceSearchField({
 }: PlaceSearchFieldProps) {
   const listId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const placesLib = useMapsLibrary('places');
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -51,14 +53,38 @@ export function PlaceSearchField({
   const [items, setItems] = useState<PlaceSuggestion[]>([]);
   const [active, setActive] = useState(0);
   const [hint, setHint] = useState('');
+  const [dropBox, setDropBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const skipSearch = useRef(false);
   const typing = value.trim().length >= 2;
+  const showDrop = open && typing;
 
   const accentColor = accent === 'pickup' ? '#2B6CFF' : '#FF5722';
   const ring =
     accent === 'pickup'
       ? 'focus-within:border-[#2B6CFF] focus-within:shadow-[0_0_0_3px_rgba(43,108,255,0.18)]'
       : 'focus-within:border-[#FF5722] focus-within:shadow-[0_0_0_3px_rgba(255,87,34,0.18)]';
+
+  function syncDropPosition() {
+    const el = boxRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setDropBox({ top: r.bottom + 8, left: r.left, width: r.width });
+  }
+
+  useLayoutEffect(() => {
+    if (!showDrop) {
+      setDropBox(null);
+      return;
+    }
+    syncDropPosition();
+    const onMove = () => syncDropPosition();
+    window.addEventListener('resize', onMove);
+    window.addEventListener('scroll', onMove, true);
+    return () => {
+      window.removeEventListener('resize', onMove);
+      window.removeEventListener('scroll', onMove, true);
+    };
+  }, [showDrop, items.length, loading]);
 
   useEffect(() => {
     if (skipSearch.current) {
@@ -86,10 +112,10 @@ export function PlaceSearchField({
         setActive(0);
         setLoading(false);
         if (!hits.length) {
-          setHint('Sigue escribiendo o toca Buscar para fijar el punto.');
+          setHint('Sigue escribiendo o toca Buscar.');
         }
       });
-    }, 140);
+    }, 160);
 
     return () => {
       cancelled = true;
@@ -99,7 +125,10 @@ export function PlaceSearchField({
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if ((target as HTMLElement).closest?.('[data-domi-place-drop]')) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
@@ -139,7 +168,7 @@ export function PlaceSearchField({
     try {
       const hit = await geocodeAddress(q, placesLib || undefined);
       if (!hit) {
-        setHint('No encontramos esa dirección. Prueba universidad, Unicentro, hospital…');
+        setHint('No encontramos ese lugar en Google Maps. Prueba el nombre del negocio.');
         return;
       }
       skipSearch.current = true;
@@ -150,14 +179,79 @@ export function PlaceSearchField({
     }
   }
 
-  const showDrop = open && typing;
+  const dropdown =
+    showDrop && dropBox
+      ? createPortal(
+          <div
+            data-domi-place-drop
+            id={listId}
+            role="listbox"
+            className="overflow-hidden rounded-2xl border border-[#2a3b5c] bg-[#0b1220] shadow-[0_28px_70px_-16px_rgba(0,0,0,0.85)]"
+            style={{
+              position: 'fixed',
+              top: dropBox.top,
+              left: dropBox.left,
+              width: dropBox.width,
+              zIndex: 40000,
+            }}
+          >
+            <div className="border-b border-white/10 px-3 py-2 text-[11px] font-semibold text-[var(--domi-muted)]">
+              {loading ? 'Buscando en Google Maps…' : 'Negocios y direcciones · toca para marcar el pin'}
+            </div>
+            {loading && !items.length ? (
+              <div className="space-y-2 px-3 py-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-10 animate-pulse rounded-xl bg-white/5" />
+                ))}
+              </div>
+            ) : null}
+            {items.length > 0 ? (
+              <ul className="max-h-72 overflow-auto py-1">
+                {items.map((item, i) => (
+                  <li key={item.id} role="option" aria-selected={i === active}>
+                    <button
+                      type="button"
+                      className={`flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition ${
+                        i === active ? 'bg-white/10' : 'hover:bg-white/5'
+                      }`}
+                      onMouseEnter={() => setActive(i)}
+                      onClick={() => void pick(item)}
+                    >
+                      <span
+                        className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
+                        style={{ background: `${accentColor}22`, color: accentColor }}
+                      >
+                        <MapPin className="h-4 w-4" aria-hidden />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-white">
+                          {highlightMatch(item.label, value)}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[11px] text-[var(--domi-muted)]">
+                          {item.kind} · {item.secondary}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : !loading ? (
+              <p className="px-3 py-3 text-sm text-[var(--domi-muted)]">
+                Sin coincidencias. Sigue escribiendo o toca <strong className="text-white">Buscar</strong>.
+              </p>
+            ) : null}
+          </div>,
+          document.body,
+        )
+      : null;
 
   return (
-    <div ref={wrapRef} className="relative z-40 block sm:col-span-2">
+    <div ref={wrapRef} className={`relative block sm:col-span-2 ${showDrop ? 'z-[80]' : 'z-[1]'}`}>
       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
         {label}
       </span>
       <div
+        ref={boxRef}
         className={`flex items-center gap-2 rounded-2xl border border-[var(--domi-border)] bg-[#0a101c] px-3 py-1 ${ring}`}
       >
         <input
@@ -212,64 +306,7 @@ export function PlaceSearchField({
           Buscar
         </button>
       </div>
-
-      {showDrop ? (
-        <div
-          id={listId}
-          role="listbox"
-          className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-[var(--domi-border)] bg-[#0b1220]/97 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.75)] backdrop-blur-md"
-        >
-          <div className="flex items-center gap-1.5 border-b border-white/5 px-3 py-2 text-[11px] text-[var(--domi-muted)]">
-            <Sparkles className="h-3.5 w-3.5 text-[#FF5722]" aria-hidden />
-            {loading ? 'Adivinando lugares en Villavicencio…' : '¿Es alguno de estos? Toca para marcar el pin.'}
-          </div>
-
-          {loading && !items.length ? (
-            <div className="space-y-2 px-3 py-3">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="h-10 animate-pulse rounded-xl bg-white/5" />
-              ))}
-            </div>
-          ) : null}
-
-          {items.length > 0 ? (
-            <ul className="max-h-72 overflow-auto py-1">
-              {items.map((item, i) => (
-                <li key={item.id} role="option" aria-selected={i === active}>
-                  <button
-                    type="button"
-                    className={`flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition ${
-                      i === active ? 'bg-white/10' : 'hover:bg-white/5'
-                    }`}
-                    onMouseEnter={() => setActive(i)}
-                    onClick={() => void pick(item)}
-                  >
-                    <span
-                      className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl"
-                      style={{ background: `${accentColor}22`, color: accentColor }}
-                    >
-                      <MapPin className="h-4 w-4" aria-hidden />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-white">
-                        {highlightMatch(item.label, value)}
-                      </span>
-                      <span className="mt-0.5 block truncate text-[11px] text-[var(--domi-muted)]">
-                        {item.kind} · {item.secondary}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : !loading ? (
-            <p className="px-3 py-3 text-sm text-[var(--domi-muted)]">
-              Sin coincidencias aún. Sigue escribiendo o toca <strong className="text-white">Buscar</strong>.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
+      {dropdown}
       {hint && !showDrop ? (
         <p className="mt-1 text-[11px] text-amber-200/90" role="status">
           {hint}

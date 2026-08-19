@@ -84,7 +84,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
         required
         accent="pickup"
         value={pickupAddress}
-        placeholder="Empieza a escribir: Unicentro, universidad, calle…"
+        placeholder="Restaurante, heladería, centro comercial, calle…"
         onQueryChange={onPickupAddressChange}
         onPlacePicked={onPickupPicked}
       />
@@ -94,7 +94,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
         required
         accent="delivery"
         value={deliveryAddress}
-        placeholder="Empieza a escribir: hospital, barrio, urbanización…"
+        placeholder="Negocio, barrio, urbanización o dirección…"
         onQueryChange={onDeliveryAddressChange}
         onPlacePicked={onDeliveryPicked}
       />

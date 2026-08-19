@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { X, Plus, MapPin, Phone, User } from 'lucide-react';
+import { X, Plus, Phone, User } from 'lucide-react';
 import { createOrder, fetchAllDrivers, fetchDispatchSettings } from '../../lib/firebase';
 import { dispatchPendingOrder, getBusyDriverIds } from '../../lib/autoDispatch';
 import { DomiCargoIcon } from '../ui/CustomIcons';
+import { OpsPlaceSearch } from './OpsPlaceSearch';
 import type { DeliveryOrder, MotorizadoDriver } from '../../types';
 
 interface CreateOrderModalProps {
@@ -20,8 +21,10 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
 }) => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [pickupAddress, setPickupAddress] = useState('Dulce Sorpresa, CC Unicentro');
+  const [pickupAddress, setPickupAddress] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [pickupCoords, setPickupCoords] = useState({ lat: 4.142, lng: -73.6266 });
+  const [deliveryCoords, setDeliveryCoords] = useState({ lat: 4.142, lng: -73.6266 });
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -47,8 +50,8 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         status: 'pending',
         assignedDriverId: null,
         assignedDriverName: null,
-        pickupCoords: { lat: 4.148, lng: -73.622, addressName: pickupAddress },
-        deliveryCoords: { lat: 4.135, lng: -73.625, addressName: deliveryAddress },
+        pickupCoords: { lat: pickupCoords.lat, lng: pickupCoords.lng, addressName: pickupAddress },
+        deliveryCoords: { lat: deliveryCoords.lat, lng: deliveryCoords.lng, addressName: deliveryAddress },
       });
 
       setStatusMsg('Asignando al conductor activo libre más cercano…');
@@ -129,36 +132,31 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
             </div>
           </div>
 
-          <div>
-            <label className="text-xs text-slate-300 font-bold block mb-1">Dirección de Origen</label>
-            <div className="relative">
-              <MapPin className="w-4 h-4 text-[#FF5722] absolute left-3 top-3" />
-              <input
-                type="text"
-                required
-                value={pickupAddress}
-                onChange={(e) => setPickupAddress(e.target.value)}
-                className="w-full bg-[#111A2E] border border-[#1E2E50] rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF5722]"
-              />
-            </div>
-          </div>
+          <OpsPlaceSearch
+            label="Dirección de Origen"
+            accent="pickup"
+            required
+            value={pickupAddress}
+            placeholder="Restaurante, heladería, comercio…"
+            onQueryChange={setPickupAddress}
+            onPlacePicked={(hit) => {
+              setPickupAddress(hit.label);
+              setPickupCoords({ lat: hit.lat, lng: hit.lng });
+            }}
+          />
 
-          <div>
-            <label className="text-xs text-slate-300 font-bold block mb-1">
-              Dirección de Destino en Villavicencio
-            </label>
-            <div className="relative">
-              <MapPin className="w-4 h-4 text-[#00E676] absolute left-3 top-3" />
-              <input
-                type="text"
-                required
-                value={deliveryAddress}
-                onChange={(e) => setDeliveryAddress(e.target.value)}
-                placeholder="Ej. Barrio El Jordán, Cl. 25 #14-20"
-                className="w-full bg-[#111A2E] border border-[#1E2E50] rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00E676]"
-              />
-            </div>
-          </div>
+          <OpsPlaceSearch
+            label="Dirección de Destino en Villavicencio"
+            accent="delivery"
+            required
+            value={deliveryAddress}
+            placeholder="Negocio, barrio o dirección…"
+            onQueryChange={setDeliveryAddress}
+            onPlacePicked={(hit) => {
+              setDeliveryAddress(hit.label);
+              setDeliveryCoords({ lat: hit.lat, lng: hit.lng });
+            }}
+          />
 
           <div>
             <label className="text-xs text-slate-300 font-bold block mb-1">Detalle del Paquete</label>
