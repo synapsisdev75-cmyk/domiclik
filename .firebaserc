@@ -5,8 +5,14 @@
   "targets": {
     "gen-lang-client-0954482957": {
       "hosting": {
-        "landing": ["gen-lang-client-0954482957"]
+        "landing": [
+          "gen-lang-client-0954482957"
+        ],
+        "ops": [
+          "domiclick-ops"
+        ]
       }
     }
-  }
+  },
+  "etags": {}
 }
