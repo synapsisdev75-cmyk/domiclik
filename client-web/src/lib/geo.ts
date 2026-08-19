@@ -57,7 +57,7 @@ const PLACE_KIND_ES: Record<string, string> = {
   meal_takeaway: 'Restaurante',
   meal_delivery: 'Restaurante',
   cafe: 'Café',
-  bakery: 'Panadería',
+  ice_cream: 'Heladería',
   bar: 'Bar',
   night_club: 'Bar',
   church: 'Iglesia',
@@ -115,35 +115,39 @@ function placesFromLib(
 async function predictGoogle(
   places: typeof google.maps.places,
   q: string,
-  types?: string[],
 ): Promise<PlaceSuggestion[]> {
   const service = new places.AutocompleteService();
-  const predictions = await new Promise<google.maps.places.AutocompletePrediction[]>(
-    (resolve) => {
-      const req: google.maps.places.AutocompletionRequest = {
-        input: q,
-        componentRestrictions: { country: 'co' },
-        locationBias: {
-          center: VILLAVICENCIO_CENTER,
-          radius: 35000,
-        },
-      };
-      if (types?.length) req.types = types;
-      service.getPlacePredictions(req, (res, status) => {
-        if (
-          status !== places.PlacesServiceStatus.OK &&
-          status !== places.PlacesServiceStatus.ZERO_RESULTS
-        ) {
-          console.warn('[DomiClick] Places autocomplete status:', status, types || 'all');
-          resolve([]);
-          return;
-        }
-        resolve(res || []);
-      });
-    },
+  const inputs = q.toLowerCase().includes('villavicencio') ? [q] : [q, `${q} Villavicencio`];
+  const batches = await Promise.all(
+    inputs.map(
+      (input) =>
+        new Promise<google.maps.places.AutocompletePrediction[]>((resolve) => {
+          service.getPlacePredictions(
+            {
+              input,
+              componentRestrictions: { country: 'co' },
+              locationBias: {
+                center: VILLAVICENCIO_CENTER,
+                radius: 35000,
+              },
+            },
+            (res, status) => {
+              if (
+                status !== places.PlacesServiceStatus.OK &&
+                status !== places.PlacesServiceStatus.ZERO_RESULTS
+              ) {
+                console.warn('[DomiClick] Places autocomplete status:', status);
+                resolve([]);
+                return;
+              }
+              resolve(res || []);
+            },
+          );
+        }),
+    ),
   );
-  return (predictions || []).map((p) => ({
-    id: `${types?.[0] || 'all'}-${p.place_id}`,
+  return batches.flat().map((p) => ({
+    id: `ac-${p.place_id}`,
     placeId: p.place_id,
     label: p.structured_formatting?.main_text || p.description,
     secondary: p.structured_formatting?.secondary_text || 'Villavicencio, Meta',
@@ -152,16 +156,64 @@ async function predictGoogle(
   }));
 }
 
+async function textSearchGoogle(
+  places: typeof google.maps.places,
+  q: string,
+): Promise<PlaceSuggestion[]> {
+  if (!places.PlacesService) return [];
+  const host = document.createElement('div');
+  const svc = new places.PlacesService(host);
+  const query = q.toLowerCase().includes('villavicencio') ? q : `${q} Villavicencio Meta`;
+  const results = await new Promise<google.maps.places.PlaceResult[]>((resolve) => {
+    svc.textSearch(
+      {
+        query,
+        location: VILLAVICENCIO_CENTER,
+        radius: 28000,
+      },
+      (res, status) => {
+        if (
+          status !== places.PlacesServiceStatus.OK &&
+          status !== places.PlacesServiceStatus.ZERO_RESULTS
+        ) {
+          console.warn('[DomiClick] Places textSearch status:', status);
+          resolve([]);
+          return;
+        }
+        resolve(res || []);
+      },
+    );
+  });
+  return results.slice(0, 12).map((p) => {
+    const loc = p.geometry?.location;
+    return {
+      id: `ts-${p.place_id || p.name}`,
+      placeId: p.place_id,
+      label: p.name || p.formatted_address || q,
+      secondary: p.vicinity || p.formatted_address || 'Villavicencio, Meta',
+      kind: kindFromTypes(p.types),
+      source: 'google' as const,
+      lat: loc ? loc.lat() : undefined,
+      lng: loc ? loc.lng() : undefined,
+    };
+  });
+}
+
 async function searchGooglePlaces(
   places: typeof google.maps.places,
   q: string,
 ): Promise<PlaceSuggestion[]> {
-  const [businesses, addresses, mixed] = await Promise.all([
-    predictGoogle(places, q, ['establishment']),
-    predictGoogle(places, q, ['geocode']),
-    predictGoogle(places, q),
+  const [textHits, autoHits] = await Promise.all([
+    textSearchGoogle(places, q).catch((err) => {
+      console.warn('[DomiClick] textSearch', err);
+      return [] as PlaceSuggestion[];
+    }),
+    predictGoogle(places, q).catch((err) => {
+      console.warn('[DomiClick] autocomplete', err);
+      return [] as PlaceSuggestion[];
+    }),
   ]);
-  return mergeSuggestions([businesses, mixed, addresses]).slice(0, 10);
+  return mergeSuggestions([textHits, autoHits]);
 }
 
 function foldKey(s: string) {
@@ -262,16 +314,15 @@ export async function searchPlaceSuggestions(
   if (q.length < 2) return [];
 
   const places = placesFromLib(placesLib);
-  if (places?.AutocompleteService) {
-    try {
-      const googleHits = await searchGooglePlaces(places, q);
-      if (googleHits.length) return googleHits;
-    } catch (err) {
-      console.warn('[DomiClick] Places autocomplete', err);
-    }
-  }
+  const googlePromise = places
+    ? searchGooglePlaces(places, q).catch((err) => {
+        console.warn('[DomiClick] Places', err);
+        return [] as PlaceSuggestion[];
+      })
+    : Promise.resolve([] as PlaceSuggestion[]);
 
-  return searchPhoton(q);
+  const [googleHits, photonHits] = await Promise.all([googlePromise, searchPhoton(q)]);
+  return mergeSuggestions([googleHits, photonHits]);
 }
 
 export async function resolvePlaceSuggestion(

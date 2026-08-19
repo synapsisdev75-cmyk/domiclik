@@ -7,10 +7,12 @@ export type OpsPlaceHit = { label: string; lat: number; lng: number };
 
 type Suggestion = {
   id: string;
-  placeId: string;
+  placeId?: string;
   label: string;
   secondary: string;
   kind: string;
+  lat?: number;
+  lng?: number;
 };
 
 type OpsPlaceSearchProps = {
@@ -48,52 +50,83 @@ function placesApi(): typeof google.maps.places | null {
   return (window as unknown as { google?: typeof google }).google?.maps?.places || null;
 }
 
-async function predict(q: string, types?: string[]): Promise<Suggestion[]> {
+async function predict(q: string): Promise<Suggestion[]> {
   const places = placesApi();
   if (!places?.AutocompleteService) return [];
   const service = new places.AutocompleteService();
+  const input = q.toLowerCase().includes('villavicencio') ? q : `${q} Villavicencio`;
   const predictions = await new Promise<google.maps.places.AutocompletePrediction[]>((resolve) => {
-    const req: google.maps.places.AutocompletionRequest = {
-      input: q,
-      componentRestrictions: { country: 'co' },
-      locationBias: {
-        center: { lat: VILLAVICENCIO_CENTER.lat, lng: VILLAVICENCIO_CENTER.lng },
-        radius: 35000,
+    service.getPlacePredictions(
+      {
+        input,
+        componentRestrictions: { country: 'co' },
+        locationBias: {
+          center: { lat: VILLAVICENCIO_CENTER.lat, lng: VILLAVICENCIO_CENTER.lng },
+          radius: 35000,
+        },
       },
-    };
-    if (types?.length) req.types = types;
-    service.getPlacePredictions(req, (res, status) => {
-      if (status !== places.PlacesServiceStatus.OK && status !== places.PlacesServiceStatus.ZERO_RESULTS) {
-        resolve([]);
-        return;
-      }
-      resolve(res || []);
-    });
+      (res, status) => {
+        if (status !== places.PlacesServiceStatus.OK && status !== places.PlacesServiceStatus.ZERO_RESULTS) {
+          resolve([]);
+          return;
+        }
+        resolve(res || []);
+      },
+    );
   });
   return predictions.map((p) => ({
-    id: `${types?.[0] || 'all'}-${p.place_id}`,
+    id: `ac-${p.place_id}`,
     placeId: p.place_id,
     label: p.structured_formatting?.main_text || p.description,
     secondary: p.structured_formatting?.secondary_text || 'Villavicencio',
-    kind: p.types?.includes('restaurant')
-      ? 'Restaurante'
-      : p.types?.includes('establishment')
-        ? 'Negocio'
-        : 'Lugar',
+    kind: p.types?.includes('restaurant') ? 'Restaurante' : 'Negocio',
   }));
 }
 
+async function textSearch(q: string): Promise<Suggestion[]> {
+  const places = placesApi();
+  if (!places?.PlacesService) return [];
+  const host = document.createElement('div');
+  const svc = new places.PlacesService(host);
+  const query = q.toLowerCase().includes('villavicencio') ? q : `${q} Villavicencio Meta`;
+  const results = await new Promise<google.maps.places.PlaceResult[]>((resolve) => {
+    svc.textSearch(
+      {
+        query,
+        location: { lat: VILLAVICENCIO_CENTER.lat, lng: VILLAVICENCIO_CENTER.lng },
+        radius: 28000,
+      },
+      (res, status) => {
+        if (status !== places.PlacesServiceStatus.OK && status !== places.PlacesServiceStatus.ZERO_RESULTS) {
+          resolve([]);
+          return;
+        }
+        resolve(res || []);
+      },
+    );
+  });
+  return results.slice(0, 12).map((p) => {
+    const loc = p.geometry?.location;
+    return {
+      id: `ts-${p.place_id || p.name}`,
+      placeId: p.place_id,
+      label: p.name || p.formatted_address || q,
+      secondary: p.vicinity || p.formatted_address || 'Villavicencio',
+      kind: p.types?.includes('restaurant') ? 'Restaurante' : 'Negocio',
+      lat: loc?.lat(),
+      lng: loc?.lng(),
+    };
+  });
+}
+
 async function searchGoogle(q: string): Promise<Suggestion[]> {
-  const [biz, geo, mixed] = await Promise.all([
-    predict(q, ['establishment']),
-    predict(q, ['geocode']),
-    predict(q),
-  ]);
+  const [textHits, autoHits] = await Promise.all([textSearch(q), predict(q)]);
   const seen = new Set<string>();
   const out: Suggestion[] = [];
-  for (const hit of [...biz, ...mixed, ...geo]) {
-    if (seen.has(hit.placeId)) continue;
-    seen.add(hit.placeId);
+  for (const hit of [...textHits, ...autoHits]) {
+    const key = hit.placeId || hit.label;
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(hit);
     if (out.length >= 10) break;
   }
@@ -209,6 +242,13 @@ export function OpsPlaceSearch({
 
   async function pick(item: Suggestion) {
     setOpen(false);
+    if (item.lat != null && item.lng != null) {
+      skip.current = true;
+      onQueryChange(item.label);
+      onPlacePicked({ label: item.secondary ? `${item.label}, ${item.secondary}` : item.label, lat: item.lat, lng: item.lng });
+      return;
+    }
+    if (!item.placeId) return;
     const hit = await resolvePlace(item.placeId, item.label);
     if (!hit) return;
     skip.current = true;
