@@ -5,6 +5,13 @@ import { OrderForm } from '../components/OrderForm';
 import { QuickTrackingForm } from '../components/QuickTrackingForm';
 import { SiteHeader } from '../components/SiteHeader';
 import { SuccessScreen } from '../components/SuccessScreen';
+import {
+  BRAND_TAGLINE,
+  COPYRIGHT_LINE,
+  OFFICE_ADDRESS_LINE1,
+  OFFICE_ADDRESS_LINE2,
+  OFFICE_CITY,
+} from '../lib/companyInfo';
 
 export function HomePage() {
   const formRef = useRef<HTMLElement | null>(null);
@@ -34,7 +41,15 @@ export function HomePage() {
 
         <footer className="mt-16 border-t border-[var(--domi-border)] pt-8 text-center text-sm text-[var(--domi-muted)]">
           <p className="font-display text-base font-semibold text-white">DomiClick</p>
-          <p className="mt-1">Excelencia a un click de ti · Villavicencio, Meta</p>
+          <p className="mt-1">
+            {BRAND_TAGLINE} · {OFFICE_CITY}
+          </p>
+          <p className="mt-3 text-xs">
+            {OFFICE_ADDRESS_LINE1}
+            <br />
+            {OFFICE_ADDRESS_LINE2}
+          </p>
+          <p className="mt-2 text-xs text-slate-500">{COPYRIGHT_LINE}</p>
         </footer>
       </main>
     </div>

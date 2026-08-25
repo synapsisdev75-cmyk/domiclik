@@ -20,20 +20,29 @@
 
   html {
     scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   body {
     margin: 0;
     min-height: 100vh;
+    min-height: 100svh;
     background-color: var(--domi-bg);
     color: var(--domi-text);
-    font-family: 'Plus Jakarta Sans', 'Outfit', system-ui, sans-serif;
+    font-family: 'Plus Jakarta Sans', 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
     background-image:
       radial-gradient(ellipse 80% 50% at 10% -10%, rgba(255, 87, 34, 0.12), transparent 50%),
       radial-gradient(ellipse 60% 40% at 90% 0%, rgba(0, 229, 255, 0.08), transparent 45%),
       linear-gradient(180deg, #05080f 0%, #070b14 100%);
-    background-attachment: fixed;
+    /* fixed rompe el pintado en Safari iOS / algunos Mac */
+    background-attachment: scroll;
     -webkit-font-smoothing: antialiased;
+  }
+
+  #root {
+    min-height: 100vh;
+    min-height: 100svh;
   }
 
   h1,
@@ -50,13 +59,44 @@
 
 @keyframes fade-up {
   from {
-    opacity: 0;
-    transform: translateY(16px);
+    opacity: 0.35;
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.animate-fade-up {
+  opacity: 1;
+  animation: fade-up 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-fade-up-delay {
+  opacity: 1;
+  animation: fade-up 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.08s forwards;
+}
+
+.animate-fade-up-delay-2 {
+  opacity: 1;
+  animation: fade-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.14s forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-fade-up-delay,
+  .animate-fade-up-delay-2,
+  .hero-route {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+.hero-route {
+  stroke-dasharray: 5 12;
+  animation: route-dash 22s linear infinite;
 }
 
 @keyframes route-dash {
@@ -75,23 +115,6 @@
     opacity: 1;
     transform: scale(1.04);
   }
-}
-
-.animate-fade-up {
-  animation: fade-up 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.animate-fade-up-delay {
-  animation: fade-up 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
-}
-
-.animate-fade-up-delay-2 {
-  animation: fade-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.22s both;
-}
-
-.hero-route {
-  stroke-dasharray: 5 12;
-  animation: route-dash 22s linear infinite;
 }
 
 .brand-logo {
@@ -183,6 +206,7 @@
 .glass-panel {
   background: linear-gradient(160deg, rgba(13, 20, 36, 0.92), rgba(8, 12, 24, 0.88));
   border: 1px solid var(--domi-border);
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
 

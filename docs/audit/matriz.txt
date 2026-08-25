@@ -1,0 +1,621 @@
+1.OBJETIVO
+El presente documento tiene como objetivo establecer de manera organizada las funcionalidades, módulos, botones, acciones, estados y permisos que debe contemplar la plataforma Domiclick para cada uno de sus perfiles de usuario.
+La plataforma se divide en cuatro perfiles principales:
+Administrador
+Central de Operación
+Repartidor / Domiciliario
+Usuario / Cliente
+Esta matriz deberá utilizarse como guía durante el desarrollo, permitiendo verificar funcionalidad por funcionalidad qué elementos han sido desarrollados, probados y aprobados.
+1. ADMINISTRADOR
+El Administrador tendrá control general sobre la plataforma, configuración, usuarios, operación, información y seguimiento de Domiclick.
+DASHBOARD / INICIO
+Funciones
+Visualizar resumen general de la operación.
+Visualizar servicios del día.
+Visualizar servicios pendientes.
+Visualizar servicios en proceso.
+Visualizar servicios finalizados.
+Visualizar servicios cancelados.
+Visualizar usuarios registrados.
+Visualizar repartidores activos.
+Visualizar centrales de operación.
+Visualizar alertas.
+Visualizar indicadores generales.
+Botones
+Inicio
+Servicios
+Usuarios
+Repartidores
+Centrales
+Reportes
+Notificaciones
+Configuración
+Perfil
+Cerrar sesión
+ADMINISTRACIÓN DE USUARIOS
+Funciones
+Crear usuario.
+Consultar usuario.
+Editar usuario.
+Activar usuario.
+Desactivar usuario.
+Bloquear usuario.
+Desbloquear usuario.
+Consultar historial.
+Consultar servicios realizados.
+Consultar información de contacto.
+Consultar estado de la cuenta.
+Administrar permisos según el tipo de usuario.
+Botones
+Nuevo usuario
+Buscar
+Filtrar
+Ver detalle
+Editar
+Activar
+Desactivar
+Bloquear
+Desbloquear
+Historial
+Guardar
+Cancelar
+ADMINISTRACIÓN DE REPARTIDORES
+Funciones
+Registrar repartidor.
+Consultar repartidor.
+Editar información.
+Activar/desactivar repartidor.
+Aprobar o rechazar registro, si aplica.
+Consultar documentación.
+Consultar estado.
+Consultar disponibilidad.
+Consultar servicios realizados.
+Consultar servicios cancelados.
+Consultar desempeño.
+Consultar calificaciones.
+Consultar historial.
+Consultar ubicación cuando el sistema lo permita.
+Botones
+Nuevo repartidor
+Ver perfil
+Editar
+Aprobar
+Rechazar
+Activar
+Desactivar
+Ver documentos
+Ver servicios
+Ver ubicación
+Ver desempeño
+Historial
+ADMINISTRACIÓN DE CENTRALES DE OPERACIÓN
+Funciones
+Crear central.
+Editar central.
+Activar/desactivar central.
+Consultar información.
+Asignar usuarios.
+Administrar operadores.
+Consultar servicios gestionados.
+Consultar repartidores asociados.
+Consultar estadísticas.
+Consultar historial.
+Botones
+Nueva central
+Ver
+Editar
+Activar
+Desactivar
+Usuarios
+Operadores
+Repartidores
+Servicios
+Reportes
+ADMINISTRACIÓN DE SERVICIOS
+El Administrador deberá poder consultar y supervisar la totalidad de los servicios generados en la plataforma.
+Estados mínimos a contemplar
+Solicitud creada.
+Pendiente de gestión.
+Asignado.
+Aceptado.
+En camino al origen.
+Llegó al origen.
+Servicio recogido.
+En camino al destino.
+Llegó al destino.
+Entregado/finalizado.
+Cancelado.
+Incidente/reportado.
+Funciones
+Consultar todos los servicios.
+Buscar servicio.
+Filtrar por estado.
+Filtrar por fecha.
+Filtrar por usuario.
+Filtrar por repartidor.
+Filtrar por central.
+Ver detalle.
+Consultar trazabilidad.
+Consultar ubicación.
+Consultar historial.
+Cancelar cuando corresponda.
+Revisar incidentes.
+Botones
+Ver servicio
+Buscar
+Filtrar
+Mapa
+Historial
+Trazabilidad
+Cancelar
+Incidente
+Exportar, si aplica.
+REPORTES – ADMINISTRADOR
+Reportes sugeridos
+Indicadores de operación, se requieren los siguientes:
+1. Porcentaje de puntualidad (Repartidor)
+2. Tiempo de gestión (Central Op.)
+3. Tiempo conectado Vs Tiempo activo (Repartidor)
+4. Indicador de eficiencia (Repartidor)
+5. Pedidos entregados correctamente (Repartidor)
+6. Tasa de incidencias (Repartidor)
+7. Nivel de satisfacción del cliente (Repartidor)
+8. Tiempo promedio de resolución de incidencias (Central Op.)
+9. Kilometraje recorrido a diario vs galones consumidos (Repartidor)
+10. Pedidos cancelados (Se vinculan todas las solicitudes canceladas independiente si es por parte del cliente, por fallas en el pago o por fallas en el restaurante, esto permite establecer planes de acción y mejora continua)
+Base de datos de Usuarios registrados
+Base de datos Domiciliarios / conductores
+Base de datos documentos y plan de mantenimiento mecánico motos
+Centrales de operación
+Habilitar un buzón directo que solo tenga visualización el administrador, aquí podrán realizar PQR (Peticiones, quejas o reclamos)
+Botones
+Generar reporte
+Buscar
+Filtrar
+Ver detalle
+Exportar
+Descargar
+NOTIFICACIONES PUSH – ADMINISTRADOR
+El Administrador deberá poder consultar el sistema de notificaciones y, si está contemplado en los permisos, administrar o enviar comunicaciones.
+Funciones
+Ver notificaciones.
+Consultar historial.
+Crear notificación.
+Seleccionar destinatarios.
+Programar notificación, si aplica.
+Enviar.
+Consultar estado de envío.
+Importante
+Los 5 tipos de mensajes Push definidos en el documento oficial de Domiclick deberán implementarse exactamente según su estructura y finalidad, asociando cada uno al evento correspondiente del sistema.
+CONFIGURACIÓN GENERAL
+Funciones
+Configuración general de la plataforma.
+Parámetros de operación.
+Tipos de servicio.
+Zonas.
+Tarifas, si aplica.
+Horarios, si aplica.
+Usuarios y permisos.
+Configuración de notificaciones.
+Información empresarial.
+Parámetros de seguridad.
+Botones
+Editar
+Guardar
+Cancelar
+Activar
+Desactivar
+Restablecer
+2. CENTRAL DE OPERACIÓN.
+IMPORTANTE: La asignación del repartidor la hace el sistema, no se puede realizar manualmente
+DASHBOARD – CENTRAL DE OPERACIÓN
+Indicadores
+Servicios nuevos.
+Servicios pendientes.
+Servicios asignados.
+Servicios en curso.
+Servicios finalizados.
+Servicios cancelados.
+Repartidores disponibles.
+Repartidores ocupados.
+Alertas e incidentes.
+Botones
+Registro de entrada con PIN, HUELLA O FACE ID
+Inicio
+Servicios
+Repartidores
+Mapa
+Notificaciones
+Reportes
+Perfil
+Cerrar sesión
+GESTIÓN DE SERVICIOS – CENTRAL
+Funciones
+Recibir solicitud.
+Revisar información.
+Aceptar gestión.
+Asignar repartidor.
+Reasignar repartidor.
+Consultar estado.
+Consultar ubicación.
+Comunicarse con repartidor.
+Comunicarse con usuario.
+Modificar información permitida.
+Cancelar según permisos.
+Reportar incidente.
+Consultar trazabilidad.
+Botones
+Ver solicitud
+Aceptar
+Asignar
+Reasignar
+Mapa
+Contactar usuario
+Contactar repartidor
+Actualizar
+Cancelar
+Reportar incidente
+Historial
+Trazabilidad
+GESTIÓN DE REPARTIDORES – CENTRAL
+Funciones
+Ver repartidores disponibles.
+Ver repartidores ocupados.
+Ver repartidores desconectados.
+Ver ubicación.
+Consultar servicios asignados.
+Asignar servicio.
+Reasignar servicio.
+Contactar repartidor.
+Consultar desempeño.
+Consultar estado.
+Botones
+Disponibles
+Ocupados
+Desconectados
+Ver ubicación
+Asignar servicio
+Reasignar
+Contactar
+Ver perfil
+Historial
+MAPA OPERATIVO – CENTRAL
+El mapa debe permitir visualizar, según permisos:
+Ubicación de repartidores.
+Servicios activos.
+Punto de recogida.
+Punto de entrega.
+Estado de cada servicio.
+Ruta.
+Repartidor asignado.
+Botones
+Ver mapa
+Mi ubicación
+Repartidores
+Servicios
+Ver ruta
+Actualizar
+Ver detalle
+3. REPARTIDOR / DOMICILIARIO.
+Este perfil debe ser independiente de la Central de Operación.
+La Central coordina y el Repartidor ejecuta físicamente el servicio.
+INICIO – REPARTIDOR
+Información
+Estado de disponibilidad.
+Servicios nuevos.
+Servicio actual.
+Servicios completados.
+Resumen del día.
+Notificaciones.
+Botones
+Registro de entrada con PIN, HUELLA O FACE ID
+KM inicial (Este botón debe ser condición para iniciar sesión)
+Botón “Conectarme
+KM final (Este botón debe ser condición para cerra sesión)
+Botón Desconectarme”
+Formula = Total KM recorridos – Total Galones consumidos – Valor total del combustible
+Botón de pánico
+Disponible
+No disponible
+Servicio actual
+Nuevos servicios
+Historial
+Notificaciones
+Mi perfil
+El cambio de disponibilidad deberá quedar registrado en el sistema.
+SERVICIOS – REPARTIDOR
+Secciones
+Nuevos servicios.
+Servicios asignados.
+Servicio actual.
+Servicios finalizados.
+Servicios cancelados.
+Información de cada servicio
+Número de servicio.
+Fecha.
+Hora.
+Dirección de recogida.
+Dirección de entrega.
+Información del usuario.
+Descripción.
+Instrucciones.
+Valor, cuando corresponda.
+Estado.
+Información de contacto.
+FLUJO DEL SERVICIO – REPARTIDOR
+El flujo debe controlar claramente cada cambio de estado.
+1. Servicio recibido
+Botón:
+Ver servicio
+2. Servicio asignado
+Botones:
+Aceptar servicio
+3. Desplazamiento al origen
+Botón:
+Iniciar ruta
+4. Llegada al origen
+Botón:
+Llegué al origen
+5. Recogida
+Botón:
+Confirmar recogida
+6. Desplazamiento al destino
+Botón:
+Iniciar Entrega
+7. Llegada al destino
+Botón:
+Llegué al destino
+8. Finalización
+Botón:
+Confirmar Entrega
+9. Servicio terminado
+El sistema deberá registrar:
+Fecha.
+Hora.
+Repartidor.
+Usuario.
+Estados.
+Ubicación cuando corresponda.
+Evidencia de entrega, si aplica.
+NAVEGACIÓN – REPARTIDOR
+Funciones
+Ver origen.
+Ver destino.
+Abrir navegación.
+Consultar ruta.
+Actualizar ubicación.
+Regresar al servicio.
+Botones
+Navegar
+Ver ruta
+Actualizar ubicación
+Origen
+Destino
+COMUNICACIÓN – REPARTIDOR
+Botones
+Llamar al usuario
+Contactar Central
+Enviar mensaje
+Reportar inconveniente
+El acceso a datos de contacto deberá respetar las reglas de privacidad y permisos definidas para Domiclick.
+INCIDENTES – REPARTIDOR
+Debe existir una función específica para informar situaciones que impidan continuar normalmente el servicio.
+Posibles categorías
+Usuario no localizado.
+Dirección incorrecta.
+Problema con el pedido.
+Problema con el vehículo.
+Accidente/incidente.
+Imposibilidad de realizar entrega.
+Problema de acceso.
+Otro.
+Botones
+Reportar incidente
+Seleccionar motivo
+Agregar comentario
+Adjuntar evidencia, si aplica.
+Enviar reporte
+Contactar Central
+INGRESOS – REPARTIDOR
+Si el modelo económico de Domiclick contempla esta función:
+Ingresos del día.
+Ingresos de la semana.
+Ingresos del mes.
+Detalle por servicio.
+Comisiones.
+Descuentos.
+Liquidaciones.
+Pagos realizados.
+Pagos pendientes.
+Botones
+Mis ingresos
+Detalle
+Historial
+Liquidaciones
+DESEMPEÑO – REPARTIDOR
+Indicadores
+Servicios realizados.
+Servicios cancelados.
+Servicios completados.
+Calificación.
+Promedio.
+Tiempo de atención.
+Otros indicadores definidos por Domiclick.
+Botones
+Mi desempeño
+Ver estadísticas
+Historial
+PERFIL – REPARTIDOR
+Funciones
+Consultar datos personales.
+Editar información permitida.
+Foto.
+Teléfono.
+Correo.
+Documentación.
+Información del vehículo, si aplica.
+Información bancaria, si aplica.
+Contraseña.
+Botones
+Editar perfil
+Documentos
+Vehículo
+Cambiar contraseña
+Guardar
+PERFIL USUARIO / CLIENTE
+El Usuario tendrá como objetivo principal solicitar servicios, hacer seguimiento, consultar historial y comunicarse con Domiclick.
+INICIO – USUARIO
+Botones principales
+Solicitar servicio (Se debe habilitar la opción para que el cliente adjunte foto de la factura de compra o la opción para que el cliente digite el número de factura, esto facilita al repartidor llegar con comprobante a recoger la orden, da mayor credibilidad del cliente y del establecimiento = Excelente servicio)
+Mis servicios
+Servicio actual
+Historial
+Notificaciones
+Perfil
+Ayuda
+SOLICITAR SERVICIO
+Información
+El usuario deberá poder ingresar/seleccionar la información requerida para generar un servicio.
+Funciones
+Seleccionar origen. (Este buscador tendrá la opción de buscar por nombre principal, no es necesario que el cliente digite la dirección detalladamente, automáticamente se auto rellena al seleccionar el punto de referencia)
+Seleccionar destino. (Este buscador tendrá la opción de buscar por nombre principal, no es necesario que el cliente digite la dirección detalladamente, automáticamente se auto rellena al seleccionar el punto de referencia)
+Ingresar información del servicio.
+Seleccionar tipo de servicio.
+Agregar instrucciones.
+Consultar valor, si aplica.
+Revisar resumen.
+Confirmar solicitud.
+Botones
+Origen
+Destino
+Continuar
+Agregar información
+Agregar instrucciones
+Ver valor
+Confirmar servicio
+Cancelar
+SEGUIMIENTO DEL SERVICIO – USUARIO
+Información
+Estado actual.
+Repartidor asignado. (Habilitar el chat con el repartidor y chat con la central de operaciones)
+Ubicación.
+Ruta.
+Tiempo estimado.
+Datos del servicio.
+Historial de estados.
+Botones
+Ver servicio
+Ver repartidor
+Ver mapa
+Contactar
+Cancelar, cuando esté permitido.
+Reportar problema
+HISTORIAL – USUARIO
+Información
+Servicios realizados.
+Fecha.
+Hora.
+Origen.
+Destino.
+Valor.
+Estado.
+Repartidor, cuando corresponda.
+Botones
+Ver detalle
+Repetir servicio, si aplica.
+Calificar
+Reportar problema
+Comprobante
+CALIFICACIÓN
+Después de finalizar el servicio, el usuario podrá calificarlo cuando esta función esté contemplada.
+Elementos
+Calificación.
+Comentario.
+Enviar.
+Botones
+Calificar servicio
+Enviar
+Omitir
+PERFIL – USUARIO
+Funciones
+Datos personales.
+Teléfono.
+Correo.
+Foto.
+Direcciones.
+Métodos de pago, si aplica.
+Contraseña.
+Preferencias.
+Botones
+Editar perfil
+Mis direcciones
+Métodos de pago
+Cambiar contraseña
+Guardar
+AYUDA Y SOPORTE – USUARIO
+Funciones
+Preguntas frecuentes.
+Contactar soporte.
+Reportar problema.
+Consultar términos y condiciones.
+Consultar política de privacidad.
+Botones
+Ayuda
+Preguntas frecuentes
+Contactar soporte
+Reportar problema
+Términos y condiciones
+Política de privacidad
+NOTIFICACIONES PUSH
+Las notificaciones Push deberán estar relacionadas directamente con los eventos del sistema.
+Se deberán utilizar los 5 tipos de mensajes Push definidos oficialmente para Domiclick, respetando su redacción y estructura.
+Para cada Push se deberá determinar:
+1. Asignación del Repartidor
+Título: ¡Tu repartidor está listo! 🚀
+Mensaje: Asignamos un Domiclick para recoger tu pedido. Ya se dirige al establecimiento.
+2. Llegada al Comercio
+Título: Repartidor en el sitio 📍
+Mensaje: Tu Domiclick ya está en el restaurante validando tu número de compra.
+3. Pedido Recogido y en Ruta
+Título: ¡Pedido en camino! 🛵💨
+Mensaje: Ya recogimos tu comida. Relájate, Domiclick va directo a tu ubicación.
+4. Cercanía al Destino
+Título: ¡Estamos muy cerca! 👀
+Mensaje: Tu Domiclick está a pocos minutos de tu dirección. ¡Alístate para recibirlo!
+5. Entrega en la Puerta
+Título: ¡Llegó Domiclick! 🎉
+Mensaje: Tu repartidor está afuera con tu pedido. ¡Gracias por confiar en nosotros y buen provecho!
+TRAZABILIDAD DE LOS SERVICIOS
+Esta función es fundamental.
+Cada servicio debe conservar un historial de las acciones realizadas.
+Debe registrar, como mínimo:
+Fecha.
+Hora.
+Usuario que realizó la acción.
+Perfil.
+Acción.
+Estado anterior.
+Estado nuevo.
+Observaciones.
+Ubicación, cuando corresponda.
+Ejemplo
+Servicio creado↓Solicitud recibida por Central↓Repartidor asignado↓Repartidor acepta↓Repartidor inicia desplazamiento↓Llegada al origen↓Recogida confirmada↓Inicio de entrega↓Llegada al destino↓Entrega confirmada↓Servicio finalizado
+PRINCIPIO GENERAL DE LA PLATAFORMA
+La lógica principal deberá mantenerse separada de acuerdo con las responsabilidades:
+ADMINISTRADORControl, configuración, supervisión y administración general.
+CENTRAL DE OPERACIÓNGestión, coordinación, asignación y seguimiento de servicios.
+REPARTIDOREjecución física del servicio, actualización de estados y comunicación operativa.
+USUARIOSolicitud, seguimiento, recepción del servicio, historial y comunicación.
+Esta separación permitirá mantener claridad en los permisos, evitar acciones indebidas y facilitar el crecimiento futuro de la plataforma.
+VALIDACIÓN FINAL
+Antes de considerar terminada una funcionalidad, el equipo de desarrollo deberá verificar:
+¿La pantalla existe?
+¿El botón existe?
+¿El botón ejecuta la acción correcta?
+¿El usuario tiene permiso para realizarla?
+¿El estado cambia correctamente?
+¿La información queda almacenada?
+¿La acción aparece en la trazabilidad?
+¿Se genera el Push correspondiente?
+¿El destinatario recibe la notificación correcta?
+¿El flujo continúa correctamente hacia el siguiente estado?

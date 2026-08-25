@@ -10,6 +10,16 @@ import {
 import { API_URL, INGEST_TOKEN, SITE_ID } from './config';
 import { createClientOrder, findOrderByTrackingCode } from './firebase';
 
+function shouldUseIngestApi() {
+  if (!API_URL) return false;
+  if (typeof window === 'undefined') return true;
+  const host = window.location.hostname;
+  const isLocalHost = host === 'localhost' || host === '127.0.0.1';
+  const apiIsLocal = /localhost|127\.0\.0\.1/.test(API_URL);
+  if (!isLocalHost && apiIsLocal) return false;
+  return true;
+}
+
 /**
  * Envía la solicitud a DomiClick.
  * 1) Intenta API tubo (:8787)
@@ -23,7 +33,12 @@ export async function submitOrder(
     sourceSiteId: SITE_ID,
   };
 
+  if (!shouldUseIngestApi()) {
+    console.info('[DomiClick] Producción: guardando pedido directo en Firestore');
+  }
+
   try {
+    if (!shouldUseIngestApi()) throw new Error('skip-local-ingest-api');
     const res = await fetch(`${API_URL}${INGEST_PATH}`, {
       method: 'POST',
       headers: {
@@ -79,6 +94,9 @@ export async function submitOrder(
     scheduledFor: payload.scheduledFor,
     invoiceNumber: payload.invoiceNumber,
     invoicePhotoUrl: payload.invoicePhotoUrl,
+    paymentMethod: payload.paymentMethod,
+    paymentNote: payload.paymentNote,
+    couponCode: payload.couponCode,
     sourceSiteId: SITE_ID,
   });
 }

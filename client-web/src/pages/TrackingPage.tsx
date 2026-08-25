@@ -279,6 +279,11 @@ export function TrackingPage() {
             Ingresa un código para ver el estado de tu entrega.
           </p>
         ) : null}
+
+        <footer className="mt-16 border-t border-[var(--domi-border)] pt-8 text-center text-xs text-[var(--domi-muted)]">
+          <p>Calle 23 37k 28 · Barrio Teusaca · Villavicencio, Meta</p>
+          <p className="mt-1">© 2026 DomiClick. Todos los derechos reservados.</p>
+        </footer>
       </main>
     </div>
   );

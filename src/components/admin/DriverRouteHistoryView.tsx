@@ -258,7 +258,7 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
             <h2 className="text-lg font-extrabold text-white">Historial de Rutas GPS por Motorizado</h2>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Visualización de telemetría y trayectoria registrada en Firestore para la jornada operativa
+            Visualización de telemetría y trayectoria para la jornada operativa
           </p>
         </div>
 

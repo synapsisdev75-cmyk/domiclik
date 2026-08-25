@@ -21,3 +21,14 @@ export const GOOGLE_MAPS_API_KEY =
 
 export const GOOGLE_MAPS_MAP_ID =
   import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || '7959bb6afa37dd5e9db669a8';
+
+/** Torre de control (ops). ops.domiclick.com puede estar aún en el sitio de landing. */
+export function opsTowerUrl() {
+  const fromEnv = String(import.meta.env.VITE_OPS_URL || '').replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:3000';
+  }
+  return 'https://domiclick-ops.web.app';
+}

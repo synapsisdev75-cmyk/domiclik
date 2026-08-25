@@ -58,7 +58,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
     sessionStorage.setItem(LOGIN_ROLE_KEY, role);
     try {
-      await startGoogleSignInRedirect();
+      const user = await startGoogleSignInRedirect();
+      if (user?.email) {
+        sessionStorage.removeItem(LOGIN_ROLE_KEY);
+        onAuthenticated(user.email, role);
+        onClose();
+      }
     } catch (err: unknown) {
       setLoading(false);
       setError(describeAuthError(err));

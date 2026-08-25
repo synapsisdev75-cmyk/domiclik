@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { CalendarClock, Loader2, Package } from 'lucide-react';
 import { submitOrder } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { uploadInvoicePhoto } from '../lib/firebase';
 import {
   estimateRoute,
   estimateRouteWithGoogle,
@@ -13,7 +14,6 @@ import {
   estimateTravelMinutes,
   formatCOP,
   MIN_SCHEDULE_LEAD_MIN,
-  MIN_SHIPPING_FEE_COP,
   parseDatetimeLocal,
   resolveScheduledFor,
   scheduleWindow,
@@ -36,6 +36,9 @@ export type OrderFormValues = {
   notes: string;
   scheduledFor: string;
   invoiceNumber: string;
+  paymentMethod: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
+  paymentNote: string;
+  couponCode: string;
 };
 
 const INITIAL: OrderFormValues = {
@@ -49,6 +52,9 @@ const INITIAL: OrderFormValues = {
   notes: '',
   scheduledFor: '',
   invoiceNumber: '',
+  paymentMethod: 'efectivo',
+  paymentNote: '',
+  couponCode: '',
 };
 
 interface OrderFormProps {
@@ -70,11 +76,11 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   const [path, setPath] = useState<LatLng[]>([]);
   const [routeKm, setRouteKm] = useState(0);
   const [, setRouteMin] = useState(0);
-  const [routeProvider, setRouteProvider] = useState<'google' | 'osrm' | 'approx' | null>(null);
   const [pickMode, setPickMode] = useState<MapPickMode>('pickup');
   const [geoBusy, setGeoBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
 
   const routeGenRef = useRef(0);
   const googleRetryRef = useRef<number | null>(null);
@@ -158,7 +164,6 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       setPath(est.path);
       setRouteKm(est.distanceKm);
       setRouteMin(est.durationMin);
-      setRouteProvider(est.provider);
 
       if (est.provider !== 'google') {
         googleRetryRef.current = window.setTimeout(() => {
@@ -176,7 +181,6 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             setPath(g.path);
             setRouteKm(g.distanceKm);
             setRouteMin(g.durationMin);
-            setRouteProvider('google');
           });
         }, 1200);
       }
@@ -190,7 +194,6 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       setPath([]);
       setRouteKm(0);
       setRouteMin(0);
-      setRouteProvider(null);
       return;
     }
     // Mientras se arrastra, solo mueve el pin; la ruta se calcula al soltar
@@ -307,6 +310,14 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       }
       await setPhone(phone);
 
+      let invoicePhotoUrl: string | undefined;
+      if (invoiceFile) {
+        if (invoiceFile.size > 5 * 1024 * 1024) {
+          throw new Error('La foto de factura no puede superar 5 MB');
+        }
+        invoicePhotoUrl = await uploadInvoicePhoto(invoiceFile);
+      }
+
       const result = await submitOrder({
         customerName: values.customerName.trim(),
         customerPhone: phone,
@@ -330,6 +341,10 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         peakMultiplier: quote.multiplier,
         scheduledFor: scheduled.toISOString(),
         invoiceNumber: values.invoiceNumber.trim() || undefined,
+        invoicePhotoUrl,
+        paymentMethod: values.paymentMethod,
+        paymentNote: values.paymentNote.trim() || undefined,
+        couponCode: values.couponCode.trim() || undefined,
       });
 
       if (!result.trackingCode) {
@@ -344,7 +359,11 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         customerPhone: phone,
         scheduledFor: toDatetimeLocalValue(min),
         invoiceNumber: '',
+        paymentMethod: 'efectivo',
+        paymentNote: '',
+        couponCode: '',
       });
+      setInvoiceFile(null);
       setPickup(null);
       setDelivery(null);
       setPath([]);
@@ -366,9 +385,6 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           </span>
           <div>
             <h2 className="font-display text-2xl font-bold text-white">Solicitar entrega</h2>
-            <p className="mt-1 text-sm text-[var(--domi-muted)]">
-              A = recolección · B = entrega. Tarifa $2.300 COP/km (hora pico +35%).
-            </p>
           </div>
         </div>
 
@@ -410,7 +426,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             required
             value={values.customerName}
             onChange={(e) => update('customerName', e.target.value)}
-            placeholder="Ana Pérez"
+            placeholder="Nombre completo"
           />
         </label>
 
@@ -424,7 +440,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             required
             value={values.customerPhone}
             onChange={(e) => update('customerPhone', e.target.value)}
-            placeholder="300 123 4567"
+            placeholder="Número de celular"
           />
         </label>
 
@@ -437,7 +453,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             type="email"
             value={values.customerEmail}
             onChange={(e) => update('customerEmail', e.target.value)}
-            placeholder="ana@correo.com"
+            placeholder="Correo electrónico"
             readOnly={Boolean(profile?.email)}
           />
         </label>
@@ -490,10 +506,6 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             max={toDatetimeLocalValue(scheduleBounds.max)}
             onChange={(e) => update('scheduledFor', e.target.value)}
           />
-          <span className="mt-1 block text-[11px] text-[var(--domi-muted)]">
-            Mínimo ~{scheduleBounds.leadMin} min (viaje + margen según km y hora pico/normal a 60–75
-            km/h) · máximo 15 días.
-          </span>
         </label>
 
         <label className="block sm:col-span-2">
@@ -508,9 +520,76 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             placeholder="Ej. FAC-1024 / número de pedido del restaurante"
           />
           <span className="mt-1 block text-[11px] text-[var(--domi-muted)]">
-            El repartidor lo valida en el establecimiento. Adjunta también notas si hay foto o referencia.
+            El repartidor lo valida en el establecimiento.
           </span>
         </label>
+
+        <label className="block sm:col-span-2">
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+            Foto de factura (opcional)
+          </span>
+          <input
+            className="field-input file:mr-3 file:rounded-md file:border-0 file:bg-[rgba(0,229,255,0.15)] file:px-3 file:py-1 file:text-xs file:text-white"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={(e) => setInvoiceFile(e.target.files?.[0] || null)}
+          />
+          {invoiceFile ? (
+            <span className="mt-1 block text-[11px] text-[var(--domi-green)]">
+              Archivo: {invoiceFile.name}
+            </span>
+          ) : null}
+        </label>
+
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+            Forma de pago *
+          </span>
+          <select
+            className="field-input"
+            required
+            value={values.paymentMethod}
+            onChange={(e) =>
+              update(
+                'paymentMethod',
+                e.target.value as OrderFormValues['paymentMethod']
+              )
+            }
+          >
+            <option value="efectivo">Efectivo al recibir</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="ya_pagado">Ya pagado en el negocio</option>
+            <option value="otro">Otro</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+            Cupón (opcional)
+          </span>
+          <input
+            className="field-input uppercase"
+            value={values.couponCode}
+            onChange={(e) => update('couponCode', e.target.value.toUpperCase())}
+            placeholder="Código promocional"
+            autoComplete="off"
+          />
+        </label>
+
+        {values.paymentMethod === 'transferencia' || values.paymentMethod === 'otro' ? (
+          <label className="block sm:col-span-2">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+              Detalle de pago
+            </span>
+            <input
+              className="field-input"
+              value={values.paymentNote}
+              onChange={(e) => update('paymentNote', e.target.value)}
+              placeholder="Banco, referencia o aclaración"
+            />
+          </label>
+        ) : null}
 
         <label className="block sm:col-span-2">
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
@@ -525,20 +604,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           />
         </label>
 
-        <label className="block sm:col-span-1">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Valor declarado (COP)
-          </span>
-          <input
-            className="field-input"
-            inputMode="numeric"
-            value={values.declaredValue}
-            onChange={(e) => update('declaredValue', e.target.value)}
-            placeholder="45000"
-          />
-        </label>
-
-        <label className="block sm:col-span-1">
+        <label className="block sm:col-span-2">
           <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
             Notas
           </span>
@@ -558,23 +624,6 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           </p>
           <p className="mt-1 font-display text-2xl font-extrabold text-white">
             {formatCOP(quote.shippingFee)}
-          </p>
-          <p className="mt-1 text-sm text-[var(--domi-muted)]">
-            {quote.formula}
-            {geoBusy
-              ? ' · recalculando…'
-              : ` · ~${quote.durationMin} min (${quote.travelMin} viaje @ ${quote.speedKmh} km/h + ${quote.bufferMin} margen)`}
-            {routeProvider === 'google'
-              ? ' · Google Directions'
-              : routeProvider === 'osrm'
-                ? ' · ruta por calles'
-                : routeProvider === 'approx'
-                  ? ' · estimación aprox.'
-                  : ''}
-          </p>
-          <p className="mt-1 text-xs text-[var(--domi-muted)]">
-            Bandera: <span className="text-white">{quote.label}</span> · Mínimo{' '}
-            {formatCOP(MIN_SHIPPING_FEE_COP)}
           </p>
         </div>
       ) : null}

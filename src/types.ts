@@ -51,6 +51,8 @@ export interface MotorizadoDriver {
   webauthnCredentialId?: string;
   lastPunchType?: 'in' | 'out';
   lastPunchAt?: string;
+  /** Último km de odómetro marcado (entrada o salida). */
+  lastOdometerKm?: number;
   approvedBy?: string;
   rejectionReason?: string;
   createdAt: string;
@@ -117,6 +119,11 @@ export interface DeliveryOrder {
   assignedDriverName: string | null;
   assignedDriverPhone?: string | null;
   notes?: string;
+  /** Forma de pago informada por el cliente (sin pasarela). */
+  paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
+  paymentNote?: string;
+  couponCode?: string;
+  couponDiscount?: number;
   /** Número de factura / orden de compra prepagada */
   invoiceNumber?: string;
   /** Foto de la factura para validar en el establecimiento */
@@ -146,10 +153,16 @@ export interface DeliveryOrder {
   /** Origen: página de ventas autorizada */
   sourceSiteId?: string;
   externalOrderId?: string;
-  /** Calificación 1–5 del servicio (admin / cliente) */
+  /** Calificación 1–5 del servicio (promedio de encuesta del cliente) */
   serviceRating?: number;
   ratingComment?: string;
   ratedAt?: string;
+  ratedByUid?: string;
+  ratingSurvey?: {
+    punctuality: number;
+    care: number;
+    attention: number;
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -209,6 +222,11 @@ export interface DriverReview {
   trackingCode?: string;
   stars: number;
   comment: string;
+  survey?: {
+    punctuality: number;
+    care: number;
+    attention: number;
+  };
   authorRole: 'admin' | 'customer';
   authorName: string;
   authorUid?: string;

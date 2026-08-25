@@ -35,6 +35,9 @@ export type IngestOrderBody = {
   scheduledFor?: string;
   invoiceNumber?: string;
   invoicePhotoUrl?: string;
+  paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
+  paymentNote?: string;
+  couponCode?: string;
 };
 
 export type IngestOrderResponse = {

@@ -19,7 +19,7 @@ const unlockOnce = () => {
 window.addEventListener('pointerdown', unlockOnce);
 window.addEventListener('keydown', unlockOnce);
 
-// PWA: en desarrollo NO registrar SW (evita JS/datos fantasma). En prod: network-first.
+// PWA: en desarrollo NO registrar SW. En prod: network-first + limpia caches viejos.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
@@ -30,7 +30,14 @@ if ('serviceWorker' in navigator) {
         await Promise.all(keys.map((k) => caches.delete(k)));
         return;
       }
-      await navigator.serviceWorker.register('/sw.js');
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      // Fuerza toma de control del SW nuevo (evita pantallas negras por JS/CSS cacheado)
+      if (reg.waiting) reg.waiting.postMessage?.({ type: 'SKIP_WAITING' });
+      reg.update().catch(() => undefined);
+      const keys = await caches.keys();
+      await Promise.all(
+        keys.filter((k) => k.startsWith('domiclick-') && k !== 'domiclick-v5-shell').map((k) => caches.delete(k))
+      );
     } catch (err) {
       console.warn('Service worker setup failed', err);
     }

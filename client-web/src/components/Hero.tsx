@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, MapPin } from 'lucide-react';
 import { BRAND } from './BrandLogo';
 import { BRAND_SUBLINE, BRAND_TAGLINE, BRAND_WELCOME } from '../lib/brandCopy';
@@ -46,22 +47,44 @@ interface HeroProps {
 }
 
 export function Hero({ onCtaClick }: HeroProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [showVideo, setShowVideo] = useState(true);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const play = video.play();
+    if (play && typeof play.catch === 'function') {
+      play.catch(() => setShowVideo(false));
+    }
+  }, []);
+
   return (
-    <section className="relative isolate min-h-[100svh] overflow-hidden">
-      <video
-        className="absolute inset-0 h-full w-full object-cover"
-        src={BRAND.heroVideo}
-        autoPlay
-        muted
-        loop
-        playsInline
-        poster="/brand/logo-optimized-transparent.png"
-      />
-      <div className="absolute inset-0 bg-gradient-to-b from-[#05080f]/55 via-[#05080f]/72 to-[#05080f]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_20%,rgba(5,8,15,0.75)_75%)]" />
+    <section className="relative isolate min-h-[100vh] min-h-[100svh] overflow-hidden bg-[#05080f]">
+      {showVideo ? (
+        <video
+          ref={videoRef}
+          className="absolute inset-0 h-full w-full object-cover"
+          src={BRAND.heroVideo}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          poster="/brand/logo-optimized-transparent.png"
+          onError={() => setShowVideo(false)}
+        />
+      ) : (
+        <div
+          className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_20%,rgba(255,87,34,0.28),transparent_50%),radial-gradient(ellipse_at_80%_60%,rgba(43,108,255,0.22),transparent_45%),linear-gradient(180deg,#0a1224,#05080f)]"
+          aria-hidden
+        />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-b from-[#05080f]/45 via-[#05080f]/65 to-[#05080f]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_20%,rgba(5,8,15,0.7)_75%)]" />
       <HeroRouteOverlay />
 
-      <div className="relative z-10 mx-auto flex min-h-[100svh] max-w-6xl flex-col justify-end px-5 pb-16 pt-28 sm:px-8 sm:pb-24">
+      <div className="relative z-10 mx-auto flex min-h-[100vh] min-h-[100svh] max-w-6xl flex-col justify-end px-5 pb-16 pt-28 sm:px-8 sm:pb-24">
         <div className="max-w-2xl">
           <p className="animate-fade-up mb-3 inline-flex items-center gap-2 text-sm font-semibold tracking-wide text-[var(--domi-cyan)]">
             <MapPin className="h-4 w-4" aria-hidden />

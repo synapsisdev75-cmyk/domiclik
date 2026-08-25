@@ -1,5 +1,5 @@
 /* DomiClick PWA — network-first para no servir datos/JS viejos */
-const CACHE = 'domiclick-v3-shell';
+const CACHE = 'domiclick-v5-shell';
 const PRECACHE = [
   '/manifest.webmanifest',
   '/brand/logo-mark.png',
@@ -25,6 +25,12 @@ self.addEventListener('activate', (event) => {
       )
       .then(() => self.clients.claim())
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', (event) => {

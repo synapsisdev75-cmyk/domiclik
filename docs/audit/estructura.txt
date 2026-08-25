@@ -1,0 +1,850 @@
+APP DE DELIVERY
+OBJETIVO DEL PROYECTO
+Desarrollar una plataforma integral de delivery que permita conectar clientes y repartidores:
+CLIENTES: Que desean recibir servicios de restaurantes, tiendas y productos.
+CENTRAL DE OPERACIONES: (Debe contar con un panel administrativo con roles y permisos específicos) será el área responsable de recibir, coordinar, supervisar y dar seguimiento integral a las solicitudes realizadas por los clientes, asegurando que cada requerimiento sea gestionado de manera eficiente e intregado conforme a los estándares de calidad establecidos por la compañía.
+Su función principal será garantizar la correcta coordinación entre cliente, restaurante/comercio y repartidor, desde la recepción de la solicitud hasta la finalización y confirmación de la entrega.
+Responsabilidades:
+Recepcionar y validar las solicitudes realizadas por los clientes.
+Coordinar y asignar los recursos necesarios para la correcta ejecución de cada pedido.
+Supervisar en tiempo real el estado y avance de las órdenes.
+Coordinar la comunicación entre cliente, restaurante/comercio y repartidor.
+Dar seguimiento a los tiempos de preparación, despacho y entrega.
+Detectar, gestionar e informar oportunamente cualquier incidencia o desviación durante el proceso.
+Coordinar soluciones ante retrasos, pedidos incompletos, productos incorrectos u otras eventualidades.
+Garantizar el cumplimiento de los protocolos operativos y estándares de servicio.
+Mantener informado al cliente sobre cambios relevantes en el estado de su pedido.
+Registrar y documentar incidencias para su posterior análisis y mejora continua.
+Estándares de calidad del servicio.
+La Central de Operaciones deberá garantizar que cada pedido sea gestionado bajo los siguientes principios:
+Puntualidad: cumplimiento de los tiempos de preparación y entrega establecidos, manteniendo una comunicación proactiva ante cualquier eventualidad.
+Respeto: trato profesional, cordial y respetuoso hacia clientes, restaurantes, repartidores y demás participantes de la operación.
+Honestidad y transparencia: manejo responsable de la información, los pedidos, los pagos y cualquier incidencia que se presente durante el servicio.
+Amabilidad: atención cercana, profesional y orientada a brindar una experiencia positiva al cliente.
+Integridad del pedido: garantizar que los productos sean entregados completos, correctamente preparados, debidamente protegidos y en condiciones adecuadas para su consumo.
+Responsabilidad: seguimiento de cada solicitud hasta su correcta finalización, evitando que los incidentes queden sin resolución.
+Trazabilidad: mantener registro de los principales eventos, estados e incidencias asociados a cada pedido.
+Objetivo operativo.
+La Central de Operaciones deberá asegurar que cada solicitud recibida sea atendida, coordinada, monitoreada y finalizada de manera eficiente, proporcionando al cliente una experiencia consistente y de alta calidad, desde la confirmación del pedido hasta su entrega final.
+El desempeño de esta área deberá medirse mediante indicadores clave como:
+PORCENTAJE DE PUNTUALIDAD. (Indicador Repartidor)
+Formula:
+Pedidos entregados dentro del tiempo prometido ​ × 100
+Total, de pedidos entregados
+Ejemplo:950 pedidos puntuales / 1,000 pedidos entregados × 100 = 95%
+TIEMPO DE GESTION. (Indicador Central de operaciones)
+Formula:
+(Hora de asignación − Hora de recepción)
+Total, de solicitudes gestionadas
+Unidad de medida: Minutos.
+Es importante que el sistema registre automáticamente los tiempos de recepción y asignación
+TIEMPO CONECTADO VS TIEMPO ACTIVO (Indicador repartidor)
+Indicador que permita visualizar, de manera diaria, el rendimiento de cada motocicleta. Este indicador deberá mostrar tres métricas clave:
+Distancia total recorrida en kilómetros.
+Horas totales de conexión a la plataforma
+Horas efectivas de actividad (es decir, el tiempo en que se realizaron entregas o movimientos).
+Los datos deben provenir del seguimiento en tiempo real de la aplicación y presentarse en un dashboard accesible a través del panel de control. Es fundamental que el sistema integre estos datos en tiempo real y permita generar reportes históricos diarios, segmentados por unidad.”
+INDICADOR DE EFICIENCIA (Este indicador es para control interno, como plan estratégico se premiará o remunerará económicamente con frecuencia mensual al mejor repartidor en base a este indicador)
+Sistema de puntuación de repartidores
+Crear un indicador de desempeño basado en:
+• Puntualidad.
+• Cantidad de entregas.
+• Cancelaciones.
+• Tiempo promedio por entrega.
+• Kilómetros recorridos.
+• Calificación de los clientes.
+• Incidencias reportadas.
+TIEMPO DE ENTREGA. (Indicador repartidor)
+Mide el tiempo desde la confirmación del pedido hasta su entrega al cliente.
+Fórmula:
+(Hora de entrega−Hora de confirmación)​
+Total, de pedidos entregados
+Unidad de medida: minutos.
+También recomiendo medirlo por separado desde:
+Hora pedido confirmado → Hora pedido listoHora pedido listo → Hora pedido recogidoHora pedido recogido → Hora pedido entregado
+Esto permitirá identificar exactamente dónde está el problema operativo.
+PEDIDOS ENTREGADOS CORRECTAMENTE. (Indicador repartidor)
+Mide qué porcentaje de pedidos llega al cliente sin errores.
+Un pedido correctamente entregado puede definirse como aquel que:
+Llegó al cliente correcto.
+Llegó a la dirección correcta.
+Contiene los productos solicitados.
+No presenta faltantes.
+No presenta productos incorrectos.
+No presenta daños atribuibles a la operación.
+Formula:
+Pedidos entregados sin incidencias​ × 100
+Total de pedidos entregados
+Ejemplo:980 pedidos correctos / 1,000 pedidos entregados × 100 = 98%
+TASA DE INCIDENCIAS. (Indicador repartidor)
+Mide qué porcentaje de pedidos presentó algún problema durante el proceso.
+Formula:
+Pedidos con al menos una incidencia X 100
+Total de pedidos
+Ejemplo:
+35 pedidos con incidencia / 1,000 pedidos × 100 = 3.5%
+Importante:
+para evitar distorsiones, un pedido con 3 problemas debe contabilizarse como 1 pedido con incidencia en este KPI.
+Adicionalmente, conviene medir la cantidad de incidencias por cada 100 pedidos.
+TASA DE CANCELACIONES. (Indicador repartidor y central de operaciones)
+Mide el porcentaje de pedidos que fueron cancelados antes de completarse.
+Importante para determinar si la causa de cancelación obedece a una falla en la logística interna, el repartidor, el proveedor, en base a este indicador de establecen planes de acción y mejora continua
+Formula:
+Pedidos cancelados X 100
+Total de pedidos creados
+Ejemplo:
+20 cancelados / 1,000 pedidos creados × 100 = 2%
+Recomiendo dividirlo además por responsable:
+Cancelación por cliente.
+Cancelación por restaurante.
+Cancelación por repartidor.
+Cancelación por Central de Operaciones.
+Cancelación por Sistema/Pago.
+Esto es fundamental para identificar dónde está el problema.
+NIVEL DE SATISFACCIÓN DEL CLIENTE. (Indicador de repartidor)
+Si utilizas una calificación de 1 a 5:
+Formula:
+Estrellas recibidas por los clientes
+Total de calificaciones
+Ejemplo:
+4 + 5 + 5 + 4 + 5 = 4.6
+5
+Resultado: 4.6 / 5
+TIEMPO PROMEDIO DE RESOLUCIÓN DE INCIDENCIAS. (Indicador central de operaciones)
+Mide cuánto tiempo tarda la central en resolver una incidencia desde que es registrada hasta que se cierra.
+Formula:
+(Hora de cierre – Hora de apertura)
+Total de incidencias resueltas
+Unidad de medida: Minutos u horas.
+Ejemplo:
+incidencias resueltas en:
+10 min
+20 min
+15 min
+30 min
+25 min
+10+20+15+30+25 = 20
+5
+Resultado: 20 minutos promedio.
+REPARTIDORES: Los repartidores deberán mantener un nivel de desempeño y una calificación general mínima aceptable, determinada a partir de los indicadores de gestión definidos anteriormente.
+El sistema deberá calcular automáticamente el Índice de Desempeño del Repartidor, permitiendo clasificar su rendimiento y determinar si cumple con los estándares mínimos establecidos para continuar operando dentro de la empresa.
+Asimismo, los indicadores deben generar alertas cuando un repartidor presente resultados por debajo de los parámetros establecidos, con el objetivo de implementar acciones correctivas, seguimiento o cuando corresponda, suspensión temporal o definitiva de la actividad.
+ADMINISTRADOR: El Administrador será el responsable de supervisar, configurar y gestionar integralmente la operación, asegurando el correcto funcionamiento de todos los procesos y servicios que intervienen en la experiencia del cliente.
+La aplicación deberá contar con un panel administrativo centralizado, mediante el cual el administrador pueda gestionar y supervisar, de acuerdo con sus respectivos niveles de permisos y responsabilidades:
+Clientes y usuarios.
+Repartidores.
+Pedidos y entregas.
+Zonas y áreas de cobertura.
+Tarifas y costos de entrega.
+Métodos de pago.
+Promociones, descuentos y cupones.
+Comisiones por referidos
+Incidencias y solicitudes de soporte.
+Calificaciones y sugerencias de los clientes (Al finalizar la entrega generar una pequeña encuesta de satisfacción y generar un espacio editable para solicitar sugerencias para mejorar el servicio).
+Notificaciones.
+Reportes e indicadores de gestión (descargables por día)..
+Configuraciones generales de la plataforma.
+El sistema deberá implementar un modelo de roles y permisos, permitiendo establecer diferentes niveles de acceso para el administrador, la central de operaciones y los repartidores según sus funciones, garantizando que cada usuario pueda acceder únicamente a la información y operaciones que le correspondan.
+FUNCIONES PRINCIPALES QUE DEBE CONTENER Y EJECUTAR LA APP
+Asignación 100% automatizada e inteligente de ordenes en lugar de asignar simplemente el pedido al repartidor disponible, el sistema puede considerar:
+Distancia.
+Capacidad del vehículo.
+Número de pedidos actuales.
+Ubicación.
+Tipo de mercancía.
+Tiempo estimado de llegada.
+Historial de desempeño.
+Los usuarios que generen solicitudes a través de la central de operaciones, es decir, por vía telefónica, deberán proporcionar sus datos al operador, quienes los registrarán en un sistema centralizado. La aplicación, mediante una integración con APIs de asignación inteligente, procesará las órdenes de manera autónoma, optimizando su distribución a través de un motor de reglas basado en geolocalización y restricciones logísticas. De esta forma, se garantiza un enrutamiento automatizado, minimizando latencias y asegurando que las asignaciones se efectúen sin intervención manual, alineadas con las políticas de SLA y optimización del ciclo de entrega
+Facturación electrónica
+Para garantizar un proceso de facturación eficiente, ágil y automatizado, tanto la central de operaciones como la aplicación deberán permitir la captura y validación de la información necesaria del cliente.
+Como mínimo, se deberán registrar los siguientes datos:
+- Nombre completo o razón social del cliente.
+- Número de contacto.
+- Documento de identificación o datos tributarios, como cédula, NIT o RUT, según corresponda.
+- Correo electrónico u otro canal de comunicación alternativo para el envío de la factura y posibles procesos de seguimiento.
+- Dirección de facturación, cuando sea requerida.
+La aplicación deberá integrarse directamente con el software o sistema de facturación electrónica, permitiendo que, una vez confirmada la compra o servicio, la información sea transferida automáticamente para generar la factura electrónica.
+Esto permitirá reducir errores de digitación, agilizar el proceso de facturación, centralizar la información y garantizar una trazabilidad completa de cada transacción, además de facilitar el envío automático de la factura al cliente por correo electrónico, WhatsApp u otro canal habilitado.
+Modulo financiero
+Módulo financiero que permita registrar, consolidar y visualizar todos los ingresos, egresos y gastos de manera diaria. Este módulo debe permitir la captura manual o automática de cada transacción, categorizarlas (por ejemplo, ventas, costos, mantenimiento), y asociarlas a las motocicletas. Debe incluir un reporte diario con gráficos, desgloses por categoría y totales acumulados, accesible desde el panel de control. Además, se requiere que se pueda exportar la información a formatos estándar, como CSV o PDF, para su análisis contable.
+Este módulo debe contener un menú especifico donde se pueda registrar y gestionar todos los pagos en efectivo que se realicen a diario. Este módulo debe permitir ingresar, categorizar y validar cada pago realizado en efectivo, asociándolo a la motocicleta, pedido o concepto correspondiente. Es fundamental que se genere un reporte diario consolidado, con totales, desgloses por concepto, y que se integre a la sección de ingresos del módulo financiero. Además, el sistema debe permitir exportar estos registros a formatos estándar, como CSV, para su conciliación diaria.
+Módulo de programación de futuras entregas. (Para agendar una entrega futura el cliente debe realizar el 100% del pago para su programación)
+Este módulo permitirá a los usuarios programar entregas con hasta 8 días de anticipación. El objetivo es que, mediante una interfaz intuitiva, el usuario ingrese los datos básicos de la entrega (destinatario, dirección, productos, fecha deseada) y una vez programada, la orden se asocie automáticamente al sistema logístico. Es clave que el módulo recopile y valide la información, asegure la disponibilidad, y se integre con el flujo de asignación de pedidos. Asimismo, deberá incluir un panel de visualización donde se muestren las entregas programadas por fecha, permitiendo ajustes o cancelaciones previas.
+IMPORTANTE, este módulo debe contar con un sistema de notificaciones proactivas, donde los clientes reciban recordatorios automáticos de sus entregas programadas.
+Landig pague Chatbot con Inteligencia Artificial
+Implementación de un chatbot interactivo basado en Inteligencia Artificial (IA), diseñado para brindar atención y asistencia a los clientes durante cada etapa del proceso. El sistema podrá resolver dudas de manera inmediata, proporcionar información sobre el estado de los servicios o pedidos, orientar al usuario paso a paso y, cuando sea necesario, escalar la solicitud a un funcionario para recibir atención personalizada.
+Modulo de control de asistencia (Importante al tratarse de un control administrativo remoto, el personal debe estar 100% controlado con indicadores y sistemas que me lo permitan)
+Todos los funcionarios de la empresa deben registrar su entrada y salida de manera precisa, utilizando ya sea datos biométricos (como huella digital) o un código personal. El módulo debe capturar automáticamente la hora exacta de registro, asociar cada entrada al perfil del empleado, y generar reportes diarios con un resumen de horarios. Además, el sistema debe integrarse con el panel de control para que se puedan visualizar las asistencias por empleado, generar alertas ante retrasos, y exportar los reportes a formatos estándar, como CSV. Esto garantizará un control de asistencia riguroso, automatizado y con trazabilidad total de los horarios de los empleados.”
+Modulo de Control de mantenimiento preventivo y correctivo
+Cada motocicleta deberá tener una ficha técnica individual con:
+• marca, modelo, cilindraje, color, numero vin, numero chasis,
+• fecha soat, Generar alerta 8 días antes para su renovación
+• fecha tecno mecánica Generar alerta 8 días antes para su renovación
+• programación de Mantenimientos preventivos. Crear fórmula para calcular y generar una alerta cuando se acerque a los 5.000 km recorridos, para su posterior mantenimiento general, esto se alimenta a diario de manera automática con los datos que ingresa el repartidor antes de iniciar la operación, Generar alerta 500 km antes de llegar a los 5.000 esto para planificar la parada del equipo
+• historial de Reparaciones.
+• Próximo mantenimiento.
+• Costos acumulados.
+Sistema de fidelización
+Crear puntos para clientes frecuentes y permitir:
+• Descuentos.
+• Entregas gratis.
+• Promociones.
+• Beneficios por frecuencia de compra.
+Módulo de Control y Seguimiento del Consumo de Combustible
+Se deberá implementar un módulo que permita controlar y monitorear el consumo de combustible asociado a cada jornada de operación. Para iniciar la jornada, el sistema deberá exigir al repartidor el registro obligatorio del kilometraje inicial, bloqueando el inicio de operaciones hasta completar este dato.
+Al finalizar la jornada, el repartidor deberá registrar el kilometraje final como requisito para poder cerrar la sesión. A partir de ambos registros, el sistema calculará automáticamente el total de kilómetros recorridos durante la jornada.
+Adicionalmente, el módulo deberá en tiempo real calcular y notificar al repartidor la información correspondiente al consumo de combustible, con el fin de determinar automáticamente el total de galones consumidos y generar indicadores como kilómetros recorridos por galón, consumo promedio y costo estimado de combustible por jornada.
+Esta información permitirá llevar un control detallado del rendimiento de cada vehículo, detectar posibles desviaciones en el consumo, optimizar los costos operativos y generar reportes para la gestión administrativa y financiera de la empresa.
+Asignación estratégica de ordenes de acuerdo con su ubicación
+Los repartidores se distribuirán de manera estratégica en las cuatro zonas geográficas de la ciudad: oriente, occidente, norte y sur. El algoritmo de asignación, basado en inteligencia artificial, optimizará en tiempo real la ubicación del repartidor, priorizando la distancia mínima al punto de recogida. Esto garantizará una asignación dinámica, eficiente y escalable, integrándose con los módulos de geolocalización y gestión de rutas.
+Múltiples rutas y paradas: Capacidad para planificar y gestionar rutas de distribución con múltiples paradas, permitiendo consolidar pedidos provenientes de diferentes tiendas y optimizar su entrega en una misma ruta.
+Multiple asignación de ordenes
+La aplicación implementará un mecanismo avanzado de asignación de órdenes, permitiendo la asignación concurrente de hasta tres pedidos a un mismo repartidor, basado en un modelo de optimización de rutas geoespaciales. El algoritmo evaluará en tiempo real la densidad de entregas, las coordenadas geográficas y la capacidad logística, de modo que se puedan agrupar hasta dos órdenes adicionales sin sobrepasar el tiempo de entrega objetivo. Esta arquitectura garantiza un balance entre eficiencia operativa y cumplimiento, sin comprometer la puntualidad del servicio.
+Código de entrega seguroGenerar un código numérico único o código QR para cada pedido que el cliente debe proporcionar al repartidor para completar la entrega. Esto reduce entregas a personas equivocadas.
+Evidencia de entrega inteligenteRegistrar automáticamente fotografía + ubicación GPS + fecha/hora + código de validación, creando una trazabilidad completa de la entrega.
+Notificación automática de recogida del pedido
+El sistema deberá generar y enviar automáticamente una notificación al cliente en tiempo real una vez que el repartidor haya confirmado exitosamente la recogida del pedido.
+La notificación deberá permitir identificar al repartidor responsable y confirmar al cliente que su pedido ha sido recolectado. El mensaje deberá incluir, como mínimo, la siguiente información:
+“Hola, soy [Nombre del repartidor], repartidor de Domiclick. Te informo que he recogido exitosamente tu pedido y que ya se encuentra en proceso de entrega.”
+La notificación deberá enviarse de manera inmediata después de registrar la confirmación de recogida en el sistema.
+Notificación automática de proximidad al punto de entrega GEOFENCING
+El sistema deberá generar y enviar automáticamente una notificación al destinatario cuando el repartidor se encuentre aproximadamente a 2 minutos de distancia del punto de entrega, con el objetivo de anticipar su llegada, reducir los tiempos de espera y optimizar el proceso de entrega.
+La notificación deberá enviarse de forma automática con base en la ubicación y estimación de tiempo de llegada del repartidor, e incluir como mínimo la siguiente información:
+“Hola, [Nombre del DESTINATARIO]. Me encuentro aproximadamente a 2 minutos de llegar al punto de entrega. Por favor, permanece atento a mi llegada.”
+ETA inteligente y dinámicoMostrar al cliente una hora estimada de llegada que se actualice automáticamente según tráfico, ubicación del repartidor, paradas pendientes y condiciones de la ruta.
+Chat inteligente cliente–repartidorComunicación dentro de la aplicación sin necesidad de compartir números telefónicos. Incluso puedes incorporar mensajes predeterminados como:
+“Estoy llegando.”
+“No encuentro la dirección.”
+“¿Puedes indicarme dónde dejar el pedido?”
+“Estoy en la entrada.”
+Enmascaramiento de llamadasSi necesitas llamadas entre cliente y repartidor, evitar que ambos conozcan sus números personales.
+Optimización automática de rutasEl sistema calcula el mejor orden para múltiples recogidas y entregas, considerando distancia, tráfico, prioridad y ventanas de tiempo.
+Sistema de referidos
+Implementar:
+Código de referido.
+Link de referido.
+Invitación de amigos.
+Bonificación al nuevo usuario.
+Bonificación al usuario que refiere.
+Límites antifraude.
+Historial de referidos.
+Seguimiento en tiempo realEl cliente puede visualizar en el mapa la ubicación del repartidor y el avance de su pedido, con actualización automática.
+Botón de pánico / Alerta de emergencia
+El sistema deberá incorporar un botón de pánico accesible desde la aplicación del repartidor, diseñado para permitir el reporte inmediato de situaciones de emergencia o riesgo durante la operación de entrega.
+Al activarse, el sistema deberá generar una alerta de emergencia en tiempo real y notificar al personal o centro de monitoreo autorizado, incluyendo la información necesaria para facilitar la atención del incidente, como:
+Identificación del repartidor.
+Ubicación GPS en tiempo real.
+Fecha y hora de activación.
+Pedido o servicio asociado.
+Estado de la operación en el momento de la alerta.
+La activación del botón deberá requerir una confirmación previa para evitar activaciones accidentales. Una vez confirmada, la alerta deberá registrarse automáticamente en el sistema y mantenerse activa hasta que sea atendida o cerrada por un usuario autorizado.
+Objetivo: Proporcionar un mecanismo rápido y confiable para reportar situaciones de emergencia, permitiendo una respuesta oportuna y facilitando la trazabilidad del incidente.
+ESCALABILIDAD DE LA PLATAFORMA
+La arquitectura deberá diseñarse desde el inicio con capacidad para soportar el crecimiento progresivo de la operación, permitiendo incorporar y administrar de manera eficiente:
+Múltiples repartidores.
+Diferentes zonas y áreas de cobertura.
+Diferentes modelos y tarifas de entrega.
+Múltiples métodos de pago.
+Seguimiento de pedidos en tiempo real.
+Incremento progresivo de clientes, pedidos y transacciones.
+Expansión a nuevas ciudades, regiones o mercados.
+La plataforma deberá contar con una arquitectura segura, escalable, modular y preparada para crecimiento futuro, evitando que el incremento en el número de usuarios, establecimientos, repartidores o transacciones afecte significativamente el rendimiento, disponibilidad o calidad del servicio.
+Objetivo del módulo administrativo
+El objetivo principal será proporcionar a la organización una visión centralizada y en tiempo real de la operación, permitiendo supervisar el desempeño de la plataforma, tomar decisiones basadas en información confiable, identificar incidencias oportunamente y optimizar continuamente los procesos de servicio y entrega.
+Asimismo, todas las acciones y modificaciones administrativas deberán quedar registradas mediante un sistema de auditoría, permitiendo identificar quién realizó cada acción, cuándo fue realizada y, cuando corresponda, qué información fue modificada.
+APLICACIONES / INTERFACES DEL SISTEMA
+El proyecto deberá contemplar, como mínimo, los siguientes componentes:
+Aplicación del cliente
+iOS
+Android
+Version web
+Aplicación del repartidor
+iOS
+Android
+Panel administrativo
+Aplicación web
+Acceso restringido mediante roles y permisos
+REGISTRO Y AUTENTICACIÓN DEL CLIENTE
+El cliente deberá poder:
+Crear una cuenta mediante:
+Email
+Número telefónico
+Contraseña
+Google
+Apple
+Iniciar sesión.
+Cerrar sesión.
+Recuperar contraseña.
+Cambiar contraseña.
+Verificar número telefónico mediante código OTP.
+Verificar email.
+Mantener la sesión iniciada.
+Cerrar sesión de otros dispositivos.
+Gestionar dispositivos conectados.
+Eliminar permanentemente su cuenta.
+Aceptar términos y condiciones.
+Aceptar política de privacidad.
+Gestionar permisos de ubicación.
+Gestionar permisos de notificaciones.
+Seguridad
+Contraseñas almacenadas mediante hashing seguro.
+Protección contra intentos excesivos de login.
+Verificación de identidad cuando sea necesaria.
+Registro de actividad relevante.
+Protección contra cuentas duplicadas.
+Protección contra fraude.
+PERFIL DEL CLIENTE
+El cliente deberá disponer de un perfil donde pueda gestionar:
+Información personal
+Nombre.
+Apellido.
+Foto de perfil.
+Email.
+Teléfono.
+Fecha de nacimiento, si aplica.
+Preferencias.
+Direcciones
+Permitir:
+Agregar dirección.
+Editar dirección.
+Eliminar dirección.
+Establecer dirección principal.
+Guardar múltiples direcciones.
+Etiquetar direcciones:
+Casa
+Trabajo
+Oficina
+Otra
+Cada dirección deberá incluir:
+Dirección completa.
+Calle.
+Número.
+Apartamento/unidad.
+Ciudad.
+Instrucciones de entrega.
+Nombre del destinatario, si es diferente.
+GEOLOCALIZACIÓN
+La aplicación deberá utilizar geolocalización para:
+Detectar ubicación aproximada del cliente.
+Determinar si una dirección está dentro del área de cobertura.
+Calcular distancia entre restaurante y cliente.
+Calcular distancia entre repartidor y restaurante.
+Calcular rutas.
+Estimar tiempos de entrega.
+Mostrar seguimiento del repartidor.
+Determinar tarifas de delivery.
+Importante
+La dirección seleccionada para un pedido deberá quedar almacenada como un snapshot del pedido, de manera que modificar posteriormente la dirección del usuario no altere pedidos históricos.
+CARRITO DE COMPRA (APLICA PARA LA APP DE LA LICORERA Y DULCES SORPRESAS=
+El cliente deberá poder:
+Agregar productos.
+Eliminar productos.
+Modificar cantidades.
+Modificar personalizaciones.
+Agregar instrucciones.
+Ver subtotal.
+Ver impuestos.
+Ver costo de delivery.
+Ver cargos de servicio.
+Aplicar promociones.
+Aplicar cupones.
+Ver descuentos.
+Ver total final.
+El sistema deberá recalcular todos los valores en el backend antes de confirmar el pedido.
+PAGOS
+La plataforma deberá integrar un proveedor de pagos seguro.
+El sistema deberá soportar: tarjeta de debito, crédito, pse, o pago en efectivo
+Nunca almacenar directamente datos sensibles completos de tarjetas en la base de datos de la plataforma.
+PROPINAS
+El cliente deberá poder agregar propina:
+Antes de realizar el pedido.
+Después de recibirlo, si el modelo lo requiere.
+El sistema deberá registrar la propina asociada al pedido y determinar su distribución según las reglas del negocio.
+PROMOCIONES Y CUPONES
+El sistema deberá soportar:
+Códigos promocionales.
+Descuentos porcentuales.
+Descuentos de cantidad fija.
+Envío gratis.
+Primera orden.
+Promociones por zona.
+Promociones por horario.
+Promociones para determinados usuarios.
+Promociones con fecha de inicio y vencimiento.
+Pedido mínimo.
+El backend deberá validar siempre las condiciones del cupón.
+CREACIÓN DEL PEDIDO
+Al confirmar un pedido, generar un identificador único.
+El pedido deberá guardar:
+ID del pedido.
+Cliente.
+Punto de recogida
+Productos.
+Personalizaciones.
+Dirección de entrega.
+Instrucciones.
+Método de pago.
+Propina.
+Descuentos.
+Total.
+Fecha/hora.
+Estado.
+Repartidor asignado.
+Historial de estados.
+ESTADOS DEL PEDIDO
+Se recomienda implementar un flujo de estados claramente definido:
+Pedido creado.
+Pago pendiente.
+Pago confirmado.
+Pedido enviado al restaurante.
+Restaurante recibió pedido.
+Restaurante aceptó pedido.
+Restaurante está preparando.
+Pedido listo.
+Buscando repartidor.
+Repartidor asignado.
+Repartidor dirigiéndose al restaurante.
+Repartidor llegó al restaurante.
+Pedido recogido.
+Repartidor en camino al cliente.
+Repartidor llegó.
+Pedido entregado.
+Pedido cancelado.
+Pedido rechazado.
+Pedido fallido.
+Pedido reembolsado.
+Cada cambio de estado deberá registrar:
+Fecha/hora.
+Usuario/sistema que realizó el cambio.
+Estado anterior.
+Estado nuevo.
+TRACKING EN TIEMPO REAL
+El cliente deberá poder visualizar:
+Estado del pedido.
+Repartidor asignado.
+Ubicación aproximada del repartidor.
+Ruta.
+Tiempo estimado de llegada.
+Actualizaciones en tiempo real.
+El sistema deberá evitar exponer información personal innecesaria del repartidor.
+MAPAS Y NAVEGACIÓN
+Integrar proveedor de mapas para:
+Geocodificación.
+Reverse geocoding.
+Cálculo de rutas.
+Distancias.
+ETA.
+Navegación.
+El repartidor podrá abrir la navegación en una aplicación externa si se desea.
+NOTIFICACIONES
+Implementar los Push para notificar a los clientes de los siguientes eventos:
+Pedido recibido.
+Pedido aceptado.
+Pedido rechazado.
+Repartidor asignado.
+Pedido recogido.
+Repartidor llegó.
+Pedido entregado.
+Pedido cancelado.
+Reembolso.
+Promoción.
+Cupón.
+Recordatorio.
+Email
+Para:
+Registro.
+Confirmación.
+Recibos.
+Recuperación de cuenta.
+Pedidos.
+Reembolsos.
+El usuario deberá poder configurar qué comunicaciones desea recibir, excepto aquellas necesarias para ejecutar el servicio.
+REVIEWS Y RATINGS
+Después de completar un pedido, el cliente podrá evaluar:
+Repartidor
+Rating 1–5.
+Comentario opcional.
+Pedido
+Calidad.
+Exactitud.
+Tiempo.
+Experiencia.
+SOPORTE AL CLIENTE
+Debe existir un módulo de soporte.
+Opciones:
+Centro de ayuda.
+FAQ.
+Chat.
+Tickets.
+Reportar problema.
+Contactar soporte.
+Categorías:
+Pedido no recibido.
+Pedido incorrecto.
+Producto faltante.
+Producto dañado.
+Problemas de pago.
+Problemas con repartidor.
+Problemas técnicos.
+GESTIÓN DE REPARTIDORES
+El administrador podrá:
+Aprobar repartidores.
+Ver documentación.
+Activar/desactivar.
+Suspender.
+Ver ubicación, cuando corresponda.
+Ver pedidos realizados.
+Ver ganancias.
+Ver ratings.
+Revisar incidencias.
+Gestionar pagos.
+TARIFAS DE DELIVERY
+El sistema deberá soportar diferentes modelos:
+Tarifa fija.
+Tarifa según distancia.
+Tarifa según zona.
+Tarifa dinámica.
+Envío gratis.
+Tarifa mínima.
+Tarifa por demanda.
+La fórmula deberá ser configurable desde administración.
+PAGOS A REPARTIDORES NOMINA
+El sistema deberá registrar:
+Ganancia base.
+Pago por distancia.
+Incentivos.
+Bonos.
+Propinas.
+Ajustes.
+Penalizaciones, si legalmente aplican.
+Total ganado.
+Historial de pagos.
+El repartidor deberá poder consultar sus ganancias.
+PROMOCIONES ADMINISTRATIVAS
+El administrador podrá crear:
+Cupones.
+Descuentos.
+Envío gratis.
+Primera orden.
+Promociones por restaurante.
+Promociones por zona.
+Promociones por horario.
+Promociones para usuarios específicos.
+Cada promoción deberá tener:
+Nombre.
+Código.
+Tipo.
+Valor.
+Fecha inicio.
+Fecha fin.
+Uso máximo.
+Usuarios elegibles.
+Pedido mínimo.
+Restaurantes elegibles.
+Zonas elegibles.
+47. REPORTES
+El administrador deberá poder generar reportes:
+Ventas.
+Pedidos.
+Clientes.
+Repartidores.
+Comisiones.
+Propinas.
+Reembolsos.
+Cancelaciones.
+Promociones.
+Rentabilidad.
+Zonas.
+Horarios.
+Exportación:
+CSV.
+Excel.
+PDF, si se requiere.
+SEGURIDAD
+Implementar:
+HTTPS.
+Encriptación de información sensible.
+Hashing de contraseñas.
+Tokens seguros.
+Rate limiting.
+Protección contra ataques comunes.
+Validación de inputs.
+Protección de APIs.
+Control de acceso.
+Logs.
+Auditoría.
+Gestión segura de secretos.
+Protección contra fraude.
+Detección de actividad sospechosa.
+PRIVACIDAD Y CUMPLIMIENTO
+La plataforma deberá contemplar:
+Política de privacidad.
+Términos y condiciones.
+Consentimiento.
+Gestión de cookies, si aplica.
+Eliminación de cuenta.
+Solicitud de datos.
+Gestión de información personal.
+Retención de información.
+Protección de información financiera.
+Cumplimiento de las leyes aplicables a los mercados donde opere la plataforma.
+MULTIIDIOMA
+La arquitectura deberá estar preparada para internacionalización.
+Inicialmente podría soportar:
+Español.
+Inglés.
+FACTURACIÓN Y RECIBOS
+Después de completar un pedido:
+Generar recibo.
+Mostrar desglose.
+Enviar email.
+Permitir consultar desde historial.
+El recibo deberá mostrar:
+Fecha.
+Descripcion
+Total.
+Método de pago.
+PEDIDOS DE ALTA DEMANDA
+El sistema deberá estar preparado para momentos de alta demanda.
+Ejemplos:
+Viernes por la noche.
+Eventos deportivos.
+Festividades.
+Mal clima.
+Funciones:
+Aumentar tarifa.
+Limitar pedidos.
+Pausar zonas.
+Mostrar alertas.
+TIMELINE DEL PEDIDO
+Cada pedido deberá tener un timeline como:
+09:10 — Pedido creado09:11 — Pago confirmado09:12 — Restaurante aceptó09:15 — Preparación iniciada09:28 — Pedido listo09:30 — Repartidor asignado09:36 — Pedido recogido09:49 — Repartidor llegó09:50 — Pedido entregado
+Esto será fundamental para soporte y auditoría.
+MANEJO DE ERRORES
+Todos los sistemas deberán contemplar:
+Error de pago.
+Error de conexión.
+Repartidor no disponible.
+Dirección inválida.
+Producto agotado.
+Pedido duplicado.
+Fallo de notificación.
+Fallo de geolocalización.
+Fallo de mapas.
+Timeout.
+Error interno.
+El usuario deberá recibir mensajes claros y accionables.
+ESTADOS OFFLINE
+Las aplicaciones móviles deberán manejar pérdida temporal de conexión.
+Ejemplo:
+Si el repartidor pierde internet durante la entrega:
+No perder información.
+Guardar eventos pendientes.
+Sincronizar cuando vuelva la conexión.
+Evitar duplicación de eventos.
+ARQUITECTURA ESCALABLE
+La plataforma deberá diseñarse pensando en crecimiento.
+Inicialmente:
+Arquitectura modular.
+APIs bien definidas.
+Separación de responsabilidades.
+Base de datos correctamente indexada.
+Cache donde sea necesario.
+Procesamiento asíncrono para tareas pesadas.
+A futuro deberá poder soportar:
+Más ciudades.
+Más repartidores.
+Más usuarios.
+Mayor volumen de pedidos.
+SISTEMA DE COLAS / EVENTOS
+Se recomienda utilizar procesamiento asíncrono para:
+Notificaciones.
+Emails.
+SMS.
+Procesamiento de pagos.
+Asignación de repartidores.
+Actualización de estadísticas.
+Procesamiento de imágenes.
+Generación de reportes.
+OBSERVABILIDAD
+Implementar:
+Logs centralizados.
+Error tracking.
+Monitoring.
+Métricas.
+Alertas.
+Health checks.
+Monitoring de APIs.
+Monitoring de base de datos.
+Monitoring de pagos.
+El equipo deberá poder detectar rápidamente:
+Caídas.
+Errores.
+Aumento de latencia.
+Fallos de pagos.
+Problemas de notificaciones.
+tests
+Probar flujo completo:
+Cliente → Central de operaciones → App → Repartidor → Cliente.
+Tests de carga
+Simular:
+Cientos/miles de usuarios.
+Muchos pedidos simultáneos.
+Alta demanda.
+CASOS CRÍTICOS QUE EL INGENIERO DEBE RESOLVER
+Antes del lanzamiento se deberán definir específicamente estos escenarios:
+Caso 1
+Cliente paga → orden cancelada o producto no disponible.
+¿Qué sucede con el dinero?
+Caso 2
+Domiclick acepta → no hay repartidores.
+¿Qué sucede?
+Caso 3
+Cliente cambia dirección después de realizar el pedido.
+¿Está permitido?
+Caso 5
+Producto se agota después de recibir el pedido.
+¿Cómo se reemplaza o reembolsa?
+Caso 6
+Cliente dice que nunca recibió el pedido.
+¿Cómo se investiga?
+Caso 7
+Repartidor marca entregado pero cliente reclama.
+¿Qué evidencia se guarda?
+Caso 8
+Pago aprobado pero aplicación se cierra.
+¿Cómo evitar pedidos duplicados?
+Caso 9
+Cliente presiona "Pagar" dos veces.
+¿Cómo evitar doble cobro?
+ESTRUCTURA GENERAL DE FUNCIONAMIENTO (RESUMEN)
+Para evitar intentar desarrollar todo al mismo tiempo, recomiendo dividir el proyecto.
+Fase 1 — MVP
+Cliente
+Registro/login.
+Perfil.
+Direcciones.
+Geolocalización.
+Carrito.
+Pago.
+Pedido.
+Tracking básico.
+Historial.
+Reviews.
+Notificaciones.
+Repartidor
+Registro.
+Disponibilidad.
+Recibir pedido.
+Aceptar.
+Navegación.
+Recogida.
+Entrega.
+Confirmación.
+Administrador
+Usuarios.
+Repartidores.
+Pedidos.
+Comisiones.
+Zonas.
+Promociones.
+Reportes básicos.
+FASE 2 — CRECIMIENTO
+Agregar:
+Cupones avanzados.
+Referidos.
+Programa de fidelidad.
+Pedidos programados.
+Promociones avanzadas.
+Analytics avanzado.
+Payouts automatizados.
+Reportes avanzados.
+Soporte avanzado.
+Sistema antifraude.
+Optimización de asignación de repartidores.
+FASE 3 — ESCALA
+Agregar:
+Personalización mediante IA.
+Recomendaciones.
+Predicción de demanda.
+Optimización de rutas.
+Gestión avanzada de inventario.
+Multi-ciudad.
+Multi-idioma.
+Integraciones con sistemas externos.
+ENTREGABLES DEL EQUIPO DE INGENIERÍA
+El proyecto deberá incluir:
+Aplicación móvil del cliente.
+Aplicación móvil del repartidor.
+Panel web de Domiclick
+Panel administrativo.
+Backend.
+API.
+Base de datos.
+Integración de pagos.
+Integración de mapas.
+Sistema de notificaciones.
+Analytics.
+Sistema de logs.
+Documentación técnica.
+Documentación de API.
+Tests automatizados.
+Configuración de ambientes.
+Sistema de deployment.
+Backups.
+Monitoreo.
+Código fuente completo.
+CHECKLIST DE LANZAMIENTO
+Antes de publicar:
+Funcional
+Registro funciona.
+Login funciona.
+Menús funcionan.
+Carrito funciona.
+Checkout funciona.
+Pagos funcionan.
+Pedidos funcionan.
+Repartidor recibe pedidos.
+Tracking funciona.
+Notificaciones funcionan.
+Reembolsos funcionan.
+Soporte funciona.
+Operación
+Monitoring.
+Backups.
+Alertas.
+Recuperación ante fallos.
+App stores
+App Store.
+Google Play.
+Políticas de privacidad.
+Términos.
+Screenshots.
+Iconos.
+Descripción.
+REQUISITO GENERAL DE CALIDAD
+El sistema deberá priorizar:
+Seguridad + estabilidad + escalabilidad + velocidad + experiencia de usuario.
+Las operaciones financieras, pedidos, estados y asignación de repartidores deberán ejecutarse principalmente en backend y contar con mecanismos de auditoría, validación e idempotencia.
+La aplicación deberá diseñarse como una plataforma que pueda crecer desde un lanzamiento inicial en una zona limitada hasta múltiples ciudades y, potencialmente, múltiples países sin necesidad de reconstruir completamente la arquitectura.
+RECOMENDACIÓN FINAL PARA EL EQUIPO DE INGENIERÍA
+Antes de comenzar la implementación, el equipo deberá entregar y aprobar:
+Arquitectura técnica.
+Diagrama de infraestructura.
+Diagrama de base de datos.
+Diseño de APIs.
+Flujo completo de pedidos.
+Máquina de estados del pedido.
+Sistema de roles y permisos.
+Estrategia de pagos.
+Estrategia de geolocalización.
+Algoritmo inicial de asignación de repartidores.
+Estrategia de notificaciones.
+Plan de seguridad.
+Plan de testing.
+Plan de escalabilidad.
+Plan de backups y recuperación.
+Roadmap por fases.
+Criterios de aceptación de cada módulo.
+Estimación de desarrollo por módulo.
+Ningún módulo crítico deberá considerarse terminado hasta que exista una prueba funcional y de error que demuestre su correcto funcionamiento.

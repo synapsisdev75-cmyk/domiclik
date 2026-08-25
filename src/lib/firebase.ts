@@ -94,12 +94,16 @@ export const storage = getStorage(app);
 export async function connectFirestore(): Promise<boolean> {
   try {
     await enableNetwork(db);
-    await getDocs(query(collection(db, 'drivers'), limit(1)));
+    await Promise.all([
+      getDocs(query(collection(db, 'drivers'), limit(1))),
+      getDocs(query(collection(db, 'orders'), limit(1))),
+    ]);
     emitSync({
       collection: 'drivers',
       fromCache: false,
       hasPendingWrites: false,
       live: true,
+      error: undefined,
     });
     console.info(
       `[Firebase] Conectado a Firestore · project=${firebaseConfig.projectId}` +
@@ -334,34 +338,65 @@ export async function fetchAllDrivers(): Promise<MotorizadoDriver[]> {
   return list;
 }
 
+function subscribeCollection<T>(
+  collectionName: string,
+  mapDoc: (id: string, data: Record<string, unknown>) => T,
+  sortFn: ((a: T, b: T) => number) | null,
+  callback: (items: T[]) => void
+) {
+  let unsub: (() => void) | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastItems: T[] = [];
+
+  const attach = () => {
+    unsub?.();
+    unsub = onSnapshot(
+      collection(db, collectionName),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        const items: T[] = [];
+        snapshot.forEach((docSnap) => {
+          items.push(mapDoc(docSnap.id, docSnap.data() as Record<string, unknown>));
+        });
+        if (sortFn) items.sort(sortFn);
+        lastItems = items;
+        emitSync({
+          collection: collectionName,
+          fromCache: snapshot.metadata.fromCache,
+          hasPendingWrites: snapshot.metadata.hasPendingWrites,
+          live: !snapshot.metadata.fromCache,
+          error: undefined,
+        });
+        callback(items);
+      },
+      (err) => {
+        console.error(`[Firebase] ${collectionName} realtime error`, err);
+        emitSync({
+          collection: collectionName,
+          fromCache: true,
+          hasPendingWrites: false,
+          live: false,
+          error: String(err),
+        });
+        callback(lastItems);
+        retryTimer = setTimeout(attach, 4000);
+      }
+    );
+  };
+
+  attach();
+  return () => {
+    unsub?.();
+    if (retryTimer) clearTimeout(retryTimer);
+  };
+}
+
 export function subscribeDrivers(callback: (drivers: MotorizadoDriver[]) => void) {
-  return onSnapshot(
-    collection(db, 'drivers'),
-    { includeMetadataChanges: true },
-    (snapshot) => {
-      const driversList: MotorizadoDriver[] = [];
-      snapshot.forEach((docSnap) => {
-        driversList.push({ id: docSnap.id, ...docSnap.data() } as MotorizadoDriver);
-      });
-      emitSync({
-        collection: 'drivers',
-        fromCache: snapshot.metadata.fromCache,
-        hasPendingWrites: snapshot.metadata.hasPendingWrites,
-        live: !snapshot.metadata.fromCache,
-      });
-      callback(driversList);
-    },
-    (err) => {
-      console.error('[Firebase] drivers realtime error', err);
-      emitSync({
-        collection: 'drivers',
-        fromCache: true,
-        hasPendingWrites: false,
-        live: false,
-        error: String(err),
-      });
-      callback([]);
-    }
+  return subscribeCollection<MotorizadoDriver>(
+    'drivers',
+    (id, data) => ({ id, ...data }) as MotorizadoDriver,
+    null,
+    callback
   );
 }
 
@@ -502,36 +537,11 @@ export function subscribeDriverLocationHistory(
 // ----------------- ORDERS (Firestore onSnapshot) ----------------- //
 
 export function subscribeOrders(callback: (orders: DeliveryOrder[]) => void) {
-  return onSnapshot(
-    collection(db, 'orders'),
-    { includeMetadataChanges: true },
-    (snapshot) => {
-      const ordersList: DeliveryOrder[] = [];
-      snapshot.forEach((docSnap) => {
-        ordersList.push({ id: docSnap.id, ...docSnap.data() } as DeliveryOrder);
-      });
-      ordersList.sort(
-        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-      );
-      emitSync({
-        collection: 'orders',
-        fromCache: snapshot.metadata.fromCache,
-        hasPendingWrites: snapshot.metadata.hasPendingWrites,
-        live: !snapshot.metadata.fromCache,
-      });
-      callback(ordersList);
-    },
-    (err) => {
-      console.error('[Firebase] orders realtime error', err);
-      emitSync({
-        collection: 'orders',
-        fromCache: true,
-        hasPendingWrites: false,
-        live: false,
-        error: String(err),
-      });
-      callback([]);
-    }
+  return subscribeCollection<DeliveryOrder>(
+    'orders',
+    (id, data) => ({ id, ...data }) as DeliveryOrder,
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+    callback
   );
 }
 
@@ -869,14 +879,15 @@ export async function submitDriverReview(
     id,
     createdAt: new Date().toISOString(),
   };
-  await setDoc(doc(db, 'driver_reviews', id), full);
+  await setDoc(doc(db, 'driver_reviews', id), omitUndefined({ ...full } as Record<string, unknown>));
 
   if (review.orderId) {
     await updateDoc(doc(db, 'orders', review.orderId), {
       serviceRating: review.stars,
-      ratingComment: review.comment,
+      ratingComment: review.comment || '',
       ratedAt: full.createdAt,
       updatedAt: full.createdAt,
+      ...(review.survey ? { ratingSurvey: review.survey } : {}),
     });
   }
 
@@ -985,6 +996,14 @@ export async function saveDriverWebAuthnCredential(
   });
 }
 
+function omitUndefined<T extends Record<string, unknown>>(value: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value)) {
+    if (field !== undefined) out[key] = field;
+  }
+  return out as T;
+}
+
 export async function recordAttendancePunch(params: {
   driverId: string;
   driverName?: string;
@@ -997,26 +1016,30 @@ export async function recordAttendancePunch(params: {
 }): Promise<AttendancePunch> {
   const at = new Date().toISOString();
   const id = 'att_' + Date.now();
-  const punch: AttendancePunch = {
+  const lat = Number(params.lat);
+  const lng = Number(params.lng);
+  const punch = omitUndefined({
     id,
     driverId: params.driverId,
-    driverName: params.driverName,
+    driverName: params.driverName || '',
     type: params.type,
     at,
     dateKey: toDateKey(at),
-    lat: params.lat,
-    lng: params.lng,
-    method: 'webauthn',
+    lat: Number.isFinite(lat) ? lat : undefined,
+    lng: Number.isFinite(lng) ? lng : undefined,
+    method: 'webauthn' as const,
     credentialId: params.credentialId,
     odometerKm: params.odometerKm,
-    odometerPhotoUrl: params.odometerPhotoUrl,
-  };
+    odometerPhotoUrl: params.odometerPhotoUrl || '',
+  }) as AttendancePunch;
   await setDoc(doc(db, 'attendance_punches', id), punch);
-  await updateDoc(doc(db, 'drivers', params.driverId), {
+  const driverPatch = omitUndefined({
     lastPunchType: params.type,
     lastPunchAt: at,
+    lastOdometerKm: params.odometerKm,
     updatedAt: at,
   });
+  await updateDoc(doc(db, 'drivers', params.driverId), driverPatch);
   return punch;
 }
 

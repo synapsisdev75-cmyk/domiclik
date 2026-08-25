@@ -29,6 +29,36 @@ import { LoginPage } from './components/auth/LoginPage';
 import { BrandIdentityModal } from './components/brand/BrandIdentityModal';
 import { MapWallScreen, isMapWallView } from './components/admin/MapWallScreen';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { completeGoogleSignInFromRedirect } from './lib/googleAuth';
+
+function SessionLoading({ message }: { message: string }) {
+  return (
+    <div className="min-h-screen min-h-dvh bg-[#05080f] text-[#e8eef9] flex flex-col items-center justify-center gap-4 px-6">
+      <div className="h-11 w-11 rounded-full border-2 border-[#2B6CFF] border-t-transparent animate-spin" />
+      <p className="text-sm font-semibold text-white text-center">{message}</p>
+      <p className="text-xs text-slate-500 text-center max-w-xs">
+        Conectando con Firebase en tiempo real…
+      </p>
+    </div>
+  );
+}
+
+function PendingAdminPanel({ email }: { email?: string }) {
+  return (
+    <div className="max-w-lg mx-auto my-16 text-center glass-panel rounded-3xl p-8 border border-amber-500/30">
+      <h2 className="text-xl font-black text-white mb-2">Acceso de administrador pendiente</h2>
+      <p className="text-sm text-slate-400 mb-3">
+        Tu cuenta <span className="text-white font-semibold">{email}</span> ya está autenticada, pero{' '}
+        <span className="text-amber-300">otro administrador activo</span> debe activarte en{' '}
+        <span className="text-white">Usuarios → Administradores</span>.
+      </p>
+      <p className="text-xs text-slate-500">
+        El primer administrador del sistema se activa automáticamente. A partir de ahí, solo un admin
+        activo puede autorizar a otro.
+      </p>
+    </div>
+  );
+}
 
 export default function App() {
   if (isMapWallView()) {
@@ -53,6 +83,7 @@ function MainApp() {
   const [dispatchSettings, setDispatchSettings] = useState<DispatchSettings>(
     DEFAULT_DISPATCH_SETTINGS
   );
+  const [opsDataReady, setOpsDataReady] = useState(false);
   const prevOrdersRef = useRef<Map<string, string>>(new Map());
   const alertsReadyRef = useRef(false);
   const autoDispatchingRef = useRef(false);
@@ -78,21 +109,40 @@ function MainApp() {
     let unsubDrivers: (() => void) | undefined;
     let unsubOrders: (() => void) | undefined;
     let unsubAdmins: (() => void) | undefined;
+    const readyTimer = window.setTimeout(() => {
+      if (!cancelled) setOpsDataReady(true);
+    }, 5000);
+
+    const markReady = () => {
+      if (!cancelled) setOpsDataReady(true);
+    };
 
     (async () => {
       await connectFirestore();
       if (cancelled) return;
-      unsubDrivers = subscribeDrivers(setDrivers);
+      unsubDrivers = subscribeDrivers((list) => {
+        setDrivers(list);
+        markReady();
+      });
       unsubOrders = subscribeOrders(setOrders);
-      unsubAdmins = subscribeAdmins(setAdminAccounts);
+      unsubAdmins = subscribeAdmins((list) => {
+        setAdminAccounts(list);
+        markReady();
+      });
     })();
 
     return () => {
       cancelled = true;
+      window.clearTimeout(readyTimer);
       unsubDrivers?.();
       unsubOrders?.();
       unsubAdmins?.();
     };
+  }, []);
+
+  // Completa retorno de Google aunque LoginPage no alcance a montarse
+  useEffect(() => {
+    completeGoogleSignInFromRedirect().catch(() => undefined);
   }, []);
 
   // Config de despacho (radio, auto-asignar, tarifas)
@@ -196,9 +246,13 @@ function MainApp() {
         setCurrentUserEmail(user.email);
         setIsAuthenticated(true);
         const saved = sessionStorage.getItem('domiclick_login_role') as UserRole | null;
-        if (saved === 'admin' || saved === 'driver' || saved === 'pending_driver') {
+        if (saved === 'admin') {
+          setRequestedRole('admin');
+          setCurrentRole('pending_admin');
+          sessionStorage.removeItem('domiclick_login_role');
+        } else if (saved === 'driver' || saved === 'pending_driver') {
           setRequestedRole(saved);
-          if (saved !== 'admin') setCurrentRole(saved);
+          setCurrentRole(saved);
           sessionStorage.removeItem('domiclick_login_role');
         }
       } else {
@@ -229,6 +283,15 @@ function MainApp() {
     (a) => currentUserEmail && a.email.toLowerCase() === currentUserEmail.toLowerCase()
   );
   const isActiveAdmin = myAdmin?.status === 'active';
+  const adminPending =
+    currentRole === 'pending_admin' ||
+    (currentRole === 'admin' && myAdmin?.status === 'pending');
+  const adminBootstrapping =
+    isAuthenticated &&
+    (requestedRole === 'admin' || currentRole === 'admin' || currentRole === 'pending_admin') &&
+    !isActiveAdmin &&
+    !adminPending &&
+    !opsDataReady;
 
   // Resolver acceso admin: primer admin se auto-activa; los demás esperan aprobación
   useEffect(() => {
@@ -356,12 +419,16 @@ function MainApp() {
         onLoginSuccess={(email, role) => {
           setCurrentUserEmail(email);
           setRequestedRole(role === 'admin' ? 'admin' : role);
-          if (role !== 'admin') setCurrentRole(role);
-          else setCurrentRole('pending_admin');
+          if (role === 'admin') setCurrentRole('pending_admin');
+          else setCurrentRole(role);
           setIsAuthenticated(true);
         }}
       />
     );
+  }
+
+  if (adminBootstrapping) {
+    return <SessionLoading message="Preparando tu acceso a la torre de control…" />;
   }
 
   return (
@@ -394,12 +461,12 @@ function MainApp() {
               ? 'EN LÍNEA'
               : 'CONECTANDO…'
             : realtimeMeta?.error
-              ? 'Firebase error'
+              ? 'SIN CONEXIÓN'
               : realtimeMeta?.live
-                ? 'EN VIVO · Firebase'
+                ? 'EN VIVO'
                 : realtimeMeta?.fromCache
                   ? 'Sincronizando…'
-                  : 'Conectando Firebase…'
+                  : 'Conectando…'
         }
       />
 
@@ -424,19 +491,10 @@ function MainApp() {
             />
           )}
 
-          {currentRole === 'pending_admin' && (
-            <div className="max-w-lg mx-auto my-16 text-center glass-panel rounded-3xl p-8 border border-amber-500/30">
-              <h2 className="text-xl font-black text-white mb-2">Acceso de administrador pendiente</h2>
-              <p className="text-sm text-slate-400 mb-3">
-                Tu cuenta <span className="text-white font-semibold">{currentUserEmail}</span> ya está
-                autenticada, pero <span className="text-amber-300">otro administrador activo</span> debe
-                activarte en <span className="text-white">Usuarios → Administradores</span>.
-              </p>
-              <p className="text-xs text-slate-500">
-                El primer administrador del sistema se activa automáticamente. A partir de ahí, solo un
-                admin activo puede autorizar a otro.
-              </p>
-            </div>
+          {adminPending && <PendingAdminPanel email={currentUserEmail} />}
+
+          {currentRole === 'admin' && !isActiveAdmin && !adminPending && (
+            <SessionLoading message="Verificando permisos de administrador…" />
           )}
 
           {currentRole === 'driver' && activeApprovedDriver && (
@@ -477,11 +535,13 @@ function MainApp() {
               <span className="font-extrabold text-white italic font-display">Domi<span className="text-[#FF5722]">Click</span></span>
               <span className="text-slate-400">· Excelencia a un click de ti.</span>
             </div>
-            <div className="text-center sm:text-left text-[11px] text-slate-300">
-              SISTEMA LOGÍSTICO INTELIGENTE · Villavicencio, Meta
+            <div className="text-center text-[11px] text-slate-300">
+              Calle 23 37k 28 · Barrio Teusaca
+              <br />
+              Villavicencio, Meta
             </div>
-            <div className="text-[11px] text-slate-500">
-              DomiClick © 2026
+            <div className="text-[11px] text-slate-500 text-center sm:text-right">
+              © 2026 DomiClick. Todos los derechos reservados.
             </div>
           </footer>
         </main>

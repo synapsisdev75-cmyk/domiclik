@@ -7,7 +7,7 @@ import { ChatWindow } from '../chat/ChatWindow';
 import { CreateOrderModal } from './CreateOrderModal';
 import { AdminSection, AdminSectionPanels } from './AdminSectionPanels';
 import { BANNER_HERO_VIDEO_URL } from '../../lib/firebase';
-import { Plus, MapPin, MessageSquare, ShieldCheck, PictureInPicture2 } from 'lucide-react';
+import { Plus, MapPin, MessageSquare, ShieldCheck, PictureInPicture2, Bike, ClipboardList, Navigation, PackageCheck } from 'lucide-react';
 import {
   DomiMotoIcon,
   DomiRadarIcon,
@@ -121,8 +121,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   Centro de Operaciones Villavicencio
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-100 max-w-xl leading-relaxed drop-shadow-[0_1px_6px_rgba(0,0,0,0.9)]">
-                  Sistema de gestión logística inteligente. Conectamos, optimizamos y entregamos
-                  excelencia.
+                  Sistema digital de encargos locales. Conectamos clientes con transportistas
+                  independientes y supervisamos cada entrega en Villavicencio.
                 </p>
               </div>
 
@@ -154,7 +154,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </span>
                     </div>
                     <div className="w-10 h-10 rounded-full bg-[#FF5722]/15 border border-[#FF5722]/40 flex items-center justify-center shrink-0">
-                      <DomiMotoIcon className="w-6 h-6" color="#FF5722" />
+                      <Bike className="w-5 h-5 text-[#FF5722]" />
                     </div>
                   </div>
                 </button>
@@ -177,7 +177,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </span>
                     </div>
                     <div className="w-10 h-10 rounded-full bg-[#2B6CFF]/15 border border-[#00E5FF]/40 flex items-center justify-center shrink-0">
-                      <DomiTowerIcon className="w-6 h-6" color="#00E5FF" />
+                      <ClipboardList className="w-5 h-5 text-[#00E5FF]" />
                     </div>
                   </div>
                 </button>
@@ -200,7 +200,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </span>
                     </div>
                     <div className="w-10 h-10 rounded-full bg-[#00E5FF]/15 border border-[#00E5FF]/40 flex items-center justify-center shrink-0">
-                      <MapPin className="w-5 h-5 text-[#00E5FF]" />
+                      <Navigation className="w-5 h-5 text-[#00E5FF]" />
                     </div>
                   </div>
                 </button>
@@ -223,7 +223,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </span>
                     </div>
                     <div className="w-10 h-10 rounded-full bg-[#FF5722]/15 border border-[#FF5722]/40 flex items-center justify-center shrink-0">
-                      <DomiCargoIcon className="w-6 h-6" color="#FF5722" />
+                      <PackageCheck className="w-5 h-5 text-[#FF5722]" />
                     </div>
                   </div>
                 </button>
@@ -351,7 +351,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {emptyOrders ? (
                   <div className="text-center py-8 px-3 text-xs text-slate-400">
                     <p className="font-bold text-white mb-1">Sin pedidos aún</p>
-                    <p>Llegan por el tubo de ventas o «Nueva Solicitud».</p>
+                    <p>Los pedidos aparecen aquí cuando un cliente solicita una entrega.</p>
                   </div>
                 ) : (
                   displayOrders.slice(0, 8).map((ord) => {

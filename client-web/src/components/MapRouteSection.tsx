@@ -126,12 +126,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
             <p className="text-xs text-[var(--domi-muted)]">Recalculando ruta óptima…</p>
           ) : null}
         </div>
-      ) : (
-        <p className="text-xs text-[var(--domi-muted)]">
-          Escribe y elige una sugerencia del listado: el pin se marca en el mapa. También puedes
-          tocar Buscar, el mapa o arrastrar A / B.
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }

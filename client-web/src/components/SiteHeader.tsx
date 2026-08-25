@@ -20,6 +20,12 @@ export function SiteHeader() {
           >
             Seguir pedido
           </Link>
+          <Link
+            to="/transportista"
+            className="text-sm font-semibold text-[var(--domi-muted)] transition-colors hover:text-[var(--domi-orange)]"
+          >
+            Transportistas
+          </Link>
           <AuthButton />
         </div>
       </div>

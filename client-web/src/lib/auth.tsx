@@ -10,6 +10,7 @@ import {
 import type { User } from 'firebase/auth';
 import {
   completeGoogleRedirect,
+  isActiveOpsAdmin,
   saveCustomerPhone,
   signInWithGoogle,
   signOutCustomer,
@@ -18,6 +19,7 @@ import {
   userToProfile,
   type CustomerProfile,
 } from './firebase';
+import { opsTowerUrl } from './config';
 
 type AuthContextValue = {
   user: User | null;
@@ -51,6 +53,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (next) {
         const p = userToProfile(next);
         setProfile(p);
+        if (await isActiveOpsAdmin(next.email)) {
+          window.location.assign(opsTowerUrl());
+          return;
+        }
         try {
           await upsertCustomerProfile(p);
         } catch (err) {

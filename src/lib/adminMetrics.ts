@@ -55,6 +55,12 @@ export function startOfMonthISO(date = new Date()) {
   return d;
 }
 
+export function startOfDayISO(date = new Date()) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 export function toDateKey(iso: string | Date) {
   const d = typeof iso === 'string' ? new Date(iso) : iso;
   if (Number.isNaN(d.getTime())) return '';
@@ -79,6 +85,10 @@ export type DriverOpsStats = {
   rating: number;
   reviewCount: number;
   lastDeliveryAt: string | null;
+  /** Índice compuesto 0–100 (entregas, éxito, rating, baja cancelación). */
+  performanceIndex: number;
+  /** Minutos promedio recepción → asignación (timeline / autoAssignedAt). */
+  avgAssignMin: number | null;
 };
 
 export function buildDriverStats(
@@ -114,6 +124,40 @@ export function buildDriverStats(
             new Date(a.updatedAt || a.createdAt).getTime()
         )[0];
 
+      // Tiempo de gestión: createdAt → autoAssignedAt o primer evento "assigned" en timeline
+      const assignMins: number[] = [];
+      for (const o of mine) {
+        const start = new Date(o.createdAt).getTime();
+        const assignedIso =
+          o.autoAssignedAt ||
+          o.timeline?.find((t) => t.to === 'assigned')?.at ||
+          '';
+        if (!assignedIso) continue;
+        const end = new Date(assignedIso).getTime();
+        if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+          assignMins.push((end - start) / 60000);
+        }
+      }
+      const avgAssignMin = assignMins.length
+        ? Math.round((assignMins.reduce((s, n) => s + n, 0) / assignMins.length) * 10) / 10
+        : null;
+
+      const ratingScore = Math.min(100, (reviewAvg / 5) * 100);
+      const cancelPct = mine.length ? (cancelled.length / mine.length) * 100 : 0;
+      const volumeScore = Math.min(100, delivered.length * 8);
+      const performanceIndex = Math.round(
+        Math.max(
+          0,
+          Math.min(
+            100,
+            volumeScore * 0.25 +
+              (mine.length ? (delivered.length / mine.length) * 100 : 0) * 0.3 +
+              ratingScore * 0.3 +
+              Math.max(0, 100 - cancelPct * 4) * 0.15
+          )
+        )
+      );
+
       return {
         driver,
         assigned: mine.length,
@@ -126,9 +170,11 @@ export function buildDriverStats(
         rating: Math.round(reviewAvg * 10) / 10,
         reviewCount: drvReviews.length || driver.ratingCount || 0,
         lastDeliveryAt: last?.updatedAt || last?.createdAt || null,
+        performanceIndex,
+        avgAssignMin,
       };
     })
-    .sort((a, b) => b.delivered - a.delivered || b.rating - a.rating);
+    .sort((a, b) => b.performanceIndex - a.performanceIndex || b.delivered - a.delivered);
 }
 
 export type DailyPoint = { date: string; label: string; delivered: number; created: number; revenue: number };
@@ -204,17 +250,64 @@ export function downloadTextFile(filename: string, content: string, mime = 'text
   URL.revokeObjectURL(url);
 }
 
+/** Escapa celdas para CSV compatible con Excel (Colombia usa `;`). */
+function escapeCsvCell(v: string | number) {
+  const s = String(v ?? '');
+  if (/[",\n;\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+/**
+ * CSV con BOM + sep=; para que Excel abra cada valor en su propia columna
+ * (evita que todo quede en la columna A).
+ */
 export function toCsv(rows: Record<string, string | number>[]) {
   if (!rows.length) return '\uFEFF';
   const headers = Object.keys(rows[0]);
-  const escape = (v: string | number) => {
-    const s = String(v ?? '');
-    if (/[",\n;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
   const lines = [
-    headers.join(';'),
-    ...rows.map((r) => headers.map((h) => escape(r[h])).join(';')),
+    'sep=;',
+    headers.map(escapeCsvCell).join(';'),
+    ...rows.map((r) => headers.map((h) => escapeCsvCell(r[h])).join(';')),
   ];
-  return `\uFEFF${lines.join('\n')}`;
+  return `\uFEFF${lines.join('\r\n')}`;
+}
+
+/**
+ * Tabla HTML .xls — Excel siempre separa casillas (más fiable que CSV).
+ */
+export function toExcelHtml(rows: Record<string, string | number>[], sheetName = 'DomiClick') {
+  const headers = rows.length ? Object.keys(rows[0]) : [];
+  const esc = (v: string | number) =>
+    String(v ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  const head = headers.map((h) => `<th>${esc(h)}</th>`).join('');
+  const body = rows
+    .map(
+      (r) =>
+        `<tr>${headers.map((h) => `<td>${esc(r[h])}</td>`).join('')}</tr>`
+    )
+    .join('');
+  return (
+    `\uFEFF<html xmlns:o="urn:schemas-microsoft-com:office:office" ` +
+    `xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">` +
+    `<head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook>` +
+    `<x:ExcelWorksheets><x:ExcelWorksheet><x:Name>${esc(sheetName)}</x:Name>` +
+    `<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>` +
+    `</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->` +
+    `<style>td,th{border:1px solid #ccc;padding:4px 8px;font-family:Calibri,Arial;font-size:11pt}` +
+    `th{background:#1a2744;color:#fff;font-weight:700}</style></head>` +
+    `<body><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></body></html>`
+  );
+}
+
+export function downloadExcel(
+  filename: string,
+  rows: Record<string, string | number>[],
+  sheetName = 'DomiClick'
+) {
+  const name = filename.endsWith('.xls') ? filename : `${filename.replace(/\.csv$/i, '')}.xls`;
+  downloadTextFile(name, toExcelHtml(rows, sheetName), 'application/vnd.ms-excel');
 }

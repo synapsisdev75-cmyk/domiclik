@@ -33,6 +33,45 @@ interface LoginPageProps {
 
 type LoginRole = 'admin' | 'driver' | 'pending_driver';
 
+function readLoginRoleFromUrl(): LoginRole {
+  if (typeof window === 'undefined') return 'admin';
+  const role = new URLSearchParams(window.location.search).get('role');
+  if (role === 'driver' || role === 'pending_driver' || role === 'admin') return role;
+  return 'admin';
+}
+
+function isDriverEntryFromLanding() {
+  if (typeof window === 'undefined') return false;
+  const role = new URLSearchParams(window.location.search).get('role');
+  return role === 'driver' || role === 'pending_driver';
+}
+
+function shouldAutoGoogle() {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('google') === '1';
+}
+
+function landingTransportistaUrl() {
+  const fromEnv = String(
+    (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_LANDING_URL || ''
+  ).replace(/\/$/, '');
+  if (fromEnv) return `${fromEnv}/transportista`;
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:5174/transportista';
+  }
+  return 'https://gen-lang-client-0954482957.web.app/transportista';
+}
+
+function clearAuthQueryParams() {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has('role') && !url.searchParams.has('google')) return;
+  url.searchParams.delete('role');
+  url.searchParams.delete('google');
+  window.history.replaceState({}, document.title, url.pathname + url.hash);
+}
+
 const LOGIN_HERO_VIDEO = '/brand/login-hero.mp4';
 
 function VillavicencioGpsBackdrop() {
@@ -151,8 +190,9 @@ function VillavicencioGpsBackdrop() {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
-  const [role, setRole] = useState<LoginRole>('driver');
-  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const driverEntry = isDriverEntryFromLanding();
+  const [role, setRole] = useState<LoginRole>(() => readLoginRoleFromUrl());
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -160,30 +200,54 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     typeof window !== 'undefined' ? isGoogleOAuthReturn() : false
   );
   const [googleBusy, setGoogleBusy] = useState(() =>
-    typeof window !== 'undefined' ? isGoogleOAuthReturn() : false
+    typeof window !== 'undefined' ? isGoogleOAuthReturn() || shouldAutoGoogle() : false
   );
   const [authError, setAuthError] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
-  const googleReturn = typeof window !== 'undefined' && isGoogleOAuthReturn();
+
+  const isRegisterMode = authMode === 'register';
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!isGoogleOAuthReturn()) return;
-      setLoading(true);
-      setGoogleBusy(true);
+      const pending = isGoogleOAuthReturn();
+      if (pending) {
+        setLoading(true);
+        setGoogleBusy(true);
+      }
       try {
         const user = await completeGoogleSignInFromRedirect();
-        if (cancelled || !user?.email) return;
-        const saved =
-          (sessionStorage.getItem(LOGIN_ROLE_KEY) as LoginRole) || role;
-        sessionStorage.removeItem(LOGIN_ROLE_KEY);
-        onLoginSuccess(user.email, saved);
+        if (cancelled) return;
+        if (user?.email) {
+          const saved =
+            (sessionStorage.getItem(LOGIN_ROLE_KEY) as LoginRole) || role;
+          sessionStorage.removeItem(LOGIN_ROLE_KEY);
+          clearAuthQueryParams();
+          onLoginSuccess(user.email, saved);
+          return;
+        }
       } catch (err: unknown) {
+        if (!cancelled) setAuthError(describeAuthError(err));
+      } finally {
         if (!cancelled) {
           setLoading(false);
           setGoogleBusy(false);
+        }
+      }
+
+      if (!cancelled && shouldAutoGoogle() && !isGoogleOAuthReturn()) {
+        clearAuthQueryParams();
+        sessionStorage.setItem(LOGIN_ROLE_KEY, role);
+        setGoogleBusy(true);
+        try {
+          const user = await startGoogleSignInRedirect();
+          if (user?.email) {
+            sessionStorage.removeItem(LOGIN_ROLE_KEY);
+            onLoginSuccess(user.email, role);
+          }
+        } catch (err: unknown) {
           setAuthError(describeAuthError(err));
+          setGoogleBusy(false);
         }
       }
     })();
@@ -212,12 +276,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         code === 'auth/invalid-credential' || code === 'auth/wrong-password'
           ? 'Correo o contraseña incorrectos.'
           : code === 'auth/user-not-found'
-            ? 'Usuario no encontrado. Solicita tu registro.'
+            ? 'Usuario no encontrado. Crea tu cuenta en Registrarse.'
             : code === 'auth/email-already-in-use'
               ? 'Ese correo ya está registrado. Inicia sesión.'
               : code === 'auth/weak-password'
                 ? 'La contraseña debe tener al menos 6 caracteres.'
-                : 'No se pudo autenticar. Revisa correo y contraseña.';
+                : code === 'auth/operation-not-allowed'
+                  ? 'Activa correo/contraseña en Firebase → Authentication → Sign-in method.'
+                  : 'No se pudo autenticar. Revisa correo y contraseña.';
       setAuthError(msg);
     } finally {
       setLoading(false);
@@ -245,26 +311,33 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setInfoMsg('');
     sessionStorage.setItem(LOGIN_ROLE_KEY, role);
     try {
-      await startGoogleSignInRedirect();
+      const user = await startGoogleSignInRedirect();
+      if (user?.email) {
+        sessionStorage.removeItem(LOGIN_ROLE_KEY);
+        onLoginSuccess(user.email, role);
+        return;
+      }
     } catch (err: unknown) {
-      setGoogleBusy(false);
       setAuthError(describeAuthError(err));
+    } finally {
+      setGoogleBusy(false);
     }
   };
 
-  const tabs: { id: LoginRole; label: string; icon: React.ReactNode }[] = [
-    { id: 'admin', label: 'Administrador', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
-    { id: 'driver', label: 'Transportista', icon: <Bike className="w-3.5 h-3.5" /> },
-    { id: 'pending_driver', label: 'Pre-registro', icon: <UserPlus className="w-3.5 h-3.5" /> },
-  ];
+  const tabs: { id: LoginRole; label: string; icon: React.ReactNode }[] = driverEntry
+    ? [
+        { id: 'driver', label: 'Transportista', icon: <Bike className="w-3.5 h-3.5" /> },
+        { id: 'pending_driver', label: 'Pre-registro', icon: <UserPlus className="w-3.5 h-3.5" /> },
+      ]
+    : [{ id: 'admin', label: 'Administrador', icon: <ShieldCheck className="w-3.5 h-3.5" /> }];
 
   return (
     <div className="login-screen min-h-screen min-h-dvh bg-[#05080f] text-[#e8eef9] overflow-x-hidden selection:bg-[#2B6CFF] selection:text-white">
-      {(googleBusy || googleReturn) && (
+      {googleBusy && (
         <div className="fixed inset-0 z-[80] bg-[#05080f]/85 backdrop-blur-sm flex flex-col items-center justify-center gap-3 px-6 text-center">
           <div className="h-10 w-10 rounded-full border-2 border-[#2B6CFF] border-t-transparent animate-spin" />
           <p className="text-sm font-semibold text-white">
-            {googleReturn ? 'Entrando con Google…' : 'Abriendo Google…'}
+            {googleBusy ? 'Conectando con Google…' : 'Abriendo Google…'}
           </p>
         </div>
       )}
@@ -279,7 +352,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               muted
               loop
               playsInline
-              preload="auto"
+              preload="metadata"
               aria-hidden
             />
             <div className="absolute inset-0 bg-gradient-to-r from-[#05080f]/78 via-[#05080f]/45 to-[#05080f]/30" />
@@ -381,14 +454,59 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           >
             <div className="mb-7">
               <h2 className="text-[26px] sm:text-[28px] font-extrabold text-white tracking-tight leading-tight">
-                Bienvenido a DomiClick
+                {driverEntry
+                  ? isRegisterMode
+                    ? 'Registro transportista'
+                    : 'Cabina transportista'
+                  : isRegisterMode
+                    ? 'Crear cuenta en DomiClick'
+                    : 'Bienvenido a DomiClick'}
               </h2>
               <p className="mt-1.5 text-[14px] text-slate-400 font-medium">
-                Accede a tu centro de operaciones.
+                {driverEntry
+                  ? 'Accede a tu jornada, GPS y pedidos asignados.'
+                  : isRegisterMode
+                    ? 'Regístrate con Google o con tu correo electrónico.'
+                    : 'Accede a tu centro de operaciones.'}
               </p>
             </div>
 
-            <div className="grid grid-cols-3 gap-1.5 p-1 rounded-2xl bg-[#0a101c] border border-[#1a2744] mb-7">
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-[#0a101c] border border-[#1a2744] mb-5">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setAuthError('');
+                  setInfoMsg('');
+                }}
+                className={`py-2.5 rounded-xl text-[12px] font-semibold transition-all duration-200 ${
+                  authMode === 'login'
+                    ? 'bg-[#2B6CFF] text-white shadow-[0_8px_20px_rgba(43,108,255,0.28)]'
+                    : 'text-slate-500 hover:text-slate-200'
+                }`}
+              >
+                Iniciar sesión
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('register');
+                  setAuthError('');
+                  setInfoMsg('');
+                }}
+                className={`py-2.5 rounded-xl text-[12px] font-semibold transition-all duration-200 ${
+                  authMode === 'register'
+                    ? 'bg-[#FF5722] text-white shadow-[0_8px_20px_rgba(255,87,34,0.28)]'
+                    : 'text-slate-500 hover:text-slate-200'
+                }`}
+              >
+                Registrarse
+              </button>
+            </div>
+
+            <div className={`grid gap-1.5 p-1 rounded-2xl bg-[#0a101c] border border-[#1a2744] mb-7 ${
+              tabs.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+            }`}>
               {tabs.map((tab) => {
                 const active = role === tab.id;
                 return (
@@ -410,10 +528,52 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             </div>
             {role === 'admin' && (
               <p className="-mt-5 mb-5 text-[11px] text-slate-500 leading-relaxed">
-                El primer administrador se activa solo. Después, otro admin activo debe autorizarte en
-                Usuarios.
+                {isRegisterMode
+                  ? 'Al registrarte como administrador, el primer usuario se activa solo. Los siguientes requieren aprobación en Usuarios.'
+                  : 'El primer administrador se activa solo. Después, otro admin activo debe autorizarte en Usuarios.'}
               </p>
             )}
+            {role === 'pending_driver' && isRegisterMode && (
+              <p className="-mt-5 mb-5 text-[11px] text-slate-500 leading-relaxed">
+                Tras crear tu cuenta completarás el prerregistro como transportista para revisión del administrador.
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+              className="w-full inline-flex items-center justify-center gap-2.5 rounded-xl py-3 text-[13px] font-semibold text-slate-200 bg-transparent border border-[#1a2744] hover:bg-[#121a2c] hover:border-[#2B6CFF]/40 disabled:opacity-60 transition mb-5"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                />
+              </svg>
+              {isRegisterMode ? 'Registrarse con Google' : 'Continuar con Google'}
+            </button>
+
+            <div className="relative mb-5">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-[#1a2744]" />
+              </div>
+              <p className="relative mx-auto w-fit bg-[#0f1728] px-3 text-[11px] text-slate-500 font-medium">
+                {isRegisterMode ? 'o regístrate con correo' : 'o continúa con correo'}
+              </p>
+            </div>
 
             <form onSubmit={handleEmailAuth} className="space-y-4">
               <div>
@@ -428,7 +588,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Ingresa tu correo empresarial"
+                    placeholder={isRegisterMode ? 'Tu correo electrónico' : 'Ingresa tu correo empresarial'}
                     className="w-full bg-[#0a101c] border border-[#1a2744] rounded-xl pl-10 pr-4 py-3 text-[13.5px] text-white placeholder:text-slate-500 focus:outline-none focus:border-[#2B6CFF] focus:ring-2 focus:ring-[#2B6CFF]/20 transition"
                   />
                 </div>
@@ -446,7 +606,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Ingresa tu contraseña"
+                    placeholder={isRegisterMode ? 'Mínimo 6 caracteres' : 'Ingresa tu contraseña'}
                     className="w-full bg-[#0a101c] border border-[#1a2744] rounded-xl pl-10 pr-11 py-3 text-[13.5px] text-white placeholder:text-slate-500 focus:outline-none focus:border-[#2B6CFF] focus:ring-2 focus:ring-[#2B6CFF]/20 transition"
                   />
                   <button
@@ -487,60 +647,40 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               </button>
             </form>
 
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-[#1a2744]" />
-              </div>
-              <p className="relative mx-auto w-fit bg-[#0f1728] px-3 text-[11px] text-slate-500 font-medium">
-                o continúa con tu cuenta empresarial
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={loading}
-              className="w-full inline-flex items-center justify-center gap-2.5 rounded-xl py-3 text-[13px] font-semibold text-slate-200 bg-transparent border border-[#1a2744] hover:bg-[#121a2c] hover:border-[#2B6CFF]/40 disabled:opacity-60 transition"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden>
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                />
-              </svg>
-              Continuar con Google
-            </button>
-
             <p className="mt-6 text-center text-[13px] text-slate-400">
-              ¿Nuevo en DomiClick?{' '}
+              {isRegisterMode ? '¿Ya tienes cuenta?' : '¿Nuevo en DomiClick?'}{' '}
               <button
                 type="button"
                 onClick={() => {
-                  setIsRegisterMode(!isRegisterMode);
+                  setAuthMode(isRegisterMode ? 'login' : 'register');
                   setAuthError('');
                   setInfoMsg('');
                 }}
                 className="font-semibold text-[#2B6CFF] hover:text-[#7aa2ff] transition"
               >
-                {isRegisterMode ? 'Inicia sesión' : 'Solicita tu registro'}
+                {isRegisterMode ? 'Inicia sesión' : 'Crea tu cuenta'}
               </button>
             </p>
 
-            <div className="mt-6 pt-4 border-t border-[#1a2744]/80 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
-              <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />
-              <span>Conexión segura · Datos protegidos</span>
+            {!driverEntry && (
+              <p className="mt-3 text-center text-[12px] text-slate-500">
+                ¿Eres transportista?{' '}
+                <a
+                  href={landingTransportistaUrl()}
+                  className="font-semibold text-[#FF5722] hover:text-[#ff8a50] transition"
+                >
+                  Ingresa desde la web de clientes
+                </a>
+              </p>
+            )}
+
+            <div className="mt-6 pt-4 border-t border-[#1a2744]/80 flex flex-col items-center gap-1.5 text-[11px] text-slate-500">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-slate-500" />
+                <span>Conexión segura · Datos protegidos</span>
+              </div>
+              <span className="text-center">Calle 23 37k 28 · Barrio Teusaca · Villavicencio</span>
+              <span>© 2026 DomiClick. Todos los derechos reservados.</span>
             </div>
           </div>
         </section>

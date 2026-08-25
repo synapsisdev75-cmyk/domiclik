@@ -1,5 +1,11 @@
 import { ROAD_FACTOR } from './pricing';
 import { GOOGLE_MAPS_API_KEY } from './config';
+import { searchLocalPlaces, matchesSearchAnchor } from './villavicencioPlaces';
+import {
+  resolvePlaceCategory,
+  categorySearchQuery,
+  categoryMatchesPlace,
+} from './placeCategories';
 
 export const VILLAVICENCIO_CENTER = { lat: 4.142, lng: -73.6266 };
 
@@ -60,6 +66,8 @@ const PLACE_KIND_ES: Record<string, string> = {
   ice_cream: 'Heladería',
   bar: 'Bar',
   night_club: 'Bar',
+  butcher_shop: 'Carnicería',
+  bakery: 'Panadería',
   church: 'Iglesia',
   pharmacy: 'Farmacia',
   gas_station: 'Estación',
@@ -117,7 +125,12 @@ async function predictGoogle(
   q: string,
 ): Promise<PlaceSuggestion[]> {
   const service = new places.AutocompleteService();
-  const inputs = q.toLowerCase().includes('villavicencio') ? [q] : [q, `${q} Villavicencio`];
+  const category = resolvePlaceCategory(q);
+  const inputs = category
+    ? [categorySearchQuery(category, q)]
+    : q.toLowerCase().includes('villavicencio')
+      ? [q]
+      : [q, `${q} Villavicencio`];
   const batches = await Promise.all(
     inputs.map(
       (input) =>
@@ -161,15 +174,21 @@ async function textSearchGoogle(
   q: string,
 ): Promise<PlaceSuggestion[]> {
   if (!places.PlacesService) return [];
+  const category = resolvePlaceCategory(q);
   const host = document.createElement('div');
   const svc = new places.PlacesService(host);
-  const query = q.toLowerCase().includes('villavicencio') ? q : `${q} Villavicencio Meta`;
+  const query = category
+    ? categorySearchQuery(category, q)
+    : q.toLowerCase().includes('villavicencio')
+      ? q
+      : `${q} Villavicencio Meta`;
   const results = await new Promise<google.maps.places.PlaceResult[]>((resolve) => {
     svc.textSearch(
       {
         query,
         location: VILLAVICENCIO_CENTER,
         radius: 28000,
+        type: category?.googleIncludedType,
       },
       (res, status) => {
         if (
@@ -184,14 +203,14 @@ async function textSearchGoogle(
       },
     );
   });
-  return results.slice(0, 12).map((p) => {
+  return results.slice(0, category ? 15 : 12).map((p) => {
     const loc = p.geometry?.location;
     return {
       id: `ts-${p.place_id || p.name}`,
       placeId: p.place_id,
       label: p.name || p.formatted_address || q,
       secondary: p.vicinity || p.formatted_address || 'Villavicencio, Meta',
-      kind: kindFromTypes(p.types),
+      kind: category?.label || kindFromTypes(p.types),
       source: 'google' as const,
       lat: loc ? loc.lat() : undefined,
       lng: loc ? loc.lng() : undefined,
@@ -199,21 +218,103 @@ async function textSearchGoogle(
   });
 }
 
+async function geocodeGoogle(q: string): Promise<PlaceSuggestion[]> {
+  const g = (window as unknown as { google?: typeof google }).google?.maps;
+  if (!g?.Geocoder) return [];
+  const geo = new g.Geocoder();
+  try {
+    const res = await geo.geocode({
+      address: `${q}, Villavicencio, Meta, Colombia`,
+      componentRestrictions: { country: 'CO' },
+      bounds: {
+        north: VILLAVICENCIO_MAP_BOUNDS.north,
+        south: VILLAVICENCIO_MAP_BOUNDS.south,
+        east: VILLAVICENCIO_MAP_BOUNDS.east,
+        west: VILLAVICENCIO_MAP_BOUNDS.west,
+      },
+    });
+    return (res.results || []).slice(0, 8).map((r) => {
+      const loc = r.geometry.location;
+      return {
+        id: `gc-${r.place_id}`,
+        placeId: r.place_id,
+        label: r.formatted_address.split(',')[0] || q,
+        secondary: r.formatted_address,
+        kind: 'Dirección',
+        source: 'google' as const,
+        lat: loc.lat(),
+        lng: loc.lng(),
+      };
+    });
+  } catch (err) {
+    console.warn('[DomiClick] Geocoder', err);
+    return [];
+  }
+}
+
+function placeDisplayName(value: unknown): string {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object' && value && 'text' in value) {
+    return String((value as { text?: string }).text || '');
+  }
+  return '';
+}
+
+async function searchByTextNew(q: string): Promise<PlaceSuggestion[]> {
+  const Place = (window as unknown as { google?: typeof google }).google?.maps?.places?.Place;
+  if (!Place?.searchByText) return [];
+  const category = resolvePlaceCategory(q);
+  const textQuery = category ? categorySearchQuery(category, q) : `${q} Villavicencio Meta Colombia`;
+  try {
+    const request: google.maps.places.SearchByTextRequest = {
+      textQuery,
+      fields: ['id', 'displayName', 'formattedAddress', 'location', 'types'],
+      locationBias: VILLAVICENCIO_CENTER,
+      region: 'CO',
+      language: 'es',
+      maxResultCount: category ? 15 : 10,
+    };
+    if (category?.googleIncludedType) {
+      request.includedType = category.googleIncludedType;
+    }
+    const { places } = await Place.searchByText(request);
+    return (places || [])
+      .filter((p) => !category || categoryMatchesPlace(category, {
+        label: placeDisplayName(p.displayName) || q,
+        kind: kindFromTypes(p.types),
+        secondary: p.formattedAddress || undefined,
+      }))
+      .map((p) => {
+      const loc = p.location;
+      return {
+        id: `nt-${p.id}`,
+        placeId: p.id,
+        label: placeDisplayName(p.displayName) || q,
+        secondary: p.formattedAddress || 'Villavicencio, Meta',
+        kind: category?.label || kindFromTypes(p.types),
+        source: 'google' as const,
+        lat: loc?.lat(),
+        lng: loc?.lng(),
+      };
+    });
+  } catch (err) {
+    console.warn('[DomiClick] Place.searchByText', err);
+    return [];
+  }
+}
+
 async function searchGooglePlaces(
   places: typeof google.maps.places,
   q: string,
 ): Promise<PlaceSuggestion[]> {
-  const [textHits, autoHits] = await Promise.all([
-    textSearchGoogle(places, q).catch((err) => {
-      console.warn('[DomiClick] textSearch', err);
-      return [] as PlaceSuggestion[];
-    }),
-    predictGoogle(places, q).catch((err) => {
-      console.warn('[DomiClick] autocomplete', err);
-      return [] as PlaceSuggestion[];
-    }),
+  const [textNew, textOld, autoHits, geoHits] = await Promise.all([
+    searchByTextNew(q),
+    textSearchGoogle(places, q).catch(() => [] as PlaceSuggestion[]),
+    predictGoogle(places, q).catch(() => [] as PlaceSuggestion[]),
+    geocodeGoogle(q),
   ]);
-  return mergeSuggestions([textHits, autoHits]);
+  return mergeSuggestions([textNew, textOld, autoHits, geoHits], q);
 }
 
 function foldKey(s: string) {
@@ -225,16 +326,19 @@ function foldKey(s: string) {
     .trim();
 }
 
-function mergeSuggestions(groups: PlaceSuggestion[][]): PlaceSuggestion[] {
+function mergeSuggestions(groups: PlaceSuggestion[][], query?: string): PlaceSuggestion[] {
+  const category = query ? resolvePlaceCategory(query) : null;
+  const limit = category ? 12 : 10;
   const seen = new Set<string>();
   const out: PlaceSuggestion[] = [];
   for (const group of groups) {
     for (const hit of group) {
+      if (query && !matchesSearchAnchor(hit, query)) continue;
       const key = foldKey(`${hit.label} ${hit.lat?.toFixed(4) || ''} ${hit.lng?.toFixed(4) || ''}`);
       if (!key || seen.has(key)) continue;
       seen.add(key);
       out.push(hit);
-      if (out.length >= 10) return out;
+      if (out.length >= limit) return out;
     }
   }
   return out;
@@ -303,7 +407,7 @@ async function searchPhoton(query: string): Promise<PlaceSuggestion[]> {
       }
     }),
   );
-  return mergeSuggestions(batches);
+  return mergeSuggestions(batches, query);
 }
 
 export async function searchPlaceSuggestions(
@@ -313,16 +417,17 @@ export async function searchPlaceSuggestions(
   const q = query.trim();
   if (q.length < 2) return [];
 
+  const localHits = searchLocalPlaces(q);
   const places = placesFromLib(placesLib);
   const googlePromise = places
     ? searchGooglePlaces(places, q).catch((err) => {
         console.warn('[DomiClick] Places', err);
         return [] as PlaceSuggestion[];
       })
-    : Promise.resolve([] as PlaceSuggestion[]);
+    : geocodeGoogle(q).catch(() => [] as PlaceSuggestion[]);
 
   const [googleHits, photonHits] = await Promise.all([googlePromise, searchPhoton(q)]);
-  return mergeSuggestions([googleHits, photonHits]);
+  return mergeSuggestions([localHits, googleHits, photonHits], q);
 }
 
 export async function resolvePlaceSuggestion(

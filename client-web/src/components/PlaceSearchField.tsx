@@ -9,6 +9,7 @@ import {
   type LatLng,
   type PlaceSuggestion,
 } from '../lib/geo';
+import { searchLocalPlaces } from '../lib/villavicencioPlaces';
 
 type PlaceSearchFieldProps = {
   label: string;
@@ -52,11 +53,10 @@ export function PlaceSearchField({
   const [resolving, setResolving] = useState(false);
   const [items, setItems] = useState<PlaceSuggestion[]>([]);
   const [active, setActive] = useState(0);
-  const [hint, setHint] = useState('');
   const [dropBox, setDropBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const skipSearch = useRef(false);
   const typing = value.trim().length >= 2;
-  const showDrop = open && typing;
+  const showDrop = open && typing && (items.length > 0 || loading);
 
   const accentColor = accent === 'pickup' ? '#2B6CFF' : '#FF5722';
   const ring =
@@ -96,26 +96,24 @@ export function PlaceSearchField({
       setItems([]);
       setOpen(false);
       setLoading(false);
-      setHint('');
       return;
     }
 
     let cancelled = false;
-    setLoading(true);
-    setHint('');
+    const instant = searchLocalPlaces(q);
+    setItems(instant);
+    setActive(0);
     setOpen(true);
+    setLoading(true);
 
     const t = window.setTimeout(() => {
       void searchPlaceSuggestions(q, placesLib || undefined).then((hits) => {
         if (cancelled) return;
-        setItems(hits);
+        setItems(hits.length ? hits : instant);
         setActive(0);
         setLoading(false);
-        if (!hits.length) {
-          setHint('Sigue escribiendo o toca Buscar.');
-        }
       });
-    }, 160);
+    }, 120);
 
     return () => {
       cancelled = true;
@@ -137,13 +135,9 @@ export function PlaceSearchField({
   async function pick(item: PlaceSuggestion) {
     setResolving(true);
     setOpen(false);
-    setHint('');
     try {
       const hit = await resolvePlaceSuggestion(item, placesLib || undefined);
-      if (!hit) {
-        setHint('No se pudo marcar ese lugar. Prueba otra sugerencia.');
-        return;
-      }
+      if (!hit) return;
       skipSearch.current = true;
       onQueryChange(hit.label);
       onPlacePicked(hit);
@@ -154,23 +148,16 @@ export function PlaceSearchField({
 
   async function locateTyped() {
     const q = value.trim();
-    if (q.length < 2) {
-      setHint('Escribe al menos 2 letras para buscar.');
-      return;
-    }
+    if (q.length < 2) return;
     if (items[0]) {
       await pick(items[0]);
       return;
     }
     setResolving(true);
-    setHint('');
     setOpen(false);
     try {
       const hit = await geocodeAddress(q, placesLib || undefined);
-      if (!hit) {
-        setHint('No encontramos ese lugar en Google Maps. Prueba el nombre del negocio.');
-        return;
-      }
+      if (!hit) return;
       skipSearch.current = true;
       onQueryChange(hit.label);
       onPlacePicked(hit);
@@ -195,9 +182,6 @@ export function PlaceSearchField({
               zIndex: 40000,
             }}
           >
-            <div className="border-b border-white/10 px-3 py-2 text-[11px] font-semibold text-[var(--domi-muted)]">
-              {loading ? 'Buscando en Google Maps…' : 'Negocios y direcciones · toca para marcar el pin'}
-            </div>
             {loading && !items.length ? (
               <div className="space-y-2 px-3 py-3">
                 {[0, 1, 2].map((i) => (
@@ -235,10 +219,6 @@ export function PlaceSearchField({
                   </li>
                 ))}
               </ul>
-            ) : !loading ? (
-              <p className="px-3 py-3 text-sm text-[var(--domi-muted)]">
-                Sin coincidencias. Sigue escribiendo o toca <strong className="text-white">Buscar</strong>.
-              </p>
             ) : null}
           </div>,
           document.body,
@@ -307,11 +287,6 @@ export function PlaceSearchField({
         </button>
       </div>
       {dropdown}
-      {hint && !showDrop ? (
-        <p className="mt-1 text-[11px] text-amber-200/90" role="status">
-          {hint}
-        </p>
-      ) : null}
     </div>
   );
 }

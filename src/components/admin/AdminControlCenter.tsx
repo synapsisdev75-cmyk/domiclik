@@ -22,11 +22,12 @@ import {
   buildDailySeries,
   buildDriverStats,
   computePayrollLines,
+  downloadExcel,
   downloadTextFile,
   formatCOP,
+  startOfDayISO,
   startOfMonthISO,
   startOfWeekISO,
-  toCsv,
 } from '../../lib/adminMetrics';
 import {
   Star,
@@ -170,7 +171,7 @@ export const AdminControlCenter: React.FC<Props> = ({
   const [reviews, setReviews] = useState<DriverReview[]>([]);
   const [payrollSettings, setPayrollSettings] = useState<PayrollSettings>(DEFAULT_PAYROLL_SETTINGS);
   const [payrollRuns, setPayrollRuns] = useState<PayrollRun[]>([]);
-  const [period, setPeriod] = useState<'week' | 'month' | 'all'>('week');
+  const [period, setPeriod] = useState<'day' | 'week' | 'month' | 'all'>('week');
   const [selectedDriverId, setSelectedDriverId] = useState<string>('');
   const [driverMenuOpen, setDriverMenuOpen] = useState(false);
   const [stars, setStars] = useState(5);
@@ -204,6 +205,9 @@ export const AdminControlCenter: React.FC<Props> = ({
     }
     if (period === 'month') {
       return { from: startOfMonthISO(now), to: now, label: 'Mes en curso' };
+    }
+    if (period === 'day') {
+      return { from: startOfDayISO(now), to: now, label: 'Hoy (diario)' };
     }
     return { from: startOfWeekISO(now), to: now, label: 'Semana en curso (lun–hoy)' };
   }, [period]);
@@ -248,6 +252,26 @@ export const AdminControlCenter: React.FC<Props> = ({
   const avgRating = useMemo(() => {
     if (displayStats.length === 0) return 0;
     return Math.round((displayStats.reduce((s, x) => s + x.rating, 0) / displayStats.length) * 10) / 10;
+  }, [displayStats]);
+  const satisfactionPct = useMemo(() => {
+    const rated = scopedOrders.filter((o) => Number(o.serviceRating) > 0);
+    if (rated.length === 0) return null;
+    const avg = rated.reduce((s, o) => s + Number(o.serviceRating), 0) / rated.length;
+    return Math.round((avg / 5) * 100);
+  }, [scopedOrders]);
+  const cancelRatePct = useMemo(() => {
+    const total = scopedOrders.length;
+    if (!total) return null;
+    return Math.round((cancelled / total) * 1000) / 10;
+  }, [scopedOrders, cancelled]);
+  const avgAssignMin = useMemo(() => {
+    const vals = displayStats.map((s) => s.avgAssignMin).filter((n): n is number => n != null);
+    if (!vals.length) return null;
+    return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+  }, [displayStats]);
+  const topPerformer = useMemo(() => {
+    if (!displayStats.length) return null;
+    return [...displayStats].sort((a, b) => b.performanceIndex - a.performanceIndex)[0];
   }, [displayStats]);
 
   const selected = selectedDriverId
@@ -297,15 +321,17 @@ export const AdminControlCenter: React.FC<Props> = ({
       Cancelados: s.cancelled,
       En_curso: s.inProgress,
       Exito_pct: s.successPct,
+      Indice_desempeno: s.performanceIndex,
+      Gestion_avg_min: s.avgAssignMin ?? '',
       Calificacion: s.rating,
       Resenas: s.reviewCount,
       Recaudo_COP: Math.round(s.revenue),
       Ticket_promedio_COP: Math.round(s.avgFee),
     }));
-    downloadTextFile(
-      `domiclick-metricas-repartidores-${range.from.toISOString().slice(0, 10)}.csv`,
-      toCsv(rows),
-      'text/csv'
+    downloadExcel(
+      `domiclick-metricas-repartidores-${range.from.toISOString().slice(0, 10)}.xls`,
+      rows,
+      'Metricas'
     );
   };
 
@@ -324,10 +350,10 @@ export const AdminControlCenter: React.FC<Props> = ({
       Rating: l.ratingAvg,
       Total_a_pagar_COP: Math.round(l.total),
     }));
-    downloadTextFile(
-      `domiclick-nomina-${range.from.toISOString().slice(0, 10)}.csv`,
-      toCsv(rows),
-      'text/csv'
+    downloadExcel(
+      `domiclick-nomina-${range.from.toISOString().slice(0, 10)}.xls`,
+      rows,
+      'Nomina'
     );
   };
 
@@ -362,7 +388,7 @@ export const AdminControlCenter: React.FC<Props> = ({
       Creado: o.createdAt,
       Actualizado: o.updatedAt,
     }));
-    downloadTextFile(`domiclick-envios-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows), 'text/csv');
+    downloadExcel(`domiclick-envios-${new Date().toISOString().slice(0, 10)}.xls`, rows, 'Envios');
   };
 
   const persistPayroll = async (status: 'draft' | 'approved') => {
@@ -399,14 +425,14 @@ export const AdminControlCenter: React.FC<Props> = ({
             Control Supremo
           </h2>
           <p className="text-xs text-slate-400 font-tech mt-1">
-            Métricas reales · calificaciones · nómina · informes descargables · Firebase en vivo
+            Métricas reales · calificaciones · nómina · informes descargables
           </p>
           <p className="text-[11px] text-[#00E5FF] font-tech font-bold mt-1.5">
             Vista: {selectedDriverLabel}
           </p>
         </div>
         <div className="flex items-center gap-1 bg-[#0A1122] p-1 rounded-xl border border-[#1A2D52] text-[11px] font-bold">
-          {(['week', 'month', 'all'] as const).map((p) => (
+          {(['day', 'week', 'month', 'all'] as const).map((p) => (
             <button
               key={p}
               type="button"
@@ -415,7 +441,7 @@ export const AdminControlCenter: React.FC<Props> = ({
                 period === p ? 'bg-[#2B6CFF] text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
-              {p === 'week' ? 'Semana' : p === 'month' ? 'Mes' : 'Todo'}
+              {p === 'day' ? 'Diario' : p === 'week' ? 'Semana' : p === 'month' ? 'Mes' : 'Todo'}
             </button>
           ))}
         </div>
@@ -543,13 +569,28 @@ export const AdminControlCenter: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-2.5">
         {[
           { label: 'Entregados', value: delivered, color: 'text-[#00E676]' },
           { label: 'En tránsito', value: transit, color: 'text-[#00E5FF]' },
           { label: 'Pendientes', value: pending, color: 'text-amber-400' },
+          { label: 'Cancelación %', value: cancelRatePct != null ? `${cancelRatePct}%` : '—', color: 'text-red-300' },
           { label: 'Recaudo', value: formatCOP(revenue), color: 'text-white' },
-          { label: selectedDriverId ? 'Rating' : 'Rating flota', value: avgRating ? `${avgRating}★` : '—', color: 'text-amber-300' },
+          {
+            label: selectedDriverId ? 'Satisfacción' : 'Satisfacción central',
+            value:
+              satisfactionPct != null
+                ? `${satisfactionPct}%`
+                : avgRating
+                  ? `${avgRating}★`
+                  : '—',
+            color: 'text-amber-300',
+          },
+          {
+            label: 'Gestión avg',
+            value: avgAssignMin != null ? `${avgAssignMin} min` : '—',
+            color: 'text-[#7aa2ff]',
+          },
           { label: 'Nómina periodo', value: formatCOP(payrollTotal), color: 'text-[#FF5722]' },
         ].map((k) => (
           <div key={k.label} className="bg-[#0A1020] border border-[#162748] rounded-2xl p-3">
@@ -558,6 +599,29 @@ export const AdminControlCenter: React.FC<Props> = ({
           </div>
         ))}
       </div>
+
+      {topPerformer && topPerformer.delivered > 0 && (
+        <div className="bg-[#0A1020] border border-amber-500/35 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] text-amber-300/90 font-tech uppercase tracking-wider">
+              Mejor desempeño del periodo
+            </div>
+            <div className="text-sm font-black text-white mt-0.5">
+              {topPerformer.driver.fullName}{' '}
+              <span className="text-amber-300 font-tech">
+                · índice {topPerformer.performanceIndex}/100
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              {topPerformer.delivered} entregas · {topPerformer.successPct}% éxito ·{' '}
+              {topPerformer.rating.toFixed(1)}★
+            </div>
+          </div>
+          <div className="text-[10px] text-slate-500 font-tech max-w-xs text-right">
+            Índice = entregas + éxito + rating − cancelaciones (plan de reconocimiento mensual)
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-1.5 bg-[#0A1122] p-1 rounded-2xl border border-[#1A2D52] w-fit">
         {tabs.map((t) => (
@@ -675,14 +739,15 @@ export const AdminControlCenter: React.FC<Props> = ({
                       <div className="min-w-0">
                         <div className="text-sm font-bold text-white truncate">{s.driver.fullName}</div>
                         <div className="text-[10px] text-slate-500 font-tech">
-                          {s.driver.plateNumber} · {s.delivered} entregas · {s.successPct}% éxito
+                          {s.driver.plateNumber} · {s.delivered} entregas · índice{' '}
+                          {s.performanceIndex}
                         </div>
                       </div>
                     </div>
                     <div className="text-right shrink-0">
                       <Stars value={s.rating} />
                       <div className="text-[10px] text-slate-400 font-tech mt-0.5">
-                        {s.rating.toFixed(1)} · {formatCOP(s.revenue)}
+                        {s.successPct}% éxito · {formatCOP(s.revenue)}
                       </div>
                     </div>
                   </div>
@@ -711,6 +776,8 @@ export const AdminControlCenter: React.FC<Props> = ({
 
                 <div className="grid grid-cols-2 gap-2">
                   {[
+                    { l: 'Índice', v: `${selected.performanceIndex}/100` },
+                    { l: 'Gestión avg', v: selected.avgAssignMin != null ? `${selected.avgAssignMin} min` : '—' },
                     { l: 'Entregas', v: selected.delivered },
                     { l: 'En curso', v: selected.inProgress },
                     { l: 'Cancelados', v: selected.cancelled },

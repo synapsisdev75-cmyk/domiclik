@@ -13,6 +13,7 @@ import {
   getFirestore,
   collection,
   doc,
+  getDoc,
   setDoc,
   getDocs,
   updateDoc,
@@ -20,6 +21,7 @@ import {
   where,
   limit,
 } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import fallback from '../firebase-applet-config.json' with { type: 'json' };
 
 function env(key: string): string {
@@ -53,6 +55,7 @@ const namedDbId =
 
 export const db = namedDbId ? getFirestore(app, namedDbId) : getFirestore(app);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -184,6 +187,18 @@ export function subscribeAuth(callback: (user: User | null) => void) {
   return onAuthStateChanged(auth, callback);
 }
 
+export async function isActiveOpsAdmin(email: string | null | undefined): Promise<boolean> {
+  const id = (email || '').trim().toLowerCase();
+  if (!id) return false;
+  try {
+    const snap = await getDoc(doc(db, 'admins', id));
+    return snap.exists() && snap.data()?.status === 'active';
+  } catch (err) {
+    console.warn('[auth] no se pudo leer admins', err);
+    return false;
+  }
+}
+
 export async function upsertCustomerProfile(profile: CustomerProfile) {
   await setDoc(
     doc(db, 'customers', profile.uid),
@@ -214,6 +229,11 @@ export type PublicOrderTracking = {
   serviceRating?: number;
   ratingComment?: string;
   ratedAt?: string;
+  ratingSurvey?: {
+    punctuality: number;
+    care: number;
+    attention: number;
+  };
   createdAt?: string;
   updatedAt?: string;
   etaText?: string;
@@ -279,6 +299,7 @@ export async function findOrderByTrackingCode(code: string): Promise<PublicOrder
     serviceRating: data.serviceRating,
     ratingComment: data.ratingComment,
     ratedAt: data.ratedAt,
+    ratingSurvey: data.ratingSurvey,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
     etaText: etaForStatus(status),
@@ -292,6 +313,11 @@ export type CustomerRatingInput = {
   driverName: string;
   stars: number;
   comment: string;
+  survey?: {
+    punctuality: number;
+    care: number;
+    attention: number;
+  };
   authorName: string;
   authorUid: string;
   authorEmail?: string;
@@ -302,7 +328,7 @@ export async function submitCustomerRating(input: CustomerRatingInput) {
   const id = `rev_${Date.now()}`;
   const now = new Date().toISOString();
 
-  const review = {
+  const review: Record<string, unknown> = {
     id,
     driverId: input.driverId,
     driverName: input.driverName,
@@ -310,21 +336,25 @@ export async function submitCustomerRating(input: CustomerRatingInput) {
     trackingCode: input.trackingCode,
     stars,
     comment: input.comment.trim(),
-    authorRole: 'customer' as const,
+    authorRole: 'customer',
     authorName: input.authorName,
     authorUid: input.authorUid,
     authorEmail: input.authorEmail || '',
     createdAt: now,
   };
+  if (input.survey) review.survey = input.survey;
 
   await setDoc(doc(db, 'driver_reviews', id), review);
-  await updateDoc(doc(db, 'orders', input.orderId), {
+
+  const orderPatch: Record<string, unknown> = {
     serviceRating: stars,
     ratingComment: review.comment,
     ratedAt: now,
     ratedByUid: input.authorUid,
     updatedAt: now,
-  });
+  };
+  if (input.survey) orderPatch.ratingSurvey = input.survey;
+  await updateDoc(doc(db, 'orders', input.orderId), orderPatch);
 
   const q = query(collection(db, 'driver_reviews'), where('driverId', '==', input.driverId));
   const snap = await getDocs(q);
@@ -369,7 +399,44 @@ export type ClientOrderInput = {
   sourceSiteId: string;
   invoiceNumber?: string;
   invoicePhotoUrl?: string;
+  paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
+  paymentNote?: string;
+  couponCode?: string;
 };
+
+export async function uploadInvoicePhoto(file: File, orderIdHint?: string): Promise<string> {
+  const id = orderIdHint || `tmp_${Date.now()}`;
+  const safeName = (file.name || 'factura.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `orders/${id}/invoice_${Date.now()}_${safeName}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
+  return getDownloadURL(storageRef);
+}
+
+/** Cupón simple en colección `coupons` (code, active, discountPct | discountFixed). */
+export async function resolveCouponDiscount(
+  code: string,
+  baseFee: number
+): Promise<{ code: string; discount: number; finalFee: number } | null> {
+  const normalized = code.trim().toUpperCase();
+  if (!normalized || baseFee <= 0) return null;
+  const snap = await getDoc(doc(db, 'coupons', normalized));
+  if (!snap.exists()) return null;
+  const data = snap.data() as {
+    active?: boolean;
+    discountPct?: number;
+    discountFixed?: number;
+  };
+  if (data.active === false) return null;
+  let discount = 0;
+  if (Number(data.discountFixed) > 0) discount = Number(data.discountFixed);
+  else if (Number(data.discountPct) > 0) {
+    discount = Math.round(baseFee * (Number(data.discountPct) / 100));
+  }
+  if (discount <= 0) return null;
+  const finalFee = Math.max(0, baseFee - discount);
+  return { code: normalized, discount, finalFee };
+}
 
 /**
  * Escribe el pedido directo a Firestore (misma DB que la torre de control).
@@ -380,7 +447,15 @@ export async function createClientOrder(input: ClientOrderInput) {
   const trackingCode = 'DMC-' + Math.floor(1000 + Math.random() * 9000);
   const deliveryConfirmCode = String(Math.floor(100000 + Math.random() * 900000));
   const now = new Date().toISOString();
-  const fee = Math.round(Number(input.shippingFee) || 0);
+  let fee = Math.round(Number(input.shippingFee) || 0);
+  let couponApplied: { code: string; discount: number } | null = null;
+  if (input.couponCode?.trim()) {
+    const resolved = await resolveCouponDiscount(input.couponCode, fee);
+    if (resolved) {
+      fee = resolved.finalFee;
+      couponApplied = { code: resolved.code, discount: resolved.discount };
+    }
+  }
   const km = Number(input.routeDistanceKm) || 0;
 
   const order = {
@@ -422,6 +497,10 @@ export async function createClientOrder(input: ClientOrderInput) {
     notes: input.notes || '',
     invoiceNumber: input.invoiceNumber || '',
     invoicePhotoUrl: input.invoicePhotoUrl || '',
+    paymentMethod: input.paymentMethod || 'efectivo',
+    paymentNote: input.paymentNote || '',
+    couponCode: couponApplied?.code || input.couponCode?.trim().toUpperCase() || '',
+    couponDiscount: couponApplied?.discount || 0,
     timeline: [{ at: now, to: 'pending', byRole: 'customer', note: 'Solicitud creada' }],
     sourceSiteId: input.sourceSiteId,
     externalOrderId: '',

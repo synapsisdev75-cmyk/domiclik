@@ -270,14 +270,19 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
 
   const getPunchGeo = (): Promise<{ lat?: number; lng?: number }> =>
     new Promise((resolve) => {
+      const fallback =
+        liveCoords ||
+        (typeof driver.location?.lat === 'number' && typeof driver.location?.lng === 'number'
+          ? { lat: driver.location.lat, lng: driver.location.lng }
+          : undefined);
       if (!('geolocation' in navigator)) {
-        resolve({});
+        resolve(fallback || {});
         return;
       }
       navigator.geolocation.getCurrentPosition(
         (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => resolve({}),
-        { enableHighAccuracy: true, timeout: 4000 }
+        () => resolve(fallback || {}),
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
       );
     });
 
@@ -311,9 +316,14 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
       if (!odometerFile) {
         throw new Error('Toma una foto clara del odómetro (números visibles).');
       }
-      if (type === 'out' && todayShift.kmIn != null && km < todayShift.kmIn) {
+      const lastPunchKm = todayPunches
+        .map((p) => Number(p.odometerKm))
+        .filter((n) => Number.isFinite(n) && n > 0)
+        .reduce((max, n) => Math.max(max, n), 0);
+      const lastKm = lastPunchKm || Number(driver.lastOdometerKm) || 0;
+      if (lastKm > 0 && km < lastKm) {
         throw new Error(
-          `El km de salida (${km}) no puede ser menor que el de entrada (${todayShift.kmIn}).`
+          `El kilometraje debe ser igual o ascendente. Último registro: ${lastKm.toLocaleString('es-CO')} km.`
         );
       }
 
@@ -806,8 +816,8 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                   value={odometerKm}
                   onChange={(e) => setOdometerKm(e.target.value.replace(/[^\d]/g, ''))}
                   placeholder={
-                    todayShift.kmIn != null
-                      ? `Mayor o igual a ${todayShift.kmIn}`
+                    (todayShift.kmIn || driver.lastOdometerKm)
+                      ? `Igual o mayor a ${(todayShift.kmOut || todayShift.kmIn || driver.lastOdometerKm)?.toLocaleString('es-CO')}`
                       : 'Ej. 45280'
                   }
                 />

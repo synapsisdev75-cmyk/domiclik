@@ -43,6 +43,7 @@ import {
   Ban,
   CheckCircle2,
   AlertTriangle,
+  Star,
 } from 'lucide-react';
 import {
   DomiCargoIcon,
@@ -303,6 +304,12 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           {ord.sourceSiteId && (
             <div className="text-[10px] text-slate-500 font-tech">Origen: {ord.sourceSiteId}</div>
           )}
+          {ord.serviceRating ? (
+            <div className="text-[10px] text-amber-300 font-tech mt-0.5 flex items-center gap-1">
+              <Star className="w-3 h-3 fill-amber-300 text-amber-300" />
+              {ord.serviceRating}★ · {Math.round((Number(ord.serviceRating) / 5) * 100)}% cliente
+            </div>
+          ) : null}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -357,7 +364,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
       <div className="space-y-5">
         <SectionHeader
           title="Solicitudes"
-          subtitle="Pedidos pendientes de asignación · Firebase en vivo"
+          subtitle="Pedidos pendientes de asignación"
           action={
             <button
               type="button"
@@ -380,7 +387,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
         {pendingOrders.length === 0 ? (
           <EmptyState
             title="Sin solicitudes pendientes"
-            text="Los pedidos llegan por el tubo de ventas o con «Nueva solicitud»."
+            text="Los pedidos aparecen aquí cuando un cliente solicita una entrega."
           />
         ) : (
           <div className="space-y-2.5">
@@ -531,7 +538,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
       <div className="space-y-5">
         <SectionHeader
           title="Envíos en curso"
-          subtitle="Asignados y en tránsito · Firebase en vivo"
+          subtitle="Asignados y en tránsito"
           action={
             <div className="relative max-w-xs">
               <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />

@@ -1,0 +1,55 @@
+No es recomendable comercial ni legalmente utilizar las palabras "LOGÍSTICA Y MENSAJERÍA" en el mensaje de bienvenida de la aplicación.
+Hacerlo debilita directamente la estrategia de defensa legal que se estructuró en el objeto social de tu S.A.S. y abre la puerta a inspecciones regulatorias por las siguientes razones:
+1. El criterio de la Superintendencia de Industria y Comercio (SIC)
+En Colombia, la Superintendencia de Industria y Comercio (SIC) y los jueces de la república aplican el principio de la primacía de la realidad sobre las formas. Esto significa que las autoridades no solo revisan lo que dicen tus estatutos en el papel, sino también cómo te presentas públicamente ante los consumidores en los canales digitales.
+Si la interfaz de bienvenida de Domiclick afirma explícitamente que ofrece servicios de "mensajería", la SIC o el Ministerio de las TIC pueden argumentar que la plataforma está promocionando y ejecutando una actividad postal de mensajería expresa sin la habilitación legal correspondiente, lo que puede derivar en sanciones económicas altas.
+2. Contradicción con la exclusión de responsabilidad
+En los Términos y Condiciones se estableció explícitamente que Domiclick no es una empresa de transporte ni de mensajería, sino un intermediario neutral. Si el usuario descarga la app y lo primero que lee es "Logística y Mensajería", se genera una contradicción directa en la información al consumidor, lo cual está penalizado bajo el Estatuto del Consumidor (Ley 1480 de 2011) por falta de claridad en las condiciones del servicio.
+Alternativas recomendadas (Enfoque de Intermediación)
+Para mantener el blindaje como empresa de tecnología y software, el mensaje de bienvenida debe enfocarse en la conexión, el mandato o el asistente digital. Las siguientes opciones cumplen con el marco legal:
+"Domiclick: Conectamos tus encargos con repartidores independientes en Villavicencio."
+"Domiclick: Tu plataforma digital para la recogida de compras prepagadas."
+"Domiclick: El software que gestiona tus mandados y asistencias personales."
+"Domiclick: Tu asistente virtual para mandados y encargos locales."
+Estas expresiones mantienen la narrativa de que Domiclick es una herramienta de software (un intermediario neutral) y que la ejecución física del traslado la realiza de forma autónoma el repartidor que el cliente decida contratar a través de la app.
+¡Pídelo, págalo y relájate! 🚀 Domiclick va por tu pedido.
+“Sin convenios, sin sobrecostos. Solo mensajería de confianza para lo que ya compraste”.
+Esto terminará de convencer al usuario de la transparencia de tu servicio.
+Mensajes de Notificación Push – Domiclick
+1. Asignación del Repartidor
+Título: ¡Tu repartidor está listo! 🚀
+Mensaje: Asignamos un Domiclick para recoger tu pedido. Ya se dirige al establecimiento.
+2. Llegada al Comercio
+Título: Repartidor en el sitio 📍
+Mensaje: Tu Domiclick ya está en el restaurante validando tu número de compra.
+3. Pedido Recogido y en Ruta
+Título: ¡Pedido en camino! 🛵💨
+Mensaje: Ya recogimos tu comida. Relájate, Domiclick va directo a tu ubicación.
+4. Cercanía al Destino
+Título: ¡Estamos muy cerca! 👀
+Mensaje: Tu Domiclick está a pocos minutos de tu dirección. ¡Alístate para recibirlo!
+5. Entrega en la Puerta
+Título: ¡Llegó Domiclick! 🎉
+Mensaje: Tu repartidor está afuera con tu pedido. ¡Gracias por confiar en nosotros y buen provecho!
+Consejos y Variaciones para tus Campañas de Marketing
+Dependiendo del canal digital o físico donde vayas a publicitar a Domiclick, puedes aplicar estas ligeras variaciones de la propuesta principal para enriquecer tu contenido:
+Para Redes Sociales (Enfoque en conveniencia): "¿Ya pagaste tu almuerzo? No salgas de la oficina, Domiclick va por él."
+Para Banners dentro de la App (Enfoque genérico si recogen más que comida): "Tú lo dejas pago, Domiclick lo trae a casa."
+Para Campañas de Expectativa en Villavicencio: "Llega a Villavicencio la forma más rápida de recoger lo que ya compraste. Domiclick va por ti."
+Mi recomendación como tutor: Utiliza la frase principal del Canvas como el encabezado de tu pantalla de bienvenida de la aplicación y en tus fotos de portada en redes sociales. Esto creará una identidad de marca coherente, transparente y comercialmente muy atractiva.
+Objeto Social Definitivo - Domiclick S.A.S.
+(Aplica para el acta de constitución o conformación de la S.A.S)
+CAPÍTULO I: DENOMINACIÓN, NATURALEZA, DOMICILIO, OBJETO Y DURACIÓN
+ARTÍCULO 1o. DENOMINACIÓN Y NATURALEZA: La sociedad es una sociedad por acciones simplificada, de naturaleza comercial, que se denominará DOMICLICK S.A.S., la cual se regirá por los presentes estatutos y por las disposiciones legales vigentes aplicables a este tipo de sociedades.
+ARTÍCULO 2o. DOMICILIO: El domicilio principal de la sociedad será la ciudad de [Ciudad, País], pero podrá, por disposición de la Asamblea General de Accionistas o del Representante Legal, abrir sucursales, agencias u oficinas en cualquier otro lugar del territorio nacional o del exterior.
+ARTÍCULO 3o. OBJETO SOCIAL: El objeto social principal de la sociedad consistirá en el desarrollo, operación, comercialización y gestión de plataformas tecnológicas orientadas a la intermediación, logística y entrega a domicilio de todo tipo de bienes, mercancías, alimentos y productos de consumo general. Para la ejecución de este objeto, la sociedad operará mediante un modelo de logística integrada, gestionando su propia flota de distribución y entrega.
+La sociedad podrá realizar cualquier otra actividad económica lícita tanto en el país como en el extranjero, así como celebrar contratos, adquirir bienes muebles e inmuebles, y ejecutar todas las operaciones financieras, comerciales o civiles que sean necesarias o convenientes para el cumplimiento de su fin corporativo.
+ARTÍCULO 4o. DURACIÓN: El término de duración de la sociedad será indefinido, contado a partir de la fecha de inscripción del documento de constitución en el Registro Mercantil. No obstante, podrá disolverse en cualquier momento por decisión de sus accionistas o por las causales legales previstas.
+CAPÍTULO II: RÉGIMEN OPERATIVO Y DE PERSONAL (NÓMINA LABORAL)
+ARTÍCULO 5o. POLÍTICA DE TALENTO HUMANO Y PERSONAL DE REPARTO: Como pilar fundamental de su modelo de negocio, responsabilidad corporativa y calidad en el servicio, DOMICLICK S.A.S. establece que todo el personal dedicado a las actividades operativas de distribución, mensajería y reparto (denominados "repartidores" o "domiciliarios") estará vinculado formal e institucionalmente mediante contratos individuales de trabajo.
+ARTÍCULO 6o. CONDICIONES DEL VÍNCULO LABORAL (POR NÓMINA): Todo el personal de reparto gozará de la condición jurídica de empleado dependiente bajo el régimen laboral general vigente. En consecuencia, la sociedad asume las siguientes obligaciones estatutarias obligatorias:
+Contratación Directa: Queda expresamente prohibido el uso de esquemas de subordinación encubierta, falsos autónomos o contratos de prestación de servicios para el núcleo de la actividad de reparto diario.
+Inclusión en Nómina: Todo repartidor será incorporado a la nómina oficial de la empresa desde el primer día de su contratación, fijándose un salario (fijo o mixto con variables) que nunca será inferior al mínimo legal vigente.
+Seguridad Social e Imposiciones: La sociedad realizará las afiliaciones y aportes correspondientes al sistema de seguridad social integral (salud, pensiones, riesgos laborales) y cajas de compensación familiar en las proporciones exigidas por la legislación laboral nacional.
+Prestaciones Sociales y Beneficios: Se garantiza el pago oportuno de primas, cesantías, intereses a las cesantías, vacaciones remuneradas, dotación de uniformes, elementos de protección y todas aquellas contraprestaciones legales o extralegales acordadas.
+Seguridad y Salud en el Trabajo: La empresa proveerá las herramientas operativas básicas y los equipos de protección personal requeridos para el transporte seguro de mercancías, minimizando los riesgos viales y operativos de su personal en nómina.
