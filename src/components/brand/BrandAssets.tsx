@@ -10,6 +10,17 @@ export const BRAND = {
 } as const;
 
 export const BRAND_ICONS = {
+  dashboard: '/brand/icons/dashboard.png',
+  solicitudes: '/brand/icons/solicitudes.png',
+  flota: '/brand/icons/flota.png',
+  envios: '/brand/icons/envios.png',
+  incidentes: '/brand/icons/incidentes.png',
+  rutas: '/brand/icons/rutas.png',
+  historial: '/brand/icons/historial-menu.png',
+  control: '/brand/icons/control.png',
+  nomina: '/brand/icons/nomina.png',
+  usuarios: '/brand/icons/usuarios.png',
+  ajuste: '/brand/icons/ajuste.png',
   operadores: '/brand/icons/operadores.png',
   misiones: '/brand/icons/misiones.png',
   operaciones: '/brand/icons/operaciones.png',
@@ -18,8 +29,6 @@ export const BRAND_ICONS = {
   cobertura: '/brand/icons/cobertura.png',
   gps: '/brand/icons/gps.png',
   servidor: '/brand/icons/servidor.png',
-  incidentes: '/brand/icons/incidentes.png',
-  historial: '/brand/icons/historial.png',
   estadisticas: '/brand/icons/estadisticas.png',
   alertas: '/brand/icons/alertas.png',
   metricas: '/brand/icons/metricas.png',

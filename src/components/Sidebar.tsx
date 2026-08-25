@@ -9,17 +9,17 @@ interface SidebarProps {
 }
 
 const menuItems: { id: string; label: string; icon: BrandIconKey }[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: 'misiones' },
-  { id: 'solicitudes', label: 'Solicitudes', icon: 'nuevaMision' },
-  { id: 'flota', label: 'Flota', icon: 'operadores' },
-  { id: 'envios', label: 'Envíos', icon: 'operaciones' },
+  { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+  { id: 'solicitudes', label: 'Solicitudes', icon: 'solicitudes' },
+  { id: 'flota', label: 'Flota', icon: 'flota' },
+  { id: 'envios', label: 'Envíos', icon: 'envios' },
   { id: 'incidentes', label: 'Incidentes', icon: 'incidentes' },
-  { id: 'rutas', label: 'Rutas', icon: 'historial' },
-  { id: 'historial', label: 'Historial', icon: 'enCurso' },
-  { id: 'reportes', label: 'Control', icon: 'estadisticas' },
-  { id: 'nomina', label: 'Nómina', icon: 'metricas' },
-  { id: 'usuarios', label: 'Usuarios', icon: 'cobertura' },
-  { id: 'ajustes', label: 'Ajustes', icon: 'configuracion' },
+  { id: 'rutas', label: 'Rutas', icon: 'rutas' },
+  { id: 'historial', label: 'Historial', icon: 'historial' },
+  { id: 'reportes', label: 'Control', icon: 'control' },
+  { id: 'nomina', label: 'Nómina', icon: 'nomina' },
+  { id: 'usuarios', label: 'Usuarios', icon: 'usuarios' },
+  { id: 'ajustes', label: 'Ajustes', icon: 'ajuste' },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab, onLogout }) => {

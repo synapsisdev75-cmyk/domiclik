@@ -13,7 +13,6 @@ import {
   DomiRadarIcon,
   DomiTowerIcon,
   DomiCargoIcon,
-  DomiHelmetIcon,
 } from '../ui/CustomIcons';
 import { ORDER_STATUS_LABEL, isLiveOrderStatus } from '../../lib/orderFlow';
 import { openMapWallWindow } from './MapWallScreen';
@@ -423,21 +422,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       className="bg-[#0A1020] border border-[#162748] rounded-2xl p-3 flex items-center justify-between gap-3 hover:border-[#00E676]/50 transition cursor-pointer"
                       onClick={() => setSelectedDriverForChat(drv)}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center border ${
+                          className={`w-10 h-10 rounded-full overflow-hidden shrink-0 border ${
                             drv.isActive ? 'border-[#00E676]/50' : 'border-[#2B6CFF]/50'
-                          }`}
+                          } bg-[#0B1428] flex items-center justify-center`}
                         >
-                          <DomiHelmetIcon
-                            className="w-6 h-6"
-                            color={drv.isActive ? '#00E676' : '#2B6CFF'}
+                          {drv.photoUrl ? (
+                            <img
+                              src={drv.photoUrl}
+                              alt={drv.fullName}
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                              onError={(e) => {
+                                const el = e.currentTarget;
+                                el.style.display = 'none';
+                                const fallback = el.nextElementSibling as HTMLElement | null;
+                                if (fallback) fallback.classList.remove('hidden');
+                              }}
+                            />
+                          ) : null}
+                          <img
+                            src="/brand/icons/flota.png"
+                            alt=""
+                            className={`w-7 h-7 object-contain ${drv.photoUrl ? 'hidden' : ''}`}
+                            aria-hidden
                           />
                         </div>
-                        <div>
-                          <div className="text-xs font-bold text-white font-tech">{drv.fullName}</div>
-                          <div className="text-[10px] text-slate-400 font-tech">
-                            {drv.plateNumber || `DC-00${i + 1}`}
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-white font-tech truncate">
+                            {drv.fullName}
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-tech truncate">
+                            {drv.plateNumber || drv.motoModel || `DC-00${i + 1}`}
                           </div>
                         </div>
                       </div>

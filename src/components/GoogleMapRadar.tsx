@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { APIProvider, Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
 import { MotorizadoDriver, DeliveryOrder } from '../types';
 import { VILLAVICENCIO_CENTER } from '../data/villavicencio';
 import { BRAND } from './brand/BrandAssets';
 import { calculateOptimalRoute } from '../utils/routing';
 import { isLiveOrderStatus } from '../lib/orderFlow';
+import { Driver3DMarkersLayer } from './map/Driver3DMarkersLayer';
 
 const MAP_ID =
   (typeof import.meta !== 'undefined' &&
@@ -183,6 +184,7 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
   apiKey,
 }) => {
   const approved = drivers.filter((d) => d.status === 'approved');
+  const [model3dReady, setModel3dReady] = useState(false);
 
   const solicitudCount = orders.filter((o) => o.status === 'pending').length;
   const procesoCount = orders.filter((o) => isLiveOrderStatus(o.status)).length;
@@ -208,42 +210,44 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
           className="w-full h-full"
         >
           <StreetRoutesLayer orders={orders} />
+          <Driver3DMarkersLayer drivers={drivers} onModelReady={setModel3dReady} />
 
-          {approved.map((driver) => (
-            <AdvancedMarker
-              key={`${driver.id}-${driver.location?.lat?.toFixed(5)}-${driver.location?.lng?.toFixed(5)}`}
-              position={{ lat: driver.location.lat, lng: driver.location.lng }}
-              title={`${driver.fullName} · ${driver.plateNumber}${driver.isActive ? ' · GPS vivo' : ''}`}
-            >
-              <div
-                className="relative flex items-center justify-center pointer-events-none"
-                style={{
-                  width: 22,
-                  height: 22,
-                  transform: 'translateY(50%)',
-                }}
+          {!model3dReady &&
+            approved.map((driver) => (
+              <AdvancedMarker
+                key={`${driver.id}-${driver.location?.lat?.toFixed(5)}-${driver.location?.lng?.toFixed(5)}`}
+                position={{ lat: driver.location.lat, lng: driver.location.lng }}
+                title={`${driver.fullName} · ${driver.plateNumber}${driver.isActive ? ' · GPS vivo' : ''}`}
               >
-                {driver.isActive ? (
-                  <span
-                    className="absolute inset-0 rounded-full border-2 opacity-60"
+                <div
+                  className="relative flex items-center justify-center pointer-events-none"
+                  style={{
+                    width: 22,
+                    height: 22,
+                    transform: 'translateY(50%)',
+                  }}
+                >
+                  {driver.isActive ? (
+                    <span
+                      className="absolute inset-0 rounded-full border-2 opacity-60"
+                      style={{
+                        borderColor: '#00E676',
+                        animation: 'domiGpsPulse 1.4s ease-out infinite',
+                      }}
+                    />
+                  ) : null}
+                  <div
+                    className="w-[14px] h-[14px] rounded-full border-2 border-white"
                     style={{
-                      borderColor: '#00E676',
-                      animation: 'domiGpsPulse 1.4s ease-out infinite',
+                      background: driver.isActive ? '#00E676' : '#2B6CFF',
+                      boxShadow: `0 0 0 1px ${driver.isActive ? '#00E676' : '#2B6CFF'}, 0 0 10px ${
+                        driver.isActive ? '#00E676' : '#2B6CFF'
+                      }`,
                     }}
                   />
-                ) : null}
-                <div
-                  className="w-[14px] h-[14px] rounded-full border-2 border-white"
-                  style={{
-                    background: driver.isActive ? '#00E676' : '#2B6CFF',
-                    boxShadow: `0 0 0 1px ${driver.isActive ? '#00E676' : '#2B6CFF'}, 0 0 10px ${
-                      driver.isActive ? '#00E676' : '#2B6CFF'
-                    }`,
-                  }}
-                />
-              </div>
-            </AdvancedMarker>
-          ))}
+                </div>
+              </AdvancedMarker>
+            ))}
 
           {orders.map((order) => {
             const kind = routeKind(order.status);
@@ -326,7 +330,7 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
           </div>
           <div className="flex items-center gap-2 pt-0.5 text-[9px] text-slate-500">
             <span className="inline-block h-2 w-2 rounded-full bg-[#00E676]" />
-            Motorizado activo
+            {model3dReady ? 'Moto 3D en mapa' : 'Cargando moto 3D…'}
           </div>
         </div>
       </div>
