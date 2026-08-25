@@ -37,6 +37,9 @@ export const BRAND_ICONS = {
   configuracion: '/brand/icons/configuracion.png',
 } as const;
 
+/** Cache bust para íconos PNG recién subidos */
+export const BRAND_ICON_VERSION = 'inc3';
+
 export type BrandIconKey = keyof typeof BRAND_ICONS;
 
 interface BrandIconProps {
@@ -51,7 +54,7 @@ export function BrandIcon({ name, className = 'w-6 h-6', alt, active }: BrandIco
   return (
     <span className="brand-icon-slot inline-flex">
       <img
-        src={BRAND_ICONS[name]}
+        src={`${BRAND_ICONS[name]}?v=${BRAND_ICON_VERSION}`}
         alt={alt || name}
         className={`brand-neon object-contain select-none ${active ? 'brand-neon-active' : ''} ${className}`}
         draggable={false}
