@@ -1,5 +1,5 @@
 /* DomiClick PWA — network-first para no servir datos/JS viejos */
-const CACHE = 'domiclick-v9-shell';
+const CACHE = 'domiclick-v10-shell';
 const PRECACHE = [
   '/manifest.webmanifest',
   '/brand/logo-mark.png',

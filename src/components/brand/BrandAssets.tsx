@@ -21,6 +21,10 @@ export const BRAND_ICONS = {
   nomina: '/brand/icons/nomina.png',
   usuarios: '/brand/icons/usuarios.png',
   ajuste: '/brand/icons/ajuste.png',
+  kpiMotorizados: '/brand/icons/kpi-motorizados.png',
+  kpiSolicitudes: '/brand/icons/kpi-solicitudes.png',
+  kpiTransito: '/brand/icons/kpi-transito.png',
+  kpiEntregas: '/brand/icons/kpi-entregas.png',
   operadores: '/brand/icons/operadores.png',
   misiones: '/brand/icons/misiones.png',
   operaciones: '/brand/icons/operaciones.png',
@@ -38,7 +42,7 @@ export const BRAND_ICONS = {
 } as const;
 
 /** Cache bust para íconos PNG recién subidos */
-export const BRAND_ICON_VERSION = 'inc3';
+export const BRAND_ICON_VERSION = 'kpi4';
 
 export type BrandIconKey = keyof typeof BRAND_ICONS;
 

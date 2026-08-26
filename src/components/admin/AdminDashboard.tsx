@@ -7,7 +7,7 @@ import { ChatWindow } from '../chat/ChatWindow';
 import { CreateOrderModal } from './CreateOrderModal';
 import { AdminSection, AdminSectionPanels } from './AdminSectionPanels';
 import { BANNER_HERO_VIDEO_URL } from '../../lib/firebase';
-import { Plus, MapPin, MessageSquare, ShieldCheck, PictureInPicture2, Bike, ClipboardList, Navigation, PackageCheck } from 'lucide-react';
+import { Plus, MapPin, MessageSquare, ShieldCheck, PictureInPicture2 } from 'lucide-react';
 import {
   DomiMotoIcon,
   DomiRadarIcon,
@@ -152,9 +152,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         {approvedDrivers.length ? `${activePct}% Disponibles` : 'Sin flota aún'}
                       </span>
                     </div>
-                    <div className="w-10 h-10 rounded-full bg-[#FF5722]/15 border border-[#FF5722]/40 flex items-center justify-center shrink-0">
-                      <Bike className="w-5 h-5 text-[#FF5722]" />
-                    </div>
+                    <BrandIcon name="kpiMotorizados" className="w-12 h-12" />
                   </div>
                 </button>
 
@@ -175,9 +173,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         {pendingOrders ? 'En espera de asignación' : 'Sin pendientes'}
                       </span>
                     </div>
-                    <div className="w-10 h-10 rounded-full bg-[#2B6CFF]/15 border border-[#00E5FF]/40 flex items-center justify-center shrink-0">
-                      <ClipboardList className="w-5 h-5 text-[#00E5FF]" />
-                    </div>
+                    <BrandIcon name="kpiSolicitudes" className="w-12 h-12" />
                   </div>
                 </button>
 
@@ -198,9 +194,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         En curso ahora
                       </span>
                     </div>
-                    <div className="w-10 h-10 rounded-full bg-[#00E5FF]/15 border border-[#00E5FF]/40 flex items-center justify-center shrink-0">
-                      <Navigation className="w-5 h-5 text-[#00E5FF]" />
-                    </div>
+                    <BrandIcon name="kpiTransito" className="w-12 h-12" />
                   </div>
                 </button>
 
@@ -221,9 +215,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         Completadas hoy
                       </span>
                     </div>
-                    <div className="w-10 h-10 rounded-full bg-[#FF5722]/15 border border-[#FF5722]/40 flex items-center justify-center shrink-0">
-                      <PackageCheck className="w-5 h-5 text-[#FF5722]" />
-                    </div>
+                    <BrandIcon name="kpiEntregas" className="w-12 h-12" />
                   </div>
                 </button>
               </div>
