@@ -28,57 +28,104 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [statusTone, setStatusTone] = useState<'info' | 'ok' | 'err'>('info');
 
   if (!isOpen) return null;
 
+  const resetForm = () => {
+    setCustomerName('');
+    setCustomerPhone('');
+    setPickupAddress('');
+    setDeliveryAddress('');
+    setDescription('');
+    setPickupCoords({ lat: 4.142, lng: -73.6266 });
+    setDeliveryCoords({ lat: 4.142, lng: -73.6266 });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!deliveryAddress || !customerName) return;
+    if (!deliveryAddress.trim() || !customerName.trim() || !pickupAddress.trim()) {
+      setStatusTone('err');
+      setStatusMsg('Completa cliente, origen y destino.');
+      return;
+    }
 
     setIsSubmitting(true);
-    setStatusMsg('Creando pedido…');
+    setStatusTone('info');
+    setStatusMsg('Guardando solicitud en Firestore…');
     try {
       const order = await createOrder({
-        customerName,
-        customerPhone,
-        pickupAddress,
-        deliveryAddress,
-        description: description || 'Envío de paquete urgente',
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim() || 'Sin teléfono',
+        pickupAddress: pickupAddress.trim(),
+        deliveryAddress: deliveryAddress.trim(),
+        description: description.trim() || 'Envío de paquete urgente',
         itemType: 'paquete_pequeno',
         declaredValue: 20000,
         shippingFee: 0,
         status: 'pending',
         assignedDriverId: null,
         assignedDriverName: null,
-        pickupCoords: { lat: pickupCoords.lat, lng: pickupCoords.lng, addressName: pickupAddress },
-        deliveryCoords: { lat: deliveryCoords.lat, lng: deliveryCoords.lng, addressName: deliveryAddress },
+        pickupCoords: {
+          lat: pickupCoords.lat,
+          lng: pickupCoords.lng,
+          addressName: pickupAddress.trim(),
+        },
+        deliveryCoords: {
+          lat: deliveryCoords.lat,
+          lng: deliveryCoords.lng,
+          addressName: deliveryAddress.trim(),
+        },
+        sourceSiteId: 'ops-admin',
       });
 
-      setStatusMsg('Asignando al conductor activo libre más cercano…');
-      const drivers = driversProp?.length ? driversProp : await fetchAllDrivers();
+      setStatusTone('ok');
+      setStatusMsg(
+        `Solicitud ${order.trackingCode} creada. Ya aparece en Solicitudes y en el radar.`
+      );
+
       const settings = await fetchDispatchSettings();
-      const result = await dispatchPendingOrder(order, drivers, settings, {
-        busyDriverIds: getBusyDriverIds(orders),
-      });
-      if (result.assigned) {
-        setStatusMsg(
-          `Asignado a ${result.driverName} · ${result.assignedDistanceKm?.toFixed(1)} km · $${result.routePrice?.toLocaleString('es-CO')}`
-        );
-      } else {
-        setStatusMsg(
-          result.reason === 'no_free_active_driver'
-            ? `Pedido creado. Sin conductor activo y libre cerca (radio ${settings.searchRadiusKm} km).`
-            : `Pedido creado. Precio: $${result.routePrice?.toLocaleString('es-CO') || '—'} · ${result.reason || 'pendiente'}`
-        );
+      if (settings.autoAssignEnabled) {
+        setStatusMsg((prev) => `${prev} Buscando conductor activo…`);
+        const drivers = driversProp?.length ? driversProp : await fetchAllDrivers();
+        const mergedOrders = [...orders, order];
+        const result = await dispatchPendingOrder(order, drivers, settings, {
+          busyDriverIds: getBusyDriverIds(mergedOrders),
+        });
+        if (result.assigned) {
+          setStatusTone('ok');
+          setStatusMsg(
+            `${order.trackingCode} asignado a ${result.driverName} · ${result.assignedDistanceKm?.toFixed(1)} km · $${result.routePrice?.toLocaleString('es-CO')}. Revisa Envíos en tránsito.`
+          );
+        } else {
+          setStatusTone('info');
+          setStatusMsg(
+            `${order.trackingCode} quedó pendiente en Solicitudes (${result.reason || 'sin conductor libre cerca'}).`
+          );
+        }
       }
-      setTimeout(() => onClose(), 900);
+
+      resetForm();
+      setTimeout(() => onClose(), 1400);
     } catch (err) {
       console.error('Error creating order:', err);
-      setStatusMsg('Error al crear / despachar el pedido.');
+      setStatusTone('err');
+      setStatusMsg(
+        err instanceof Error
+          ? `No se pudo guardar: ${err.message}`
+          : 'Error al crear la solicitud. Revisa conexión a Firestore.'
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const statusClass =
+    statusTone === 'err'
+      ? 'text-red-300 bg-red-950/30 border-red-500/40'
+      : statusTone === 'ok'
+        ? 'text-emerald-300 bg-emerald-950/20 border-emerald-500/35'
+        : 'text-[#00E5FF] bg-[#0A1122] border-[#1A2D52]';
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
@@ -97,7 +144,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
           <div>
             <h3 className="text-xl font-black text-white italic">NUEVA SOLICITUD DE ENVÍO</h3>
             <p className="text-xs text-[#00F0FF]">
-              Auto-despacho al más cercano · precio solo admin
+              Se guarda en vivo · auto-asigna si está activo en Ajustes
             </p>
           </div>
         </div>
@@ -168,12 +215,12 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               className="w-full bg-[#111A2E] border border-[#1E2E50] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#00F0FF]"
             />
             <p className="text-[10px] text-slate-500 mt-1.5">
-              El precio se calcula automáticamente (base + km) y solo lo ve el administrador.
+              La solicitud entra a Firestore al instante. Si hay conductor activo y libre, se asigna solo.
             </p>
           </div>
 
           {statusMsg && (
-            <p className="text-[11px] text-[#00E5FF] font-tech bg-[#0A1122] border border-[#1A2D52] rounded-xl px-3 py-2">
+            <p className={`text-[11px] font-tech border rounded-xl px-3 py-2 ${statusClass}`}>
               {statusMsg}
             </p>
           )}
@@ -189,10 +236,10 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#FF5722] to-[#E64A19] text-white font-black text-xs transition shadow-[0_0_20px_rgba(255,87,34,0.5)] hover:scale-105 flex items-center gap-2"
+              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#FF5722] to-[#E64A19] text-white font-black text-xs transition shadow-[0_0_20px_rgba(255,87,34,0.5)] hover:scale-105 flex items-center gap-2 disabled:opacity-60"
             >
               <Plus className="w-4 h-4" />
-              <span>{isSubmitting ? 'DESPACHANDO…' : 'CREAR Y AUTO-ASIGNAR'}</span>
+              <span>{isSubmitting ? 'GUARDANDO…' : 'CREAR SOLICITUD'}</span>
             </button>
           </div>
         </form>

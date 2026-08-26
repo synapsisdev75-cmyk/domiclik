@@ -67,8 +67,15 @@ function createFirestore() {
   // Solo memoria: lo que borres en la consola se refleja al instante (sin docs fantasma offline)
   try {
     return namedDbId
-      ? initializeFirestore(app, { localCache: memoryLocalCache() }, namedDbId)
-      : initializeFirestore(app, { localCache: memoryLocalCache() });
+      ? initializeFirestore(
+          app,
+          { localCache: memoryLocalCache(), ignoreUndefinedProperties: true },
+          namedDbId
+        )
+      : initializeFirestore(app, {
+          localCache: memoryLocalCache(),
+          ignoreUndefinedProperties: true,
+        });
   } catch {
     return namedDbId ? getFirestore(app, namedDbId) : getFirestore(app);
   }
@@ -553,13 +560,18 @@ export async function createOrder(
   const deliveryConfirmCode =
     orderData.deliveryConfirmCode ||
     String(Math.floor(100000 + Math.random() * 900000));
+  const now = new Date().toISOString();
   const fullOrder: DeliveryOrder = {
     ...orderData,
     id: newId,
     trackingCode,
     deliveryConfirmCode,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    sourceSiteId: orderData.sourceSiteId || 'ops-admin',
+    timeline: orderData.timeline?.length
+      ? orderData.timeline
+      : [{ at: now, to: 'pending', byRole: 'admin', note: 'Solicitud creada en torre' }],
+    createdAt: now,
+    updatedAt: now,
   };
   await setDoc(doc(db, 'orders', newId), fullOrder);
   return fullOrder;
@@ -1164,9 +1176,9 @@ export async function requestAdminAccess(params: {
     const acc = { id, ...existing.data() } as AdminAccount;
     const patch: Partial<AdminAccount> = {
       email,
-      uid: params.uid || acc.uid,
       displayName: params.displayName || acc.displayName || email,
     };
+    if (params.uid) patch.uid = params.uid;
     await updateDoc(refDoc, patch);
     return { ...acc, ...patch };
   }
@@ -1175,13 +1187,12 @@ export async function requestAdminAccess(params: {
   const acc: AdminAccount = {
     id,
     email,
-    uid: params.uid,
     displayName: params.displayName || email,
     status: isFounder ? 'active' : 'pending',
     isFounder,
     requestedAt: now,
-    activatedAt: isFounder ? now : undefined,
-    activatedBy: isFounder ? 'sistema' : undefined,
+    ...(params.uid ? { uid: params.uid } : {}),
+    ...(isFounder ? { activatedAt: now, activatedBy: 'sistema' } : {}),
   };
   await setDoc(refDoc, acc);
   return acc;

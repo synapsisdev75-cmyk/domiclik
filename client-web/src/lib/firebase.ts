@@ -11,6 +11,7 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore,
+  initializeFirestore,
   collection,
   doc,
   getDoc,
@@ -53,7 +54,17 @@ const namedDbId =
     ? firebaseConfig.firestoreDatabaseId
     : undefined;
 
-export const db = namedDbId ? getFirestore(app, namedDbId) : getFirestore(app);
+function createClientFirestore() {
+  try {
+    return namedDbId
+      ? initializeFirestore(app, { ignoreUndefinedProperties: true }, namedDbId)
+      : initializeFirestore(app, { ignoreUndefinedProperties: true });
+  } catch {
+    return namedDbId ? getFirestore(app, namedDbId) : getFirestore(app);
+  }
+}
+
+export const db = createClientFirestore();
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
