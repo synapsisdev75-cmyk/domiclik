@@ -83,8 +83,9 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
         label="Dirección de recolección (A) *"
         required
         accent="pickup"
+        inputName="domiclick-pickup-address"
         value={pickupAddress}
-        placeholder="Restaurante, heladería, centro comercial, calle…"
+        placeholder="Ej. Calle 23, Carrera 40, Av. 40, Unicentro…"
         onQueryChange={onPickupAddressChange}
         onPlacePicked={onPickupPicked}
       />
@@ -93,8 +94,9 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
         label="Dirección de entrega (B) *"
         required
         accent="delivery"
+        inputName="domiclick-delivery-address"
         value={deliveryAddress}
-        placeholder="Negocio, barrio, urbanización o dirección…"
+        placeholder="Ej. Calle 15 # 20-10, Carrera 30, barrio o negocio…"
         onQueryChange={onDeliveryAddressChange}
         onPlacePicked={onDeliveryPicked}
       />

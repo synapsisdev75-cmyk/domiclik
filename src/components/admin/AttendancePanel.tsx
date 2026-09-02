@@ -3,7 +3,10 @@ import { AttendancePunch, MotorizadoDriver } from '../../types';
 import { subscribeAttendancePunches } from '../../lib/firebase';
 import { DEFAULT_FUEL_COP_PER_KM, formatCOP } from '../../lib/adminMetrics';
 import { summarizeDriverShift } from '../../lib/workShift';
-import { Fingerprint, LogIn, LogOut, Gauge } from 'lucide-react';
+import { ATTENDANCE_PIN_RESET_HOUR } from '../../lib/attendance';
+import { formatGallons, formatLiters } from '../../lib/motoFuel';
+import { Fingerprint, LogIn, LogOut, Gauge, Tablet, ExternalLink, UserRound, Bike, AlertTriangle } from 'lucide-react';
+import { attendanceKioskUrl, openAttendanceKioskWindow } from '../driver/AttendanceKioskScreen';
 
 interface AttendancePanelProps {
   drivers: MotorizadoDriver[];
@@ -18,7 +21,11 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
   }, [todayKey]);
 
   const approved = drivers.filter((d) => d.status === 'approved');
-  const linked = approved.filter((d) => d.webauthnCredentialId);
+  const linked = approved.filter(
+    (d) => d.webauthnCredentialId || d.webauthnKioskCredentialId
+  );
+  const pinPunchesToday = punches.filter((p) => p.method === 'pin_kiosk');
+  const pendingMobilePhotos = pinPunchesToday.filter((p) => p.mobilePhotosPending);
 
   const shifts = useMemo(
     () =>
@@ -38,9 +45,29 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
         <h3 className="text-sm font-bold text-white">Asistencia + kilometraje · hoy</h3>
       </div>
       <p className="text-xs text-slate-400">
-        Entrada y salida con huella, foto del odómetro y km. Al cierre: km del día y estimado de
-        gasolina (uso de la empresa).
+        Tablet sede: rostro → PIN (rota {ATTENDANCE_PIN_RESET_HOUR.toString().padStart(2, '0')}:00) → km + PIN.
+        Celular (QR): odómetro + placa en entrada. Móvil personal: huella WebAuthn.
       </p>
+      <div className="rounded-xl border border-[#00E5FF]/30 bg-[#00E5FF]/05 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-2 min-w-0">
+          <Tablet className="w-4 h-4 text-[#00E5FF] shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-bold text-white">Terminal tablet · PIN diario</p>
+            <p className="text-[11px] text-slate-500 break-all">{attendanceKioskUrl()}</p>
+            <p className="text-[10px] text-slate-600 mt-1">
+              {pinPunchesToday.length} marca(s) PIN · {pendingMobilePhotos.length} sin fotos móvil
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => openAttendanceKioskWindow()}
+          className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#2B6CFF] text-white text-xs font-black"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
+          Abrir en tablet
+        </button>
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <div className="bg-[#0A1020] border border-[#162748] rounded-xl px-3 py-2">
           <div className="text-[10px] text-slate-500 font-tech uppercase">Biometrías</div>
@@ -98,6 +125,12 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
                     {s.hoursWorked > 0 ? `${s.hoursWorked.toFixed(2)} h` : '—'} / {s.expectedHours} h
                   </span>
                   <span className="text-amber-300">{formatCOP(s.fuelEstimateCop)}</span>
+                  {s.gallonsUsed != null && s.gallonsUsed > 0 && (
+                    <span className="text-[#FF5722]">
+                      · {formatLiters(s.litersUsed || 0)} L · {s.gallonsUsed.toFixed(2)} gal
+                      {s.kmPerLiterUsed != null && ` · ${s.kmPerLiterUsed} km/L`}
+                    </span>
+                  )}
                 </div>
                 {(s.photoInUrl || s.photoOutUrl) && (
                   <div className="flex gap-2">
@@ -143,8 +176,19 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
                 ) : (
                   <LogOut className="w-4 h-4 text-[#FF5722] shrink-0" />
                 )}
+                {p.facePhotoUrl ? (
+                  <a href={p.facePhotoUrl} target="_blank" rel="noreferrer" title="Rostro">
+                    <img
+                      src={p.facePhotoUrl}
+                      alt="Rostro"
+                      className="h-9 w-9 object-cover rounded-md border border-[#1a2744]"
+                    />
+                  </a>
+                ) : (
+                  <UserRound className="w-4 h-4 text-slate-600 shrink-0" />
+                )}
                 {p.odometerPhotoUrl ? (
-                  <a href={p.odometerPhotoUrl} target="_blank" rel="noreferrer">
+                  <a href={p.odometerPhotoUrl} target="_blank" rel="noreferrer" title="Odómetro">
                     <img
                       src={p.odometerPhotoUrl}
                       alt="Odómetro"
@@ -154,13 +198,31 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
                 ) : (
                   <Gauge className="w-4 h-4 text-slate-600 shrink-0" />
                 )}
+                {p.platePhotoUrl ? (
+                  <a href={p.platePhotoUrl} target="_blank" rel="noreferrer" title="Placa">
+                    <img
+                      src={p.platePhotoUrl}
+                      alt="Placa"
+                      className="h-9 w-12 object-cover rounded-md border border-[#1a2744]"
+                    />
+                  </a>
+                ) : p.type === 'in' ? (
+                  <Bike className="w-4 h-4 text-slate-600 shrink-0" />
+                ) : null}
                 <div className="min-w-0">
                   <div className="text-white font-bold truncate">{p.driverName || p.driverId}</div>
-                  <div className="text-[10px] text-slate-500 font-tech">
-                    {p.type === 'in' ? 'ENTRADA' : 'SALIDA'}
-                    {p.odometerKm != null
-                      ? ` · ${p.odometerKm.toLocaleString('es-CO')} km`
-                      : ''}
+                  <div className="text-[10px] text-slate-500 font-tech flex items-center gap-1.5 flex-wrap">
+                    <span>
+                      {p.type === 'in' ? 'ENTRADA' : 'SALIDA'}
+                      {p.odometerKm != null
+                        ? ` · ${p.odometerKm.toLocaleString('es-CO')} km`
+                        : ''}
+                    </span>
+                    {p.mobilePhotosPending && (
+                      <span className="text-amber-400 inline-flex items-center gap-0.5">
+                        <AlertTriangle className="w-3 h-3" /> sin fotos móvil
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

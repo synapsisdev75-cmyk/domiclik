@@ -1,8 +1,9 @@
-import type { AttendancePunch, WorkShiftDay } from '../types';
+import type { AttendancePunch, WorkShiftDay, FleetSettings } from '../types';
 import {
   DEFAULT_FUEL_COP_PER_KM,
   EXPECTED_SHIFT_HOURS,
 } from './adminMetrics';
+import { calcShiftFuel, DEFAULT_FLEET_SETTINGS } from './motoFuel';
 
 export function hoursBetween(fromIso?: string, toIso?: string): number {
   if (!fromIso || !toIso) return 0;
@@ -16,7 +17,11 @@ export function summarizeDriverShift(
   driverId: string,
   driverName: string,
   dateKey: string,
-  fuelCostPerKm = DEFAULT_FUEL_COP_PER_KM
+  fuelCostPerKm = DEFAULT_FUEL_COP_PER_KM,
+  fleet: Pick<FleetSettings, 'fuelPricePerGallonCop' | 'defaultKmPerGallon' | 'customVehicles'> = DEFAULT_FLEET_SETTINGS,
+  motoModel?: string,
+  motoKmPerGallon?: number,
+  fleetVehicleId?: string
 ): WorkShiftDay {
   const mine = punches
     .filter((p) => p.driverId === driverId)
@@ -28,10 +33,33 @@ export function summarizeDriverShift(
 
   const kmIn = firstIn?.odometerKm;
   const kmOut = lastOut?.odometerKm;
-  const kmDriven =
-    typeof kmIn === 'number' && typeof kmOut === 'number' && kmOut >= kmIn
-      ? Math.round((kmOut - kmIn) * 10) / 10
-      : 0;
+
+  const fuelFromOut =
+    lastOut?.shiftKmDriven != null && lastOut.shiftFuelCostCop != null
+      ? {
+          kmDriven: lastOut.shiftKmDriven,
+          fuelCostCop: lastOut.shiftFuelCostCop,
+          gallonsUsed: lastOut.shiftGallons,
+          litersUsed: lastOut.shiftLiters,
+          kmPerGallon: lastOut.kmPerGallonUsed,
+          kmPerLiter: lastOut.kmPerLiterUsed,
+          litersPerKm: lastOut.litersPerKmUsed,
+          copPerKm: lastOut.copPerKmUsed,
+          fuelPricePerGallonCop: lastOut.fuelPricePerGallonUsed,
+          motoCatalogId: lastOut.motoCatalogId,
+        }
+      : null;
+
+  const fuelCalc =
+    fuelFromOut ||
+    (typeof kmIn === 'number' && typeof kmOut === 'number'
+      ? calcShiftFuel({ kmIn, kmOut, motoModel, motoKmPerGallon, fleetVehicleId, fleet })
+      : null);
+
+  const kmDriven = fuelCalc?.kmDriven ?? 0;
+  const fuelEstimateCop =
+    fuelCalc?.fuelCostCop ??
+    Math.round(kmDriven * (fuelCostPerKm || DEFAULT_FUEL_COP_PER_KM));
 
   const inAt = firstIn?.at || mine.find((p) => p.type === 'in')?.at;
   const outAt = lastOut?.at || [...mine].reverse().find((p) => p.type === 'out')?.at;
@@ -48,7 +76,15 @@ export function summarizeDriverShift(
     kmDriven,
     hoursWorked,
     expectedHours: EXPECTED_SHIFT_HOURS,
-    fuelEstimateCop: Math.round(kmDriven * (fuelCostPerKm || DEFAULT_FUEL_COP_PER_KM)),
+    fuelEstimateCop,
+    gallonsUsed: fuelCalc?.gallonsUsed,
+    litersUsed: fuelCalc?.litersUsed,
+    litersPerKm: fuelCalc?.litersPerKm,
+    copPerKm: fuelCalc?.copPerKm,
+    fuelPricePerGallonCop: fuelCalc?.fuelPricePerGallonCop,
+    kmPerGallonUsed: fuelCalc?.kmPerGallon,
+    kmPerLiterUsed: fuelCalc?.kmPerLiter,
+    motoCatalogId: fuelCalc?.motoCatalogId,
     photoInUrl: firstIn?.odometerPhotoUrl,
     photoOutUrl: lastOut?.odometerPhotoUrl,
     open: Boolean(inAt) && !outAt,
@@ -65,8 +101,12 @@ export function buildDriverShiftHistory(
   punches: AttendancePunch[],
   driverId: string,
   driverName: string,
-  fuelCostPerKm = DEFAULT_FUEL_COP_PER_KM
-): { days: WorkShiftDay[]; totalKm: number; totalHours: number; totalFuelCop: number } {
+  fuelCostPerKm = DEFAULT_FUEL_COP_PER_KM,
+  fleet: Pick<FleetSettings, 'fuelPricePerGallonCop' | 'defaultKmPerGallon' | 'customVehicles'> = DEFAULT_FLEET_SETTINGS,
+  motoModel?: string,
+  motoKmPerGallon?: number,
+  fleetVehicleId?: string
+): { days: WorkShiftDay[]; totalKm: number; totalHours: number; totalFuelCop: number; totalGallons: number; totalLiters: number } {
   const mine = punches.filter((p) => p.driverId === driverId);
   const keys = [...new Set(mine.map((p) => p.dateKey).filter(Boolean))].sort().reverse();
   const days = keys.map((dateKey) =>
@@ -75,7 +115,11 @@ export function buildDriverShiftHistory(
       driverId,
       driverName,
       dateKey,
-      fuelCostPerKm
+      fuelCostPerKm,
+      fleet,
+      motoModel,
+      motoKmPerGallon,
+      fleetVehicleId
     )
   );
   return {
@@ -83,5 +127,7 @@ export function buildDriverShiftHistory(
     totalKm: Math.round(days.reduce((s, d) => s + d.kmDriven, 0) * 10) / 10,
     totalHours: Math.round(days.reduce((s, d) => s + d.hoursWorked, 0) * 100) / 100,
     totalFuelCop: days.reduce((s, d) => s + d.fuelEstimateCop, 0),
+    totalGallons: Math.round(days.reduce((s, d) => s + (d.gallonsUsed || 0), 0) * 100) / 100,
+    totalLiters: Math.round(days.reduce((s, d) => s + (d.litersUsed || 0), 0) * 100) / 100,
   };
 }

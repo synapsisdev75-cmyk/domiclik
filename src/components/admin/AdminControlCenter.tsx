@@ -19,12 +19,15 @@ import {
 import { isLiveOrderStatus } from '../../lib/orderFlow';
 import {
   DEFAULT_PAYROLL_SETTINGS,
-  buildDailySeries,
   buildDriverStats,
+  buildMetricsSeries,
+  chartSeriesCaption,
   computePayrollLines,
   downloadExcel,
   downloadTextFile,
+  filterOrdersInRange,
   formatCOP,
+  inRange,
   startOfDayISO,
   startOfMonthISO,
   startOfWeekISO,
@@ -54,6 +57,7 @@ interface Props {
   orders: DeliveryOrder[];
   initialTab?: ControlTab;
   adminName?: string;
+  readOnly?: boolean;
 }
 
 function Stars({ value, size = 14 }: { value: number; size?: number }) {
@@ -74,6 +78,13 @@ function Stars({ value, size = 14 }: { value: number; size?: number }) {
   );
 }
 
+function chartLabelStep(pointCount: number): number {
+  if (pointCount <= 7) return 1;
+  if (pointCount <= 12) return 2;
+  if (pointCount <= 24) return 4;
+  return Math.max(1, Math.ceil(pointCount / 6));
+}
+
 function LineChart({
   points,
   valueKey,
@@ -86,45 +97,86 @@ function LineChart({
   label: string;
 }) {
   const w = 560;
-  const h = 180;
-  const pad = 28;
+  const h = 200;
+  const padX = 32;
+  const padTop = 20;
+  const padBottom = 40;
+  const plotH = h - padTop - padBottom;
+
+  if (points.length === 0) {
+    return (
+      <div>
+        <div className="text-[11px] text-slate-400 font-tech uppercase mb-2">{label}</div>
+        <div className="h-[180px] flex items-center justify-center text-xs text-slate-500 border border-dashed border-[#1a2744] rounded-xl">
+          Sin datos en este periodo
+        </div>
+      </div>
+    );
+  }
+
   const vals = points.map((p) => p[valueKey]);
   const max = Math.max(1, ...vals);
+  const labelEvery = chartLabelStep(points.length);
+  const showDots = points.length <= 14;
+
   const coords = points.map((p, i) => {
-    const x = pad + (i * (w - pad * 2)) / Math.max(1, points.length - 1);
-    const y = h - pad - (p[valueKey] / max) * (h - pad * 2);
-    return { x, y, p };
+    const x = padX + (i * (w - padX * 2)) / Math.max(1, points.length - 1);
+    const y = padTop + plotH - (p[valueKey] / max) * plotH;
+    return { x, y, p, i };
   });
   const d = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
-  const area = `${d} L ${coords[coords.length - 1]?.x || pad} ${h - pad} L ${pad} ${h - pad} Z`;
+  const area = `${d} L ${coords[coords.length - 1]?.x || padX} ${h - padBottom} L ${padX} ${h - padBottom} Z`;
+
+  const total = vals.reduce((s, v) => s + v, 0);
 
   return (
     <div>
-      <div className="text-[11px] text-slate-400 font-tech uppercase mb-2">{label}</div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-[180px]">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+        <div className="text-[11px] text-slate-400 font-tech uppercase">{label}</div>
+        <div className="text-[10px] text-slate-500 font-tech">
+          Total periodo:{' '}
+          <span className="text-slate-300 font-bold">
+            {valueKey === 'revenue' ? formatCOP(total) : total}
+          </span>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-[200px]" role="img" aria-label={label}>
         {[0, 0.5, 1].map((t) => (
           <line
             key={t}
-            x1={pad}
-            x2={w - pad}
-            y1={h - pad - t * (h - pad * 2)}
-            y2={h - pad - t * (h - pad * 2)}
+            x1={padX}
+            x2={w - padX}
+            y1={padTop + plotH - t * plotH}
+            y2={padTop + plotH - t * plotH}
             stroke="#1a2744"
             strokeWidth="1"
           />
         ))}
         <path d={area} fill={color} opacity="0.12" />
         <path d={d} fill="none" stroke={color} strokeWidth="2.4" strokeLinejoin="round" />
-        {coords.map((c, i) => (
-          <g key={i}>
-            <circle cx={c.x} cy={c.y} r="3.2" fill={color} />
-            {i % 2 === 0 && (
-              <text x={c.x} y={h - 8} textAnchor="middle" fill="#64748b" fontSize="10">
-                {c.p.label}
-              </text>
-            )}
-          </g>
-        ))}
+        {coords.map((c) => {
+          const showLabel =
+            c.i % labelEvery === 0 || c.i === points.length - 1;
+          return (
+            <g key={c.i}>
+              {showDots && <circle cx={c.x} cy={c.y} r="3" fill={color} />}
+              {showLabel && (
+                <text
+                  x={c.x}
+                  y={h - 10}
+                  textAnchor="middle"
+                  fill="#94a3b8"
+                  fontSize="9"
+                >
+                  {c.p.label}
+                </text>
+              )}
+              <title>
+                {c.p.label}: {valueKey === 'revenue' ? formatCOP(c.p[valueKey]) : c.p[valueKey]}
+              </title>
+            </g>
+          );
+        })}
       </svg>
     </div>
   );
@@ -166,6 +218,7 @@ export const AdminControlCenter: React.FC<Props> = ({
   orders,
   initialTab = 'metricas',
   adminName = 'Admin DomiClick',
+  readOnly = false,
 }) => {
   const [tab, setTab] = useState<ControlTab>(initialTab);
   const [reviews, setReviews] = useState<DriverReview[]>([]);
@@ -223,7 +276,18 @@ export const AdminControlCenter: React.FC<Props> = ({
     return orders.filter((o) => o.assignedDriverId === selectedDriverId);
   }, [orders, selectedDriverId]);
 
-  const daily = useMemo(() => buildDailySeries(scopedOrders, 14), [scopedOrders]);
+  const daily = useMemo(
+    () => buildMetricsSeries(scopedOrders, period, range.from, range.to),
+    [scopedOrders, period, range.from, range.to]
+  );
+
+  const seriesCaption = chartSeriesCaption(period);
+
+  const periodOrders = useMemo(
+    () => filterOrdersInRange(scopedOrders, range.from, range.to),
+    [scopedOrders, range.from, range.to]
+  );
+
   const stats = useMemo(
     () => buildDriverStats(drivers, orders, reviews, range.from, range.to),
     [drivers, orders, reviews, range]
@@ -242,28 +306,40 @@ export const AdminControlCenter: React.FC<Props> = ({
   }, [payrollLines, selectedDriverId]);
   const payrollTotal = scopedPayrollLines.reduce((s, l) => s + l.total, 0);
 
-  const delivered = scopedOrders.filter((o) => o.status === 'delivered').length;
-  const pending = scopedOrders.filter((o) => o.status === 'pending').length;
-  const transit = scopedOrders.filter((o) => isLiveOrderStatus(o.status)).length;
-  const cancelled = scopedOrders.filter((o) => o.status === 'cancelled').length;
-  const revenue = scopedOrders
-    .filter((o) => o.status === 'delivered')
+  const delivered = periodOrders.filter(
+    (o) => o.status === 'delivered' && inRange(o.updatedAt || o.createdAt, range.from, range.to)
+  ).length;
+  const pending = periodOrders.filter((o) => o.status === 'pending').length;
+  const transit = periodOrders.filter((o) => isLiveOrderStatus(o.status)).length;
+  const cancelled = periodOrders.filter(
+    (o) =>
+      o.status === 'cancelled' && inRange(o.updatedAt || o.createdAt, range.from, range.to)
+  ).length;
+  const revenue = periodOrders
+    .filter(
+      (o) =>
+        o.status === 'delivered' && inRange(o.updatedAt || o.createdAt, range.from, range.to)
+    )
     .reduce((s, o) => s + (Number(o.shippingFee) || 0), 0);
   const avgRating = useMemo(() => {
     if (displayStats.length === 0) return 0;
     return Math.round((displayStats.reduce((s, x) => s + x.rating, 0) / displayStats.length) * 10) / 10;
   }, [displayStats]);
   const satisfactionPct = useMemo(() => {
-    const rated = scopedOrders.filter((o) => Number(o.serviceRating) > 0);
+    const rated = periodOrders.filter(
+      (o) =>
+        Number(o.serviceRating) > 0 &&
+        inRange(o.updatedAt || o.createdAt, range.from, range.to)
+    );
     if (rated.length === 0) return null;
     const avg = rated.reduce((s, o) => s + Number(o.serviceRating), 0) / rated.length;
     return Math.round((avg / 5) * 100);
-  }, [scopedOrders]);
+  }, [periodOrders, range.from, range.to]);
   const cancelRatePct = useMemo(() => {
-    const total = scopedOrders.length;
+    const total = periodOrders.length;
     if (!total) return null;
     return Math.round((cancelled / total) * 1000) / 10;
-  }, [scopedOrders, cancelled]);
+  }, [periodOrders.length, cancelled]);
   const avgAssignMin = useMemo(() => {
     const vals = displayStats.map((s) => s.avgAssignMin).filter((n): n is number => n != null);
     if (!vals.length) return null;
@@ -409,12 +485,13 @@ export const AdminControlCenter: React.FC<Props> = ({
     }
   };
 
-  const tabs: { id: ControlTab; label: string; icon: React.ReactNode }[] = [
+  const allTabs: { id: ControlTab; label: string; icon: React.ReactNode }[] = [
     { id: 'metricas', label: 'Métricas', icon: <BarChart3 className="w-3.5 h-3.5" /> },
     { id: 'repartidores', label: 'Repartidores', icon: <Users className="w-3.5 h-3.5" /> },
     { id: 'nomina', label: 'Nómina', icon: <Wallet className="w-3.5 h-3.5" /> },
     { id: 'informes', label: 'Informes', icon: <Download className="w-3.5 h-3.5" /> },
   ];
+  const tabs = readOnly ? allTabs.filter((t) => t.id === 'informes') : allTabs;
 
   return (
     <div className="space-y-5">
@@ -425,7 +502,9 @@ export const AdminControlCenter: React.FC<Props> = ({
             Control Supremo
           </h2>
           <p className="text-xs text-slate-400 font-tech mt-1">
-            Métricas reales · calificaciones · nómina · informes descargables
+            {readOnly
+              ? 'Descarga informes operativos · solo lectura'
+              : 'Métricas reales · calificaciones · nómina · informes descargables'}
           </p>
           <p className="text-[11px] text-[#00E5FF] font-tech font-bold mt-1.5">
             Vista: {selectedDriverLabel}
@@ -646,7 +725,7 @@ export const AdminControlCenter: React.FC<Props> = ({
               points={daily}
               valueKey="delivered"
               color="#00E676"
-              label={`Entregas últimos 14 días${selectedDriverId ? ` · ${selectedDriverLabel}` : ''}`}
+              label={`Entregas · ${seriesCaption}${selectedDriverId ? ` · ${selectedDriverLabel}` : ''}`}
             />
           </div>
           <div className="bg-[#0A1020] border border-[#162748] rounded-2xl p-4">
@@ -654,7 +733,7 @@ export const AdminControlCenter: React.FC<Props> = ({
               points={daily}
               valueKey="created"
               color="#2B6CFF"
-              label={`Solicitudes creadas · 14 días${selectedDriverId ? ` · ${selectedDriverLabel}` : ''}`}
+              label={`Solicitudes creadas · ${seriesCaption}${selectedDriverId ? ` · ${selectedDriverLabel}` : ''}`}
             />
           </div>
           <div className="bg-[#0A1020] border border-[#162748] rounded-2xl p-4">
@@ -662,7 +741,7 @@ export const AdminControlCenter: React.FC<Props> = ({
               points={daily}
               valueKey="revenue"
               color="#FF5722"
-              label={`Recaudo diario (COP) · 14 días${selectedDriverId ? ` · ${selectedDriverLabel}` : ''}`}
+              label={`Recaudo (COP) · ${seriesCaption}${selectedDriverId ? ` · ${selectedDriverLabel}` : ''}`}
             />
           </div>
           <div className="bg-[#0A1020] border border-[#162748] rounded-2xl p-4">
@@ -680,7 +759,8 @@ export const AdminControlCenter: React.FC<Props> = ({
           </div>
           <div className="lg:col-span-2 bg-[#0A1020] border border-[#162748] rounded-2xl p-4">
             <div className="text-[11px] text-slate-400 font-tech uppercase mb-3">
-              Distribución operativa{selectedDriverId ? ` · ${selectedDriverLabel}` : ''}
+              Distribución operativa · {range.label}
+              {selectedDriverId ? ` · ${selectedDriverLabel}` : ''}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
@@ -689,8 +769,9 @@ export const AdminControlCenter: React.FC<Props> = ({
                 { label: 'Pendientes', n: pending, color: 'bg-[#FF5722]' },
                 { label: 'Cancelados', n: cancelled, color: 'bg-red-500' },
               ].map((row) => {
-                const pct = scopedOrders.length
-                  ? Math.round((row.n / scopedOrders.length) * 100)
+                const totalInPeriod = delivered + transit + pending + cancelled;
+                const pct = totalInPeriod
+                  ? Math.round((row.n / totalInPeriod) * 100)
                   : 0;
                 return (
                   <div key={row.label}>

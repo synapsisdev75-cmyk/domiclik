@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
-import { auth, LOGIN_ROLE_KEY } from '../../lib/firebase';
-import { startGoogleSignInRedirect, describeAuthError } from '../../lib/googleAuth';
+import { auth } from '../../lib/firebase';
+import {
+  startGoogleSignInRedirect,
+  describeAuthError,
+  saveLoginRole,
+  clearLoginRole,
+} from '../../lib/googleAuth';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -56,12 +61,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleGoogleSignIn = async () => {
     setError('');
     setLoading(true);
-    sessionStorage.setItem(LOGIN_ROLE_KEY, role);
+    saveLoginRole(role);
     try {
       const user = await startGoogleSignInRedirect();
       if (user?.email) {
-        sessionStorage.removeItem(LOGIN_ROLE_KEY);
         onAuthenticated(user.email, role);
+        clearLoginRole();
         onClose();
       }
     } catch (err: unknown) {

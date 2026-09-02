@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MotorizadoDriver, DeliveryOrder, AdminAccount } from '../../types';
 import { MapComponent, MapStyleType } from '../MapComponent';
 import { GoogleMapRadar, getGoogleMapsApiKey } from '../GoogleMapRadar';
@@ -16,6 +16,14 @@ import {
 } from '../ui/CustomIcons';
 import { ORDER_STATUS_LABEL, isLiveOrderStatus } from '../../lib/orderFlow';
 import { openMapWallWindow } from './MapWallScreen';
+import { MapWallVideoPanel } from './MapWallVideoPanel';
+import { staffCan } from '../../lib/staffAccess';
+import { subscribeIncidents } from '../../lib/firebase';
+import type { OpsIncident } from '../../types';
+import { AlertTriangle } from 'lucide-react';
+
+import type { AdminSection } from './AdminSectionPanels';
+import type { StaffRole } from '../../types';
 
 interface AdminDashboardProps {
   drivers: MotorizadoDriver[];
@@ -24,6 +32,7 @@ interface AdminDashboardProps {
   onNavigate?: (section: AdminSection) => void;
   adminAccounts?: AdminAccount[];
   currentAdminEmail?: string;
+  staffRole?: StaffRole;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -33,9 +42,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigate,
   adminAccounts = [],
   currentAdminEmail = '',
+  staffRole = 'admin',
 }) => {
+  const isSecretary = staffRole === 'secretary';
+  const canCreateOrders = staffCan(staffRole, 'orders.create');
   const [selectedDriverForChat, setSelectedDriverForChat] = useState<MotorizadoDriver | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [incidents, setIncidents] = useState<OpsIncident[]>([]);
   const [mapStyleToggle, setMapStyleToggle] = useState<'map' | 'satellite'>('map');
   const radarMapStyle: MapStyleType =
     mapStyleToggle === 'satellite' ? 'google_satellite' : 'dark';
@@ -73,6 +86,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const currentSection = (section || 'dashboard') as AdminSection;
 
+  useEffect(() => subscribeIncidents(setIncidents), []);
+
+  const openPanic = incidents.filter((i) => i.status === 'open' && i.isPanic);
+  const chatSender =
+    isSecretary
+      ? `Secretaría · ${(currentAdminEmail || 'torre').split('@')[0]}`
+      : 'Admin DomiClick';
+  const chatRole = isSecretary ? ('secretary' as const) : ('admin' as const);
+
   return (
     <div className="w-full space-y-6 select-none font-sans text-slate-100 domiclick-flow-pattern rounded-3xl p-1">
       {currentSection !== 'dashboard' ? (
@@ -84,10 +106,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onOpenCreateOrder={() => setIsCreateModalOpen(true)}
             adminAccounts={adminAccounts}
             currentAdminEmail={currentAdminEmail}
+            staffRole={staffRole}
           />
         </div>
       ) : (
         <>
+          {openPanic.length > 0 && (
+            <button
+              type="button"
+              onClick={() => go('incidentes')}
+              className="w-full text-left rounded-2xl border-2 border-red-500/70 bg-red-950/40 p-4 flex items-center gap-3 animate-pulse hover:bg-red-950/55 transition"
+            >
+              <AlertTriangle className="w-8 h-8 text-red-400 shrink-0" />
+              <div>
+                <div className="text-sm font-black text-red-200 uppercase tracking-wide">
+                  Botón de pánico activo · {openPanic.length} alerta{openPanic.length > 1 ? 's' : ''}
+                </div>
+                <div className="text-xs text-red-300/90 mt-0.5">
+                  {openPanic[0].driverName || openPanic[0].reportedByName} — pulsa para ver en Incidentes
+                </div>
+              </div>
+            </button>
+          )}
+
           {/* Hero + KPIs */}
           <div className="relative overflow-hidden rounded-3xl border border-[#142340] min-h-[320px] p-6 sm:p-8 shadow-[0_10px_40px_rgba(0,0,0,0.8)]">
             {/* Video banner en bucle — visible detrás del texto */}
@@ -117,7 +158,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </span>
                 </h1>
                 <h2 className="text-lg sm:text-xl font-bold text-[#00E5FF] tracking-wide font-tech drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-                  Centro de Operaciones Villavicencio
+                  {isSecretary
+                    ? 'Cabina de Secretaría · Pedidos y radios'
+                    : 'Centro de Operaciones Villavicencio'}
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-100 max-w-xl leading-relaxed drop-shadow-[0_1px_6px_rgba(0,0,0,0.9)]">
                   Sistema digital de encargos locales. Conectamos clientes con transportistas
@@ -128,7 +171,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="lg:col-span-5 grid grid-cols-2 gap-3.5">
                 <button
                   type="button"
-                  onClick={() => go('flota')}
+                  onClick={() => go(isSecretary ? 'chats' : 'flota')}
                   className="text-left bg-[#0B1222]/95 backdrop-blur-md border border-[#182B4D] rounded-2xl p-4 shadow-xl hover:border-[#FF5722] transition-colors neon-border-orange cursor-pointer"
                 >
                   <div className="flex items-start justify-between">
@@ -245,6 +288,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </span>
               </div>
             </div>
+            {canCreateOrders && (
             <button
               onClick={() => setIsCreateModalOpen(true)}
               className="bg-gradient-to-r from-[#FF5722] via-[#F4511E] to-[#D84315] hover:scale-105 text-white font-black px-5 py-2.5 rounded-xl transition shadow-[0_0_25px_rgba(255,87,34,0.5)] border border-[#FF7043] flex items-center gap-2 text-xs tracking-wider uppercase shrink-0"
@@ -252,9 +296,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <Plus className="w-4 h-4 stroke-[3]" />
               <span>NUEVA SOLICITUD</span>
             </button>
+            )}
           </div>
 
-          {/* Map */}
+          {/* Map — solo administrador */}
+          {!isSecretary && (
           <div className="bg-[#070B16] border border-[#142340] rounded-3xl p-4 sm:p-5 shadow-2xl space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-4 font-mono">
               <button
@@ -320,7 +366,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 />
               )}
             </div>
+            <div className="mt-4">
+              <MapWallVideoPanel />
+            </div>
           </div>
+          )}
 
           {/* Bottom grid */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -395,10 +445,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </h3>
                 <button
                   type="button"
-                  onClick={() => go('flota')}
+                  onClick={() => go(isSecretary ? 'chats' : 'flota')}
                   className="text-[11px] text-[#00F0FF] hover:underline font-mono font-bold"
                 >
-                  Ver flota
+                  {isSecretary ? 'Ver radios' : 'Ver flota'}
                 </button>
               </div>
               <div className="space-y-2.5 flex-1">
@@ -459,11 +509,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => go('flota')}
+                onClick={() => go(isSecretary ? 'chats' : 'flota')}
                 className="w-full py-2.5 rounded-xl bg-[#0B1428] hover:bg-[#121F3D] border border-[#192E56] text-slate-200 text-xs font-mono font-bold transition flex items-center justify-center gap-2"
               >
                 <DomiMotoIcon className="w-4 h-4" color="#00F0FF" />
-                Gestionar Flota
+                {isSecretary ? 'Abrir radios' : 'Gestionar Flota'}
               </button>
             </div>
 
@@ -474,10 +524,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </h3>
                 <button
                   type="button"
-                  onClick={() => go('reportes')}
+                  onClick={() => go(isSecretary ? 'incidentes' : 'reportes')}
                   className="text-[11px] text-[#00F0FF] hover:underline font-mono font-bold"
                 >
-                  Ver
+                  {isSecretary ? 'Pánico' : 'Ver'}
                 </button>
               </div>
               <div className="relative w-40 h-40 mx-auto flex items-center justify-center">
@@ -608,8 +658,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <ChatWindow
                 chatId={`chat_${selectedDriverForChat.id}`}
                 driver={selectedDriverForChat}
-                currentRole="admin"
-                senderName="Admin DomiClick"
+                currentRole={chatRole}
+                senderName={chatSender}
               />
             ) : (
               <div className="text-center py-10 text-xs text-slate-400">
@@ -622,12 +672,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </>
       )}
 
+      {canCreateOrders && (
       <CreateOrderModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         orders={orders}
         drivers={drivers}
       />
+      )}
     </div>
   );
 };

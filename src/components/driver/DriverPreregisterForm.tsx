@@ -21,9 +21,8 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
     email: '',
     phone: '',
     documentId: '',
+    birthDate: '',
     licenseNumber: '',
-    plateNumber: '',
-    motoModel: '',
     photoUrl: DEFAULT_PHOTO,
   });
 
@@ -67,23 +66,25 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
         }
       }
 
-      const newId = await createDriverPreregistration({
-        fullName: formData.fullName,
-        email: formData.email,
-        phone: formData.phone,
-        documentId: formData.documentId,
-        licenseNumber: formData.licenseNumber,
-        plateNumber: formData.plateNumber.toUpperCase(),
-        motoModel: formData.motoModel,
-        photoUrl,
-        location: {
-          lat: VILLAVICENCIO_CENTER.lat + (Math.random() - 0.5) * 0.02,
-          lng: VILLAVICENCIO_CENTER.lng + (Math.random() - 0.5) * 0.02,
-          addressName: 'Villavicencio, Meta',
-          neighborhood: 'Centro / Barzal',
-          updatedAt: new Date().toISOString(),
+      const newId = await createDriverPreregistration(
+        {
+          fullName: formData.fullName,
+          email: formData.email,
+          phone: formData.phone,
+          documentId: formData.documentId,
+          birthDate: formData.birthDate,
+          licenseNumber: formData.licenseNumber.trim(),
+          photoUrl,
+          location: {
+            lat: VILLAVICENCIO_CENTER.lat + (Math.random() - 0.5) * 0.02,
+            lng: VILLAVICENCIO_CENTER.lng + (Math.random() - 0.5) * 0.02,
+            addressName: 'Villavicencio, Meta',
+            neighborhood: 'Centro / Barzal',
+            updatedAt: new Date().toISOString(),
+          },
         },
-      }, tempId);
+        tempId
+      );
 
       setSubmittedId(newId);
       onSubmittedSuccess(newId);
@@ -95,11 +96,9 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
     }
   };
 
-  // If candidate already submitted a request, show status tracking card
   if (submittedId || existingCandidateDriver) {
     const candidate = existingCandidateDriver || {
       fullName: formData.fullName || 'Candidato Motorizado',
-      plateNumber: formData.plateNumber || 'MOTO-XYZ',
       status: 'pending' as const,
       createdAt: new Date().toISOString(),
     };
@@ -111,36 +110,32 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
             🛵
           </div>
 
-          <h3 className="text-xl font-bold text-white mb-1">
-            Solicitud de Registro enviada a DomiClick
-          </h3>
+          <h3 className="text-xl font-bold text-white mb-1">Solicitud enviada a DomiClick</h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto">
-            Tu prerregistro como conductor de motocicleta en Villavicencio ha sido recibido. El Administrador revisará tus documentos para dar la autorización.
+            Recibimos tu prerregistro. Un administrador revisará tus datos personales y te asignará la
+            moto de flota cuando apruebe tu ingreso.
           </p>
 
-          {/* Status Badge */}
           <div className="my-6 p-4 rounded-xl bg-[#11141a] border border-[#2d3139] text-left">
             <div className="flex items-center justify-between border-b border-[#2d3139] pb-3 mb-3">
               <div>
                 <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block">
-                  Estado de la Solicitud
+                  Estado de la solicitud
                 </span>
-                <span className="text-sm font-extrabold text-white">
-                  {candidate.fullName}
-                </span>
+                <span className="text-sm font-extrabold text-white">{candidate.fullName}</span>
               </div>
 
               {candidate.status === 'pending' && (
                 <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 animate-pulse">
                   <Clock className="w-3.5 h-3.5" />
-                  Pendiente de Autorización
+                  Pendiente de autorización
                 </span>
               )}
 
               {candidate.status === 'approved' && (
                 <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  Aprobado por Administrador
+                  Aprobado
                 </span>
               )}
 
@@ -154,18 +149,25 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
 
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div>
-                <span className="text-slate-500 block text-[10px]">Placa de la Moto:</span>
-                <span className="font-mono font-bold text-[#f59e0b]">{candidate.plateNumber}</span>
+                <span className="text-slate-500 block text-[10px]">Licencia de conducción</span>
+                <span className="font-medium text-slate-200">
+                  {candidate.licenseNumber || formData.licenseNumber || '—'}
+                </span>
               </div>
               <div>
-                <span className="text-slate-500 block text-[10px]">Ciudad de Operación:</span>
-                <span className="font-medium text-slate-200">Villavicencio, Meta</span>
+                <span className="text-slate-500 block text-[10px]">Moto de flota</span>
+                <span className="font-medium text-slate-400">
+                  {candidate.assignedMotoId || candidate.plateNumber
+                    ? candidate.plateNumber || 'Asignada'
+                    : 'La asigna el administrador'}
+                </span>
               </div>
             </div>
           </div>
 
           <p className="text-[11px] text-slate-400">
-            💡 <strong className="text-[#f59e0b]">¿Eres el Administrador?</strong> Puedes cambiar arriba al <span className="text-white font-bold">Modo Administrador</span> para revisar esta solicitud e ingresar al motorizado con un solo clic.
+            No necesitas registrar placa ni modelo de moto. Eso lo configura el administrador al
+            vincularte con un vehículo de la flota.
           </p>
         </div>
       </div>
@@ -174,31 +176,25 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
 
   return (
     <div className="max-w-2xl mx-auto my-6 bg-[#1E293B] border border-[#334155] rounded-2xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
-      {/* Top Graphic Gradient Stream Accent */}
       <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-[#0052FF] via-[#FF5722] to-[#0052FF]" />
 
       <div className="mb-6 border-b border-[#334155] pb-4">
         <div className="flex items-center gap-2 mb-1">
           <span className="bg-[#0052FF]/20 text-[#3b82f6] border border-[#0052FF]/40 text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full uppercase">
-            PREREGISTRO DOMICLICK
+            PRERREGISTRO DOMICLICK
           </span>
-          <span className="text-[#FF5722] text-xs font-bold">"DomiClick: Excelencia a un click de ti."</span>
         </div>
-        <h2 className="text-2xl font-black text-white tracking-tight">
-          Solicitud de Ingreso para Transporte Moto
-        </h2>
+        <h2 className="text-2xl font-black text-white tracking-tight">Registro de transportista</h2>
         <p className="text-xs text-slate-300 mt-1">
-          Completa tus datos personales y de tu motocicleta. Un administrador evaluará tu perfil para autorizar tu cuenta en Domiclick.
+          Solo tus datos personales. La moto (placa, modelo y kilometraje inicial) la registra el
+          administrador cuando te vincule a la flota.
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-        {/* Full Name & Email */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-slate-300 font-semibold mb-1">
-              Nombre Completo *
-            </label>
+            <label className="block text-slate-300 font-semibold mb-1">Nombre completo *</label>
             <input
               type="text"
               required
@@ -208,11 +204,21 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
               className="w-full bg-[#11141a] border border-[#2d3139] rounded-xl px-3.5 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-[#f59e0b] transition"
             />
           </div>
-
           <div>
-            <label className="block text-slate-300 font-semibold mb-1">
-              Correo Electrónico *
-            </label>
+            <label className="block text-slate-300 font-semibold mb-1">Fecha de nacimiento *</label>
+            <input
+              type="date"
+              required
+              value={formData.birthDate}
+              onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+              className="w-full bg-[#11141a] border border-[#2d3139] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#f59e0b] transition"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-slate-300 font-semibold mb-1">Correo electrónico *</label>
             <input
               type="email"
               required
@@ -222,14 +228,8 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
               className="w-full bg-[#11141a] border border-[#2d3139] rounded-xl px-3.5 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-[#f59e0b] transition"
             />
           </div>
-        </div>
-
-        {/* WhatsApp & Document ID */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-slate-300 font-semibold mb-1">
-              Teléfono / WhatsApp *
-            </label>
+            <label className="block text-slate-300 font-semibold mb-1">Teléfono / WhatsApp *</label>
             <input
               type="tel"
               required
@@ -239,73 +239,36 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
               className="w-full bg-[#11141a] border border-[#2d3139] rounded-xl px-3.5 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-[#f59e0b] transition"
             />
           </div>
-
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">
-              Cédula de Ciudadanía / Documento *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.documentId}
-              onChange={(e) => setFormData({ ...formData, documentId: e.target.value })}
-              placeholder="Ej: 1.121.890.342"
-              className="w-full bg-[#11141a] border border-[#2d3139] rounded-xl px-3.5 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-[#f59e0b] transition"
-            />
-          </div>
         </div>
 
-        {/* License & Plate Number */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">
-              Nº Licencia de Conducción (A2) *
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.licenseNumber}
-              onChange={(e) => setFormData({ ...formData, licenseNumber: e.target.value })}
-              placeholder="Ej: A2-9843210"
-              className="w-full bg-[#11141a] border border-[#2d3139] rounded-xl px-3.5 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-[#f59e0b] transition"
-            />
-          </div>
-
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">
-              Placa de la Moto * <span className="text-[#f59e0b] font-normal">(Solo Motocicletas)</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={formData.plateNumber}
-              onChange={(e) => setFormData({ ...formData, plateNumber: e.target.value })}
-              placeholder="Ej: KTM-45F"
-              className="w-full bg-[#11141a] border border-[#2d3139] rounded-xl px-3.5 py-2.5 text-white font-mono font-bold uppercase placeholder-slate-600 focus:outline-none focus:border-[#f59e0b] transition"
-            />
-          </div>
-        </div>
-
-        {/* Motorcycle Model */}
         <div>
-          <label className="block text-slate-300 font-semibold mb-1">
-            Marca, Cilindraje y Color de la Motocicleta *
-          </label>
+          <label className="block text-slate-300 font-semibold mb-1">Cédula de ciudadanía *</label>
           <input
             type="text"
             required
-            value={formData.motoModel}
-            onChange={(e) => setFormData({ ...formData, motoModel: e.target.value })}
-            placeholder="Ej: Yamaha FZ 150 - Color Negra / Bajaj Pulsar 200"
+            value={formData.documentId}
+            onChange={(e) => setFormData({ ...formData, documentId: e.target.value })}
+            placeholder="Ej: 1.121.890.342"
             className="w-full bg-[#11141a] border border-[#2d3139] rounded-xl px-3.5 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-[#f59e0b] transition"
           />
         </div>
 
-        {/* Photo upload → Firebase Storage */}
         <div>
           <label className="block text-slate-300 font-semibold mb-1">
-            Foto del conductor (Firebase Storage)
+            Nº licencia de conducción (A2) *
           </label>
+          <input
+            type="text"
+            required
+            value={formData.licenseNumber}
+            onChange={(e) => setFormData({ ...formData, licenseNumber: e.target.value })}
+            placeholder="Ej: A2-9843210"
+            className="w-full bg-[#11141a] border border-[#2d3139] rounded-xl px-3.5 py-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-[#f59e0b] transition"
+          />
+        </div>
+
+        <div>
+          <label className="block text-slate-300 font-semibold mb-1">Foto del transportista *</label>
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-xl overflow-hidden bg-[#11141a] border border-[#2d3139] flex items-center justify-center shrink-0">
               {photoPreview ? (
@@ -320,29 +283,25 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
               <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
             </label>
           </div>
-          {uploadError && (
-            <p className="mt-1.5 text-amber-400 text-[11px]">{uploadError}</p>
-          )}
+          {uploadError && <p className="mt-1.5 text-amber-400 text-[11px]">{uploadError}</p>}
         </div>
 
-        {/* Note */}
         <div className="p-3.5 rounded-xl bg-[#0f172a] border border-[#334155] text-[11px] flex items-start gap-2.5">
           <ShieldCheck className="w-4 h-4 text-[#FF5722] shrink-0 mt-0.5" />
           <p className="text-slate-300">
-            <strong className="text-[#FF5722]">Términos de DomiClick Villavicencio:</strong> Solo se aceptan conductores con motocicleta en regla. Al enviar el formulario, tu perfil ingresará en cola de espera hasta ser auditado y autorizado por el Administrador de la flota.
+            Al enviar, tu perfil queda en revisión. El administrador te asignará la moto de la flota
+            con placa y kilometraje inicial cuando apruebe tu ingreso.
           </p>
         </div>
 
         <button
           type="submit"
-          disabled={loading}
-          className="w-full bg-[#FF5722] hover:bg-[#e04818] text-white font-black py-3.5 px-6 rounded-xl text-sm transition shadow-xl shadow-[#FF5722]/20 flex items-center justify-center gap-2"
+          disabled={loading || !photoFile}
+          className="w-full bg-[#FF5722] hover:bg-[#e04818] disabled:opacity-50 text-white font-black py-3.5 px-6 rounded-xl text-sm transition shadow-xl shadow-[#FF5722]/20 flex items-center justify-center gap-2"
         >
-          {loading ? (
-            <span>Enviando Solicitud...</span>
-          ) : (
+          {loading ? 'Enviando…' : (
             <>
-              <span>Enviar Preregistro para Autorización</span>
+              <span>Enviar solicitud</span>
               <Send className="w-4 h-4" />
             </>
           )}

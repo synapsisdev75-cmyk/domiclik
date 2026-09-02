@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MotorizadoDriver } from '../../types';
 import { updateDriverApprovalStatus } from '../../lib/firebase';
-import { ShieldCheck, XCircle, CheckCircle2, Bike, FileText, X, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, XCircle, X } from 'lucide-react';
 
 interface DriverApprovalModalProps {
   driver: MotorizadoDriver | null;
@@ -36,6 +36,10 @@ export const DriverApprovalModal: React.FC<DriverApprovalModalProps> = ({
     onClose();
   };
 
+  const birthLabel = driver.birthDate
+    ? new Date(driver.birthDate + 'T12:00:00').toLocaleDateString('es-CO')
+    : '—';
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 sm:p-8 shadow-2xl relative my-8">
@@ -51,16 +55,13 @@ export const DriverApprovalModal: React.FC<DriverApprovalModalProps> = ({
             🛡️
           </div>
           <div>
-            <h3 className="text-lg font-bold text-white">
-              Evaluación y Autorización de Motorizado
-            </h3>
+            <h3 className="text-lg font-bold text-white">Evaluación de transportista</h3>
             <p className="text-xs text-slate-400">
-              Auditoría de preregistro para ingreso a DomiClick Villavicencio
+              Solo datos personales. La moto se vincula después en Flota.
             </p>
           </div>
         </div>
 
-        {/* Profile Details */}
         <div className="space-y-4 text-xs">
           <div className="flex items-center gap-4 bg-slate-950 p-4 rounded-2xl border border-slate-800">
             <img
@@ -70,42 +71,47 @@ export const DriverApprovalModal: React.FC<DriverApprovalModalProps> = ({
             />
             <div>
               <h4 className="text-base font-extrabold text-white">{driver.fullName}</h4>
-              <p className="text-amber-400 font-mono font-bold text-xs mt-0.5">
-                Placa Moto: {driver.plateNumber}
+              <p className="text-slate-400 text-[11px] mt-0.5">{driver.email}</p>
+              <p className="text-[10px] text-amber-400/90 mt-1">
+                Moto: {driver.plateNumber || 'pendiente — asignar en Flota'}
               </p>
-              <p className="text-slate-400 text-[11px] mt-0.5">{driver.motoModel}</p>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 bg-slate-950 p-4 rounded-2xl border border-slate-800">
             <div>
-              <span className="text-slate-500 text-[10px] block uppercase font-bold">Cédula de Ciudadanía:</span>
+              <span className="text-slate-500 text-[10px] block uppercase font-bold">Cédula</span>
               <span className="text-white font-medium">{driver.documentId}</span>
             </div>
             <div>
-              <span className="text-slate-500 text-[10px] block uppercase font-bold">Licencia de Conducción:</span>
-              <span className="text-white font-medium">{driver.licenseNumber}</span>
+              <span className="text-slate-500 text-[10px] block uppercase font-bold">Nacimiento</span>
+              <span className="text-white font-medium">{birthLabel}</span>
             </div>
             <div>
-              <span className="text-slate-500 text-[10px] block uppercase font-bold">Teléfono Contacto:</span>
+              <span className="text-slate-500 text-[10px] block uppercase font-bold">Licencia (A2)</span>
+              <span className="text-white font-medium">{driver.licenseNumber || '—'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 text-[10px] block uppercase font-bold">Teléfono</span>
               <span className="text-white font-medium">{driver.phone}</span>
             </div>
             <div>
-              <span className="text-slate-500 text-[10px] block uppercase font-bold">Correo Electrónico:</span>
-              <span className="text-white font-medium truncate block">{driver.email}</span>
+              <span className="text-slate-500 text-[10px] block uppercase font-bold">Solicitud</span>
+              <span className="text-white font-medium">
+                {new Date(driver.createdAt).toLocaleDateString('es-CO')}
+              </span>
             </div>
           </div>
 
-          {/* Reject reason input option */}
           {showRejectInput && (
             <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-xs space-y-2">
-              <label className="block text-red-300 font-semibold">Motivo del Rechazo de la Solicitud:</label>
+              <label className="block text-red-300 font-semibold">Motivo del rechazo</label>
               <input
                 type="text"
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Ej: Placa de la motocicleta no coincide con la documentación..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:border-red-500"
+                placeholder="Ej: documento no legible…"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white"
               />
               <div className="flex justify-end gap-2 pt-1">
                 <button
@@ -121,32 +127,30 @@ export const DriverApprovalModal: React.FC<DriverApprovalModalProps> = ({
                   disabled={loading}
                   className="px-3 py-1.5 rounded-lg bg-red-500 text-white font-bold text-[11px]"
                 >
-                  Confirmar Rechazo
+                  Confirmar rechazo
                 </button>
               </div>
             </div>
           )}
 
-          {/* Approval Action Buttons */}
           {!showRejectInput && (
             <div className="flex flex-col sm:flex-row gap-3 pt-3">
               <button
                 type="button"
                 onClick={() => setShowRejectInput(true)}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 text-red-400 hover:text-red-300 font-bold py-3.5 px-4 rounded-2xl text-xs transition border border-slate-700 flex items-center justify-center gap-1.5"
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-red-400 font-bold py-3.5 px-4 rounded-2xl text-xs border border-slate-700 flex items-center justify-center gap-1.5"
               >
                 <XCircle className="w-4 h-4" />
-                <span>Rechazar Solicitud</span>
+                Rechazar
               </button>
-
               <button
                 type="button"
                 onClick={handleApprove}
                 disabled={loading}
-                className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-emerald-300 text-slate-950 font-extrabold py-3.5 px-4 rounded-2xl text-xs transition shadow-xl shadow-emerald-500/20 flex items-center justify-center gap-1.5"
+                className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-400 text-slate-950 font-extrabold py-3.5 px-4 rounded-2xl text-xs flex items-center justify-center gap-1.5"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Dar Visto Bueno y Autorizar Ingreso</span>
+                Aprobar ingreso
               </button>
             </div>
           )}

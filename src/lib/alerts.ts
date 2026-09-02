@@ -3,7 +3,7 @@
  * Usa Web Audio API (sin archivos mp3).
  */
 
-type AlertKind = 'delivery' | 'message' | 'assigned';
+type AlertKind = 'delivery' | 'message' | 'assigned' | 'panic';
 
 let audioCtx: AudioContext | null = null;
 
@@ -80,6 +80,17 @@ export function playOrderAssignedSound() {
   beep(ctx, { freq: 554.37, duration: 0.16, startAt: t + 0.12, type: 'sine', gain: 0.16 });
 }
 
+/** Botón de pánico: sirena urgente (torre de control). */
+export function playPanicSound() {
+  const ctx = getCtx();
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  for (let i = 0; i < 4; i++) {
+    beep(ctx, { freq: 880, duration: 0.14, startAt: t + i * 0.28, type: 'square', gain: 0.28 });
+    beep(ctx, { freq: 660, duration: 0.14, startAt: t + i * 0.28 + 0.14, type: 'square', gain: 0.26 });
+  }
+}
+
 /** Vibración distinta según tipo (solo dispositivos que lo soporten). */
 export function vibrateAlert(kind: AlertKind) {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
@@ -88,6 +99,8 @@ export function vibrateAlert(kind: AlertKind) {
       navigator.vibrate([40, 60, 40, 60, 120]); // ritmo de éxito
     } else if (kind === 'message') {
       navigator.vibrate([80, 40, 80]); // doble pulso radio
+    } else if (kind === 'panic') {
+      navigator.vibrate([300, 100, 300, 100, 300, 100, 500]);
     } else {
       navigator.vibrate([50, 30, 50]);
     }
@@ -112,4 +125,10 @@ export function alertOrderAssigned() {
   unlockAlertAudio();
   playOrderAssignedSound();
   vibrateAlert('assigned');
+}
+
+export function alertPanic() {
+  unlockAlertAudio();
+  playPanicSound();
+  vibrateAlert('panic');
 }

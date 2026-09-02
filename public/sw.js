@@ -1,10 +1,10 @@
-/* DomiClick PWA — network-first para no servir datos/JS viejos */
-const CACHE = 'domiclick-v11-shell';
+/* DomiClick PWA — v18: mapa sectores CARTO rastertiles */
+const CACHE = 'domiclick-v18-shell';
 const PRECACHE = [
   '/manifest.webmanifest',
+  '/brand/ops-favicon.png',
+  '/brand/ops-logo-192.png',
   '/brand/logo-mark.png',
-  '/brand/logo-192.png',
-  '/brand/favicon.png',
 ];
 
 self.addEventListener('install', (event) => {
@@ -39,7 +39,6 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Nunca cachear módulos JS/CSS ni HTML de la app — siempre red (tiempo real)
   const isAppCode =
     url.origin === self.location.origin &&
     (url.pathname === '/' ||
@@ -50,16 +49,12 @@ self.addEventListener('fetch', (event) => {
       url.pathname.startsWith('/assets/') ||
       url.pathname.includes('@'));
 
+  // Código de la app: solo red. Evita pantalla en blanco por JS viejo en caché.
   if (isAppCode) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => response)
-        .catch(() => caches.match(request))
-    );
+    event.respondWith(fetch(request));
     return;
   }
 
-  // Solo assets estáticos de marca en cache
   event.respondWith(
     fetch(request)
       .then((response) => {
@@ -74,6 +69,6 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(request))
+      .catch(() => caches.match(request).then((cached) => cached || Response.error()))
   );
 });

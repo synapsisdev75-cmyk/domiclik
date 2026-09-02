@@ -7,8 +7,14 @@ import {
   estimateRoute,
   estimateRouteWithGoogle,
   reverseGeocode,
+  coordsTooClose,
   type LatLng,
 } from '../lib/geo';
+import {
+  findBlockedZoneAt,
+  isServiceBlockedAt,
+  SERVICE_BLOCKED_MESSAGE,
+} from '../lib/riskZones';
 import {
   computeShippingQuote,
   estimateTravelMinutes,
@@ -81,6 +87,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [coverageNotice, setCoverageNotice] = useState<string | null>(null);
 
   const routeGenRef = useRef(0);
   const googleRetryRef = useRef<number | null>(null);
@@ -125,6 +132,12 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   useEffect(() => {
     pickupRef.current = pickup;
     deliveryRef.current = delivery;
+  }, [pickup, delivery]);
+
+  useEffect(() => {
+    const blockedPickup = pickup ? findBlockedZoneAt(pickup.lat, pickup.lng) : null;
+    const blockedDelivery = delivery ? findBlockedZoneAt(delivery.lat, delivery.lng) : null;
+    setCoverageNotice(blockedPickup || blockedDelivery ? SERVICE_BLOCKED_MESSAGE : null);
   }, [pickup, delivery]);
 
   useEffect(() => {
@@ -219,13 +232,11 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       setPath([]);
       if (pickMode === 'pickup') {
         setPickup(point);
-        setPickMode('delivery');
         void reverseGeocode(point.lat, point.lng).then((label) => {
           setValues((prev) => ({ ...prev, pickupAddress: label }));
         });
-      } else {
+      } else if (pickMode === 'delivery') {
         setDelivery(point);
-        setPickMode(null);
         void reverseGeocode(point.lat, point.lng).then((label) => {
           setValues((prev) => ({ ...prev, deliveryAddress: label }));
         });
@@ -275,6 +286,22 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
 
     if (!pickup || !delivery) {
       setError('Marca en el mapa la recolección (A) y la entrega (B).');
+      return;
+    }
+    if (isServiceBlockedAt(pickup.lat, pickup.lng) || isServiceBlockedAt(delivery.lat, delivery.lng)) {
+      setError(SERVICE_BLOCKED_MESSAGE);
+      return;
+    }
+    if (
+      values.pickupAddress.trim().toLowerCase() === values.deliveryAddress.trim().toLowerCase()
+    ) {
+      setError('La recolección (A) y la entrega (B) deben ser direcciones diferentes.');
+      return;
+    }
+    if (coordsTooClose(pickup, delivery)) {
+      setError(
+        'Los puntos A y B están muy cerca. Marca recolección y entrega en lugares distintos en el mapa.'
+      );
       return;
     }
     if (!quote) {
@@ -470,14 +497,14 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
               draggingRef.current = false;
               setPath([]);
               setPickup({ lat: hit.lat, lng: hit.lng });
-              setPickMode('delivery');
+              update('pickupAddress', hit.label);
               setError(null);
             }}
             onDeliveryPicked={(hit) => {
               draggingRef.current = false;
               setPath([]);
               setDelivery({ lat: hit.lat, lng: hit.lng });
-              setPickMode(null);
+              update('deliveryAddress', hit.label);
               setError(null);
             }}
             pickup={pickup}
@@ -490,6 +517,14 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
             onLiveDragPickup={onLiveDragPickup}
             onLiveDragDelivery={onLiveDragDelivery}
           />
+          {coverageNotice ? (
+            <p
+              className="mt-3 rounded-xl border border-slate-600/40 bg-slate-800/30 px-3.5 py-2.5 text-sm text-slate-300 leading-relaxed"
+              role="status"
+            >
+              {coverageNotice}
+            </p>
+          ) : null}
         </div>
 
         <label className="block sm:col-span-2">
@@ -640,7 +675,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       <button
         type="submit"
         className="cta-primary mt-6 w-full sm:w-auto"
-        disabled={submitting || geoBusy || authLoading}
+        disabled={submitting || geoBusy || authLoading || Boolean(coverageNotice)}
       >
         {submitting ? (
           <>

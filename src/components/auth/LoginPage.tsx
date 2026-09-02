@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { auth, LOGIN_ROLE_KEY } from '../../lib/firebase';
+import { auth } from '../../lib/firebase';
 import {
   startGoogleSignInRedirect,
   completeGoogleSignInFromRedirect,
   isGoogleOAuthReturn,
   describeAuthError,
+  saveLoginRole,
+  clearLoginRole,
+  readLoginRole,
 } from '../../lib/googleAuth';
 import {
   signInWithEmailAndPassword,
@@ -25,18 +28,24 @@ import {
   Satellite,
   Package,
   Clock,
+  FileText,
 } from 'lucide-react';
 
 interface LoginPageProps {
-  onLoginSuccess: (email: string, role: 'admin' | 'driver' | 'pending_driver') => void;
+  onLoginSuccess: (
+    email: string,
+    role: 'admin' | 'secretary' | 'driver' | 'pending_driver'
+  ) => void;
 }
 
-type LoginRole = 'admin' | 'driver' | 'pending_driver';
+type LoginRole = 'admin' | 'secretary' | 'driver' | 'pending_driver';
 
 function readLoginRoleFromUrl(): LoginRole {
   if (typeof window === 'undefined') return 'admin';
   const role = new URLSearchParams(window.location.search).get('role');
-  if (role === 'driver' || role === 'pending_driver' || role === 'admin') return role;
+  if (role === 'driver' || role === 'pending_driver' || role === 'admin' || role === 'secretary') {
+    return role;
+  }
   return 'admin';
 }
 
@@ -219,9 +228,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         const user = await completeGoogleSignInFromRedirect();
         if (cancelled) return;
         if (user?.email) {
-          const saved =
-            (sessionStorage.getItem(LOGIN_ROLE_KEY) as LoginRole) || role;
-          sessionStorage.removeItem(LOGIN_ROLE_KEY);
+          const saved = (readLoginRole() as LoginRole) || role;
+          clearLoginRole();
           clearAuthQueryParams();
           onLoginSuccess(user.email, saved);
           return;
@@ -237,12 +245,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
       if (!cancelled && shouldAutoGoogle() && !isGoogleOAuthReturn()) {
         clearAuthQueryParams();
-        sessionStorage.setItem(LOGIN_ROLE_KEY, role);
+        saveLoginRole(role);
         setGoogleBusy(true);
         try {
           const user = await startGoogleSignInRedirect();
           if (user?.email) {
-            sessionStorage.removeItem(LOGIN_ROLE_KEY);
+            clearLoginRole();
             onLoginSuccess(user.email, role);
           }
         } catch (err: unknown) {
@@ -309,17 +317,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setGoogleBusy(true);
     setAuthError('');
     setInfoMsg('');
-    sessionStorage.setItem(LOGIN_ROLE_KEY, role);
+    saveLoginRole(role);
     try {
       const user = await startGoogleSignInRedirect();
       if (user?.email) {
-        sessionStorage.removeItem(LOGIN_ROLE_KEY);
+        // Dejar el rol guardado hasta que App lea onAuthStateChanged / onLoginSuccess
         onLoginSuccess(user.email, role);
+        clearLoginRole();
         return;
       }
+      // Redirect en curso: googleBusy se mantiene hasta el retorno
     } catch (err: unknown) {
       setAuthError(describeAuthError(err));
-    } finally {
       setGoogleBusy(false);
     }
   };
@@ -329,7 +338,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         { id: 'driver', label: 'Transportista', icon: <Bike className="w-3.5 h-3.5" /> },
         { id: 'pending_driver', label: 'Pre-registro', icon: <UserPlus className="w-3.5 h-3.5" /> },
       ]
-    : [{ id: 'admin', label: 'Administrador', icon: <ShieldCheck className="w-3.5 h-3.5" /> }];
+    : [
+        { id: 'admin', label: 'Administrador', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+        { id: 'secretary', label: 'Secretaría', icon: <FileText className="w-3.5 h-3.5" /> },
+      ];
 
   return (
     <div className="login-screen min-h-screen min-h-dvh bg-[#05080f] text-[#e8eef9] overflow-x-hidden selection:bg-[#2B6CFF] selection:text-white">
@@ -531,6 +543,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 {isRegisterMode
                   ? 'Al registrarte como administrador, el primer usuario se activa solo. Los siguientes requieren aprobación en Usuarios.'
                   : 'El primer administrador se activa solo. Después, otro admin activo debe autorizarte en Usuarios.'}
+              </p>
+            )}
+            {role === 'secretary' && (
+              <p className="-mt-5 mb-5 text-[11px] text-slate-500 leading-relaxed">
+                {isRegisterMode
+                  ? 'La secretaría atiende chats, crea pedidos y monitorea el botón de pánico. Un administrador activo debe activarte.'
+                  : 'Acceso operativo: pedidos, radios con transportistas y alertas de pánico.'}
               </p>
             )}
             {role === 'pending_driver' && isRegisterMode && (

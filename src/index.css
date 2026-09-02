@@ -281,3 +281,129 @@ img.brand-neon,
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover { background: #ff5722; }
+
+/* —— Map wall monitor (pantalla secundaria) —— */
+@keyframes map-wall-radar-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes map-wall-kpi-glow {
+  0%, 100% { box-shadow: 0 0 12px rgba(255, 87, 34, 0.15); }
+  50% { box-shadow: 0 0 22px rgba(0, 229, 255, 0.35); }
+}
+
+@keyframes map-wall-icon-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes map-wall-slide-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes map-wall-blink-soft {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@keyframes map-wall-live-pulse {
+  0%, 100% { text-shadow: 0 0 8px rgba(0, 230, 118, 0.4); }
+  50% { text-shadow: 0 0 16px rgba(0, 230, 118, 0.9); }
+}
+
+.map-wall-pulse-bg {
+  background: radial-gradient(ellipse at 50% 40%, #0d1a33 0%, #05080f 55%, #020408 100%);
+}
+
+.map-wall-grid-overlay {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 229, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+  animation: map-wall-grid-drift 20s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes map-wall-grid-drift {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 48px 48px, 48px 48px; }
+}
+
+.map-wall-radar-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 229, 255, 0.2);
+}
+
+.map-wall-radar-ring-1 { width: 100%; height: 100%; }
+.map-wall-radar-ring-2 { width: 72%; height: 72%; border-color: rgba(255, 87, 34, 0.25); }
+.map-wall-radar-ring-3 { width: 44%; height: 44%; border-color: rgba(0, 229, 255, 0.35); }
+
+.map-wall-radar-sweep {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(0, 229, 255, 0.45) 28deg, transparent 56deg);
+  animation: map-wall-radar-spin 4s linear infinite;
+  mask-image: radial-gradient(circle, black 30%, transparent 70%);
+}
+
+.map-wall-logo-glow {
+  animation: neon-breathe 3s ease-in-out infinite;
+}
+
+.map-wall-kpi-pulse {
+  animation: map-wall-kpi-glow 2.5s ease-in-out infinite;
+}
+
+.map-wall-icon-float {
+  animation: map-wall-icon-bob 3s ease-in-out infinite;
+}
+
+.map-wall-slide-up {
+  animation: map-wall-slide-up 0.6s ease-out both;
+}
+
+.map-wall-slide-delay {
+  animation-delay: 0.15s;
+}
+
+.map-wall-blink {
+  animation: map-wall-blink-soft 2s ease-in-out infinite;
+}
+
+.map-wall-live-dot {
+  animation: map-wall-live-pulse 1.5s ease-in-out infinite;
+}
+
+.map-wall-float-panel {
+  animation: map-wall-slide-up 0.35s ease-out;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 24px rgba(0, 229, 255, 0.12);
+}
+
+.map-wall-scene-dot {
+  animation: map-wall-live-pulse 1.2s ease-in-out infinite;
+}
+
+.map-wall-progress-glow {
+  box-shadow: 0 0 12px rgba(0, 229, 255, 0.45);
+}
+
+.map-wall-ticker-item {
+  animation: map-wall-slide-up 0.4s ease-out both;
+}
+
+.map-wall-video-fade {
+  animation: map-wall-video-fade-in 0.8s ease-out;
+}
+
+@keyframes map-wall-video-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+

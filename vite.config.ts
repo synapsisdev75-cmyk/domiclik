@@ -14,6 +14,10 @@ export default defineConfig(({ mode }) => {
     env.VITE_GOOGLE_MAPS_MAP_ID || '7959bb6afa37dd5e9db669a8';
 
   return {
+    build: {
+      target: 'es2020',
+      modulePreload: { polyfill: true },
+    },
     plugins: [react(), tailwindcss(), googleOAuthTokenPlugin(env.GOOGLE_OAUTH_CLIENT_SECRET || '')],
     define: {
       'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(mapsKey),

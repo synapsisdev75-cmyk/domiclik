@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AdminAccount } from '../../types';
-import { activateAdmin, inviteAdmin, revokeAdmin } from '../../lib/firebase';
-import { ShieldCheck, UserPlus, Ban, CheckCircle2, Clock } from 'lucide-react';
+import { activateAdmin, inviteAdmin, inviteStaff, revokeAdmin } from '../../lib/firebase';
+import { ShieldCheck, UserPlus, Ban, CheckCircle2, Clock, FileText } from 'lucide-react';
 
 interface Props {
   admins: AdminAccount[];
@@ -18,6 +18,14 @@ export const AdminStaffPanel: React.FC<Props> = ({ admins, currentAdminEmail }) 
   const active = admins.filter((a) => a.status === 'active');
   const revoked = admins.filter((a) => a.status === 'revoked');
   const me = currentAdminEmail.trim().toLowerCase();
+
+  const roleLabel = (a: AdminAccount) =>
+    a.role === 'secretary' ? 'SECRETARÍA' : 'ADMIN';
+
+  const roleBadgeClass = (a: AdminAccount) =>
+    a.role === 'secretary'
+      ? 'text-[10px] text-violet-300 border-violet-500/40'
+      : 'text-[10px] text-[#2B6CFF] border-[#2B6CFF]/40';
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setError('');
@@ -62,7 +70,7 @@ export const AdminStaffPanel: React.FC<Props> = ({ admins, currentAdminEmail }) 
             }
             className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#1a2744] text-xs font-bold text-slate-200"
           >
-            <UserPlus className="w-3.5 h-3.5" /> Invitar
+            <UserPlus className="w-3.5 h-3.5" /> Invitar admin
           </button>
           <button
             type="button"
@@ -77,7 +85,36 @@ export const AdminStaffPanel: React.FC<Props> = ({ admins, currentAdminEmail }) 
             }
             className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#2B6CFF] text-white text-xs font-black"
           >
-            <CheckCircle2 className="w-3.5 h-3.5" /> Invitar y activar
+            <CheckCircle2 className="w-3.5 h-3.5" /> Activar admin
+          </button>
+          <button
+            type="button"
+            disabled={!inviteEmail.trim() || Boolean(busy)}
+            onClick={() =>
+              run('invite-sec', async () => {
+                await inviteStaff(inviteEmail, me, 'secretary');
+                setInviteEmail('');
+                setInfo('Secretaría invitada en estado pendiente.');
+              })
+            }
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-violet-500/40 text-violet-200 text-xs font-bold"
+          >
+            <FileText className="w-3.5 h-3.5" /> Invitar secretaría
+          </button>
+          <button
+            type="button"
+            disabled={!inviteEmail.trim() || Boolean(busy)}
+            onClick={() =>
+              run('invite-sec-act', async () => {
+                await inviteStaff(inviteEmail, me, 'secretary');
+                await activateAdmin(inviteEmail, me);
+                setInviteEmail('');
+                setInfo('Secretaría invitada y activada.');
+              })
+            }
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-violet-600 text-white text-xs font-black"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" /> Activar secretaría
           </button>
         </div>
         {error && <p className="text-[12px] text-red-400">{error}</p>}
@@ -86,10 +123,10 @@ export const AdminStaffPanel: React.FC<Props> = ({ admins, currentAdminEmail }) 
 
       <div className="space-y-2">
         <h3 className="text-xs font-black text-amber-400 font-tech uppercase flex items-center gap-2">
-          <Clock className="w-3.5 h-3.5" /> Pendientes de activación ({pending.length})
+          <Clock className="w-3.5 h-3.5" /> Pendientes ({pending.length})
         </h3>
         {pending.length === 0 ? (
-          <p className="text-[11px] text-slate-500">No hay solicitudes de administrador en espera.</p>
+          <p className="text-[11px] text-slate-500">No hay solicitudes de admin o secretaría en espera.</p>
         ) : (
           pending.map((a) => (
             <div
@@ -97,7 +134,12 @@ export const AdminStaffPanel: React.FC<Props> = ({ admins, currentAdminEmail }) 
               className="bg-[#0A1020] border border-amber-500/30 rounded-2xl p-3.5 flex items-center justify-between gap-3"
             >
               <div>
-                <div className="text-sm font-bold text-white">{a.displayName || a.email}</div>
+                <div className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
+                  {a.displayName || a.email}
+                  <span className={`px-2 py-0.5 rounded-lg border font-tech ${roleBadgeClass(a)}`}>
+                    {roleLabel(a)}
+                  </span>
+                </div>
                 <div className="text-[10px] text-slate-400 font-tech">
                   {a.email} · solicitado {new Date(a.requestedAt).toLocaleString('es-CO')}
                 </div>
@@ -123,10 +165,13 @@ export const AdminStaffPanel: React.FC<Props> = ({ admins, currentAdminEmail }) 
             className="bg-[#0A1020] border border-[#162748] rounded-2xl p-3.5 flex items-center justify-between gap-3"
           >
             <div>
-              <div className="text-sm font-bold text-white">
+              <div className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
                 {a.displayName || a.email}
+                <span className={`px-2 py-0.5 rounded-lg border font-tech ${roleBadgeClass(a)}`}>
+                  {roleLabel(a)}
+                </span>
                 {a.email.toLowerCase() === me && (
-                  <span className="ml-2 text-[10px] text-[#2B6CFF]">TÚ</span>
+                  <span className="ml-1 text-[10px] text-[#2B6CFF]">TÚ</span>
                 )}
                 {a.isFounder && (
                   <span className="ml-2 text-[10px] text-amber-400">FUNDADOR</span>

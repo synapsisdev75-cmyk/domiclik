@@ -100,15 +100,26 @@ export function buildDriverStats(
 ): DriverOpsStats[] {
   const rangeOrders =
     from && to
-      ? orders.filter((o) => inRange(o.updatedAt || o.createdAt, from, to))
+      ? orders.filter(
+          (o) =>
+            inRange(o.createdAt, from, to) || inRange(o.updatedAt, from, to)
+        )
       : orders;
 
   return drivers
     .filter((d) => d.status === 'approved')
     .map((driver) => {
       const mine = rangeOrders.filter((o) => o.assignedDriverId === driver.id);
-      const delivered = mine.filter((o) => o.status === 'delivered');
-      const cancelled = mine.filter((o) => o.status === 'cancelled');
+      const delivered = mine.filter((o) => {
+        if (o.status !== 'delivered') return false;
+        if (from && to) return inRange(o.updatedAt || o.createdAt, from, to);
+        return true;
+      });
+      const cancelled = mine.filter((o) => {
+        if (o.status !== 'cancelled') return false;
+        if (from && to) return inRange(o.updatedAt || o.createdAt, from, to);
+        return true;
+      });
       const inProgress = mine.filter((o) => isLiveOrderStatus(o.status));
       const revenue = delivered.reduce((s, o) => s + (Number(o.shippingFee) || 0), 0);
       const drvReviews = reviews.filter((r) => r.driverId === driver.id);
@@ -179,27 +190,209 @@ export function buildDriverStats(
 
 export type DailyPoint = { date: string; label: string; delivered: number; created: number; revenue: number };
 
-export function buildDailySeries(orders: DeliveryOrder[], days = 14): DailyPoint[] {
+/** Pedidos con actividad (creación o actualización) dentro del rango. */
+export function filterOrdersInRange(
+  orders: DeliveryOrder[],
+  from: Date,
+  to: Date
+): DeliveryOrder[] {
+  return orders.filter(
+    (o) =>
+      inRange(o.createdAt, from, to) ||
+      inRange(o.updatedAt, from, to)
+  );
+}
+
+export function buildHourlySeriesForDay(orders: DeliveryOrder[], day: Date): DailyPoint[] {
+  const dayKey = toDateKey(day);
   const out: DailyPoint[] = [];
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - i);
-    const key = toDateKey(d);
-    const created = orders.filter((o) => toDateKey(o.createdAt) === key);
-    const delivered = orders.filter(
-      (o) => o.status === 'delivered' && toDateKey(o.updatedAt || o.createdAt) === key
-    );
+  for (let h = 0; h < 24; h++) {
+    const created = orders.filter((o) => {
+      if (toDateKey(o.createdAt) !== dayKey) return false;
+      const hr = new Date(o.createdAt).getHours();
+      return hr === h;
+    });
+    const delivered = orders.filter((o) => {
+      if (o.status !== 'delivered') return false;
+      const iso = o.updatedAt || o.createdAt;
+      if (toDateKey(iso) !== dayKey) return false;
+      return new Date(iso).getHours() === h;
+    });
     out.push({
-      date: key,
-      label: d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }),
+      date: `${dayKey}T${String(h).padStart(2, '0')}`,
+      label: `${h}:00`,
       created: created.length,
       delivered: delivered.length,
       revenue: delivered.reduce((s, o) => s + (Number(o.shippingFee) || 0), 0),
     });
   }
   return out;
+}
+
+function pushDailyPoint(
+  out: DailyPoint[],
+  d: Date,
+  orders: DeliveryOrder[],
+  compactLabel = false
+) {
+  const key = toDateKey(d);
+  const created = orders.filter((o) => toDateKey(o.createdAt) === key);
+  const delivered = orders.filter(
+    (o) => o.status === 'delivered' && toDateKey(o.updatedAt || o.createdAt) === key
+  );
+  out.push({
+    date: key,
+    label: compactLabel
+      ? String(d.getDate())
+      : d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }),
+    created: created.length,
+    delivered: delivered.length,
+    revenue: delivered.reduce((s, o) => s + (Number(o.shippingFee) || 0), 0),
+  });
+}
+
+const MAX_CHART_BUCKETS = 16;
+
+/** Serie mensual (máx. ~12 puntos legibles en gráfico). */
+export function buildMonthlySeriesForRange(
+  orders: DeliveryOrder[],
+  from: Date,
+  to: Date
+): DailyPoint[] {
+  const out: DailyPoint[] = [];
+  const cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+  cursor.setHours(0, 0, 0, 0);
+  const endMonth = new Date(to.getFullYear(), to.getMonth(), 1);
+
+  while (cursor <= endMonth && out.length < MAX_CHART_BUCKETS) {
+    const year = cursor.getFullYear();
+    const month = cursor.getMonth();
+    const monthStart = new Date(year, month, 1);
+    const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    const rangeStart = monthStart < from ? from : monthStart;
+    const rangeEnd = monthEnd > to ? to : monthEnd;
+
+    const inMonth = (iso: string | undefined) => {
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      return t >= rangeStart.getTime() && t <= rangeEnd.getTime();
+    };
+
+    const created = orders.filter((o) => inMonth(o.createdAt));
+    const delivered = orders.filter(
+      (o) => o.status === 'delivered' && inMonth(o.updatedAt || o.createdAt)
+    );
+
+    out.push({
+      date: toDateKey(monthStart),
+      label: monthStart.toLocaleDateString('es-CO', { month: 'short', year: '2-digit' }),
+      created: created.length,
+      delivered: delivered.length,
+      revenue: delivered.reduce((s, o) => s + (Number(o.shippingFee) || 0), 0),
+    });
+
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return out;
+}
+
+/** Serie diaria entre dos fechas (inclusive). Si hay muchos días, agrupa por semana. */
+export function buildDailySeriesForRange(
+  orders: DeliveryOrder[],
+  from: Date,
+  to: Date,
+  maxDailyPoints = 31,
+  compactLabels = false
+): DailyPoint[] {
+  const start = new Date(from);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setHours(0, 0, 0, 0);
+  const totalDays =
+    Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+
+  if (totalDays <= 0) return [];
+
+  if (totalDays <= maxDailyPoints) {
+    const out: DailyPoint[] = [];
+    const d = new Date(start);
+    while (d <= end) {
+      pushDailyPoint(out, d, orders, compactLabels);
+      d.setDate(d.getDate() + 1);
+    }
+    return out;
+  }
+
+  // Historial largo: buckets semanales (máx. 16 para que el gráfico sea legible)
+  const out: DailyPoint[] = [];
+  const d = new Date(start);
+  while (d <= end && out.length < MAX_CHART_BUCKETS) {
+    const bucketEnd = new Date(d);
+    bucketEnd.setDate(bucketEnd.getDate() + 6);
+    if (bucketEnd > end) bucketEnd.setTime(end.getTime());
+
+    const bucketStartKey = toDateKey(d);
+    const bucketEndKey = toDateKey(bucketEnd);
+    const inBucket = (iso: string | undefined) => {
+      if (!iso) return false;
+      const key = toDateKey(iso);
+      return key >= bucketStartKey && key <= bucketEndKey;
+    };
+
+    const created = orders.filter((o) => inBucket(o.createdAt));
+    const delivered = orders.filter(
+      (o) => o.status === 'delivered' && inBucket(o.updatedAt || o.createdAt)
+    );
+
+    out.push({
+      date: bucketStartKey,
+      label: d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }),
+      created: created.length,
+      delivered: delivered.length,
+      revenue: delivered.reduce((s, o) => s + (Number(o.shippingFee) || 0), 0),
+    });
+
+    d.setDate(d.getDate() + 7);
+  }
+  return out;
+}
+
+export function buildDailySeries(orders: DeliveryOrder[], days = 14): DailyPoint[] {
+  const now = new Date();
+  now.setHours(23, 59, 59, 999);
+  const from = new Date(now);
+  from.setHours(0, 0, 0, 0);
+  from.setDate(from.getDate() - (days - 1));
+  return buildDailySeriesForRange(orders, from, now);
+}
+
+export function buildMetricsSeries(
+  orders: DeliveryOrder[],
+  period: 'day' | 'week' | 'month' | 'all',
+  from: Date,
+  to: Date
+): DailyPoint[] {
+  if (period === 'day') {
+    return buildHourlySeriesForDay(orders, from);
+  }
+  if (period === 'all') {
+    const start = new Date(to);
+    start.setMonth(start.getMonth() - 11);
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+    return buildMonthlySeriesForRange(orders, start, to);
+  }
+  if (period === 'month') {
+    return buildDailySeriesForRange(orders, from, to, 31, true);
+  }
+  return buildDailySeriesForRange(orders, from, to, 14, false);
+}
+
+export function chartSeriesCaption(period: 'day' | 'week' | 'month' | 'all'): string {
+  if (period === 'day') return 'Hoy · por hora';
+  if (period === 'week') return 'Semana en curso · por día';
+  if (period === 'month') return 'Mes en curso · por día';
+  return 'Últimos 12 meses';
 }
 
 export function computePayrollLines(

@@ -6,10 +6,15 @@ import {
   geocodeAddress,
   searchPlaceSuggestions,
   resolvePlaceSuggestion,
+  OUT_OF_AREA_MESSAGE,
   type LatLng,
   type PlaceSuggestion,
 } from '../lib/geo';
-import { searchLocalPlaces } from '../lib/villavicencioPlaces';
+import { searchLocalPlaces, dedupeStreetSuggestions } from '../lib/villavicencioPlaces';
+
+function mergeInstantAndRemote(instant: PlaceSuggestion[], remote: PlaceSuggestion[]): PlaceSuggestion[] {
+  return dedupeStreetSuggestions([...instant, ...remote]).slice(0, 20);
+}
 
 type PlaceSearchFieldProps = {
   label: string;
@@ -17,6 +22,7 @@ type PlaceSearchFieldProps = {
   required?: boolean;
   accent: 'pickup' | 'delivery';
   placeholder: string;
+  inputName: string;
   onQueryChange: (value: string) => void;
   onPlacePicked: (hit: LatLng & { label: string }) => void;
 };
@@ -41,6 +47,7 @@ export function PlaceSearchField({
   required,
   accent,
   placeholder,
+  inputName,
   onQueryChange,
   onPlacePicked,
 }: PlaceSearchFieldProps) {
@@ -54,6 +61,7 @@ export function PlaceSearchField({
   const [items, setItems] = useState<PlaceSuggestion[]>([]);
   const [active, setActive] = useState(0);
   const [dropBox, setDropBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const skipSearch = useRef(false);
   const typing = value.trim().length >= 2;
   const showDrop = open && typing && (items.length > 0 || loading);
@@ -109,7 +117,7 @@ export function PlaceSearchField({
     const t = window.setTimeout(() => {
       void searchPlaceSuggestions(q, placesLib || undefined).then((hits) => {
         if (cancelled) return;
-        setItems(hits.length ? hits : instant);
+        setItems(mergeInstantAndRemote(instant, hits.length ? hits : instant));
         setActive(0);
         setLoading(false);
       });
@@ -135,9 +143,13 @@ export function PlaceSearchField({
   async function pick(item: PlaceSuggestion) {
     setResolving(true);
     setOpen(false);
+    setFieldError(null);
     try {
       const hit = await resolvePlaceSuggestion(item, placesLib || undefined);
-      if (!hit) return;
+      if (!hit) {
+        setFieldError(OUT_OF_AREA_MESSAGE);
+        return;
+      }
       skipSearch.current = true;
       onQueryChange(hit.label);
       onPlacePicked(hit);
@@ -149,15 +161,15 @@ export function PlaceSearchField({
   async function locateTyped() {
     const q = value.trim();
     if (q.length < 2) return;
-    if (items[0]) {
-      await pick(items[0]);
-      return;
-    }
     setResolving(true);
     setOpen(false);
+    setFieldError(null);
     try {
       const hit = await geocodeAddress(q, placesLib || undefined);
-      if (!hit) return;
+      if (!hit) {
+        setFieldError(OUT_OF_AREA_MESSAGE);
+        return;
+      }
       skipSearch.current = true;
       onQueryChange(hit.label);
       onPlacePicked(hit);
@@ -190,7 +202,7 @@ export function PlaceSearchField({
               </div>
             ) : null}
             {items.length > 0 ? (
-              <ul className="max-h-72 overflow-auto py-1">
+              <ul className="max-h-80 overflow-auto py-1">
                 {items.map((item, i) => (
                   <li key={item.id} role="option" aria-selected={i === active}>
                     <button
@@ -237,14 +249,20 @@ export function PlaceSearchField({
         <input
           className="field-input min-w-0 flex-1 !border-0 !bg-transparent !px-1 !py-2 !shadow-none"
           required={required}
+          name={inputName}
           value={value}
           autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-lpignore="true"
+          data-form-type="other"
           role="combobox"
           aria-expanded={showDrop}
           aria-controls={listId}
           aria-autocomplete="list"
           placeholder={placeholder}
           onChange={(e) => {
+            setFieldError(null);
             onQueryChange(e.target.value);
             setOpen(true);
           }}
@@ -286,6 +304,11 @@ export function PlaceSearchField({
           Buscar
         </button>
       </div>
+      {fieldError ? (
+        <p className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+          {fieldError}
+        </p>
+      ) : null}
       {dropdown}
     </div>
   );

@@ -18,6 +18,7 @@ import {
   enableNetwork,
   writeBatch,
   arrayUnion,
+  deleteField,
 } from 'firebase/firestore';
 import {
   initializeAuth,
@@ -49,9 +50,27 @@ import {
   DispatchSettings,
   AttendancePunch,
   AttendancePunchType,
+  AttendanceDailyPin,
   OpsIncident,
+  FleetSettings,
+  FleetVehicleSpec,
+  FleetMoto,
+  FleetMotoStatus,
+  MotoMaintenanceLog,
+  MotoMaintenanceType,
+  MapWallSettings,
+  StaffRole,
+  SecretariatFile,
 } from '../types';
 import { DEFAULT_PAYROLL_SETTINGS, DEFAULT_DISPATCH_SETTINGS, toDateKey } from './adminMetrics';
+import { DEFAULT_MAP_WALL_SETTINGS, mergeMapWallSettings } from './mapWall';
+import {
+  dailyPinDocId,
+  generateAttendancePin,
+  getAttendancePinDayKey,
+  getAttendancePinExpiresAt,
+} from './attendance';
+import { calcShiftFuel, DEFAULT_FLEET_SETTINGS } from './motoFuel';
 
 const firebaseConfig = getFirebaseConfig();
 
@@ -85,8 +104,9 @@ export const db = createFirestore();
 
 function createAuth() {
   try {
+    // localStorage primero: Safari/iOS en modo privado falla con IndexedDB
     return initializeAuth(app, {
-      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+      persistence: [browserLocalPersistence, indexedDBLocalPersistence],
       popupRedirectResolver: browserPopupRedirectResolver,
     });
   } catch {
@@ -190,6 +210,31 @@ export async function uploadOdometerPhoto(
   return getDownloadURL(storageRef);
 }
 
+/** Selfie de llegada a sede (desbloquea el PIN del día en la tablet). */
+export async function uploadAttendanceFacePhoto(
+  file: File,
+  driverId: string
+): Promise<string> {
+  const safeName = (file.name || 'rostro.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `drivers/${driverId}/attendance-face/${Date.now()}_${safeName}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
+  return getDownloadURL(storageRef);
+}
+
+/** Placa de la moto (celular vía QR del kiosco). */
+export async function uploadPlatePhoto(
+  file: File,
+  driverId: string,
+  punchType: 'in' | 'out'
+): Promise<string> {
+  const safeName = (file.name || 'placa.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `drivers/${driverId}/plate/${punchType}_${Date.now()}_${safeName}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
+  return getDownloadURL(storageRef);
+}
+
 export async function uploadBrandLogoFromUrl(localPath: string, storagePath: string): Promise<string> {
   const response = await fetch(localPath);
   const blob = await response.blob();
@@ -250,27 +295,33 @@ export async function deleteStorageFile(fileUrl: string): Promise<void> {
   }
 }
 
-/** Limpia caches locales / SW / IndexedDB que pueden mostrar datos borrados en Firebase */
+/** Limpia caches locales / SW / IndexedDB que pueden mostrar datos borrados en Firebase.
+ *  Nunca toca Auth (firebaseLocalStorage*) — eso cerraría la sesión del admin. */
 export function clearDemoLocalCache() {
-  const keysToRemove = Object.keys(localStorage).filter(
-    (k) =>
-      k.startsWith('domiclick_') &&
-      !k.startsWith('domiclick_brand_') &&
-      k !== 'domiclick_gmaps_key' &&
-      k !== 'domiclick_cleared_cache_v3'
-  );
-  keysToRemove.forEach((k) => localStorage.removeItem(k));
+  try {
+    const keysToRemove = Object.keys(localStorage).filter(
+      (k) =>
+        k.startsWith('domiclick_') &&
+        !k.startsWith('domiclick_brand_') &&
+        k !== 'domiclick_gmaps_key' &&
+        k !== 'domiclick_cleared_cache_v3' &&
+        k !== 'domiclick_cleared_cache_v4' &&
+        k !== 'domiclick_login_role' &&
+        k !== 'domiclick_google_redirecting'
+    );
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* Safari privado / políticas corporativas */
+  }
 
-  // Borrar bases IndexedDB de Firestore / Auth residuales
+  // Solo caché offline de Firestore — NO Auth ni Persistence de sesión
   if (typeof indexedDB !== 'undefined' && indexedDB.databases) {
     indexedDB.databases().then((dbs) => {
       dbs.forEach((info) => {
         const name = info.name || '';
-        if (
-          name.includes('firestore') ||
-          name.includes('firebase') ||
-          name.includes('firebaseLocalStorage')
-        ) {
+        const isFirestore =
+          /firestore/i.test(name) && !/firebaseLocalStorage|firebase-heartbeat|firebase-installations/i.test(name);
+        if (isFirestore) {
           try {
             indexedDB.deleteDatabase(name);
           } catch {
@@ -996,6 +1047,432 @@ export async function saveDispatchSettings(
   return full;
 }
 
+// ----------------- FLEET (combustible + mantenimiento) ----------------- //
+
+export function subscribeFleetSettings(callback: (settings: FleetSettings) => void) {
+  return onSnapshot(
+    doc(db, 'settings', 'fleet'),
+    (snap) => {
+      if (!snap.exists()) {
+        callback(DEFAULT_FLEET_SETTINGS);
+        return;
+      }
+      callback({
+        ...DEFAULT_FLEET_SETTINGS,
+        ...(snap.data() as FleetSettings),
+        id: 'fleet',
+      });
+    },
+    () => callback(DEFAULT_FLEET_SETTINGS)
+  );
+}
+
+export async function fetchFleetSettings(): Promise<FleetSettings> {
+  const snap = await getDoc(doc(db, 'settings', 'fleet'));
+  if (!snap.exists()) return DEFAULT_FLEET_SETTINGS;
+  return { ...DEFAULT_FLEET_SETTINGS, ...(snap.data() as FleetSettings), id: 'fleet' };
+}
+
+export async function saveFleetSettings(
+  settings: Omit<FleetSettings, 'id' | 'updatedAt'>
+): Promise<FleetSettings> {
+  const existing = await fetchFleetSettings();
+  const full: FleetSettings = {
+    ...existing,
+    ...settings,
+    id: 'fleet',
+    updatedAt: new Date().toISOString(),
+  };
+  await setDoc(doc(db, 'settings', 'fleet'), full, { merge: true });
+  return full;
+}
+
+export async function upsertFleetVehicle(
+  vehicle: Omit<FleetVehicleSpec, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+): Promise<FleetVehicleSpec> {
+  const fleet = await fetchFleetSettings();
+  const now = new Date().toISOString();
+  const id = vehicle.id || `fv_${Date.now()}`;
+  const prev = fleet.customVehicles?.find((v) => v.id === id);
+  const entry: FleetVehicleSpec = {
+    ...vehicle,
+    id,
+    active: vehicle.active !== false,
+    createdAt: prev?.createdAt || now,
+    updatedAt: now,
+  };
+  const list = [...(fleet.customVehicles || [])];
+  const idx = list.findIndex((v) => v.id === id);
+  if (idx >= 0) list[idx] = entry;
+  else list.push(entry);
+  await saveFleetSettings({ ...fleet, customVehicles: list });
+  return entry;
+}
+
+export async function removeFleetVehicle(vehicleId: string): Promise<void> {
+  const fleet = await fetchFleetSettings();
+  const list = (fleet.customVehicles || []).filter((v) => v.id !== vehicleId);
+  await saveFleetSettings({ ...fleet, customVehicles: list });
+}
+
+// ----------------- MAP WALL (pantalla secundaria) ----------------- //
+
+export function subscribeMapWallSettings(callback: (settings: MapWallSettings) => void) {
+  return onSnapshot(
+    doc(db, 'settings', 'map_wall'),
+    (snap) => {
+      callback(
+        mergeMapWallSettings(
+          snap.exists() ? ({ id: 'map_wall', ...snap.data() } as MapWallSettings) : null
+        )
+      );
+    },
+    () => callback(mergeMapWallSettings(null))
+  );
+}
+
+export async function saveMapWallSettings(
+  patch: Partial<Omit<MapWallSettings, 'id' | 'updatedAt'>>
+): Promise<MapWallSettings> {
+  const full: MapWallSettings = mergeMapWallSettings({
+    ...DEFAULT_MAP_WALL_SETTINGS,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+  await setDoc(doc(db, 'settings', 'map_wall'), full, { merge: true });
+  return full;
+}
+
+export async function uploadMapWallVideo(file: File, slot: 'a' | 'b'): Promise<string> {
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `videos/map-wall/video-${slot}_${Date.now()}_${safeName}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, file, { contentType: file.type || 'video/mp4' });
+  const url = await getDownloadURL(storageRef);
+  const key = slot === 'a' ? 'videoAUrl' : 'videoBUrl';
+  const labelKey = slot === 'a' ? 'videoALabel' : 'videoBLabel';
+  await saveMapWallSettings({
+    [key]: url,
+    [labelKey]: file.name.replace(/\.[^.]+$/, ''),
+  });
+  return url;
+}
+
+export async function assignDriverFleetVehicle(
+  driverId: string,
+  fleetVehicleId: string | null,
+  motoModel?: string
+): Promise<void> {
+  const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+  if (fleetVehicleId) patch.fleetVehicleId = fleetVehicleId;
+  else patch.fleetVehicleId = deleteField();
+  if (motoModel !== undefined) patch.motoModel = motoModel;
+  await updateDoc(doc(db, 'drivers', driverId), patch);
+}
+
+// ----------------- FLEET MOTOS (inventario físico) ----------------- //
+
+export function subscribeFleetMotos(callback: (motos: FleetMoto[]) => void) {
+  return onSnapshot(
+    collection(db, 'fleet_motos'),
+    (snapshot) => {
+      const list: FleetMoto[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as FleetMoto);
+      });
+      list.sort((a, b) => a.plateNumber.localeCompare(b.plateNumber));
+      callback(list);
+    },
+    () => callback([])
+  );
+}
+
+export async function upsertFleetMoto(
+  moto: Omit<FleetMoto, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+): Promise<FleetMoto> {
+  const now = new Date().toISOString();
+  const id = moto.id || `moto_${Date.now()}`;
+  const prevSnap = moto.id ? await getDoc(doc(db, 'fleet_motos', id)) : null;
+  const entry: FleetMoto = {
+    ...moto,
+    id,
+    active: moto.active !== false,
+    createdAt: prevSnap?.exists() ? (prevSnap.data() as FleetMoto).createdAt : now,
+    updatedAt: now,
+  };
+  await setDoc(doc(db, 'fleet_motos', id), entry);
+  return entry;
+}
+
+export async function updateFleetMotoStatus(
+  motoId: string,
+  status: FleetMotoStatus,
+  extra?: Partial<FleetMoto>
+): Promise<void> {
+  await updateDoc(doc(db, 'fleet_motos', motoId), {
+    status,
+    ...extra,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function deleteFleetMoto(motoId: string): Promise<void> {
+  const snap = await getDoc(doc(db, 'fleet_motos', motoId));
+  if (snap.exists()) {
+    const moto = snap.data() as FleetMoto;
+    if (moto.currentDriverId) {
+      await updateDoc(doc(db, 'drivers', moto.currentDriverId), {
+        assignedMotoId: deleteField(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }
+  await deleteDoc(doc(db, 'fleet_motos', motoId));
+}
+
+export async function assignMotoToDriver(motoId: string, driverId: string | null): Promise<void> {
+  const motoSnap = await getDoc(doc(db, 'fleet_motos', motoId));
+  if (!motoSnap.exists()) return;
+  const moto = motoSnap.data() as FleetMoto;
+  const now = new Date().toISOString();
+
+  if (moto.currentDriverId && moto.currentDriverId !== driverId) {
+    await updateDoc(doc(db, 'drivers', moto.currentDriverId), {
+      assignedMotoId: deleteField(),
+      updatedAt: now,
+    });
+  }
+
+  if (!driverId) {
+    await updateDoc(doc(db, 'fleet_motos', motoId), {
+      currentDriverId: deleteField(),
+      status: 'available',
+      updatedAt: now,
+    });
+    return;
+  }
+
+  const driverSnap = await getDoc(doc(db, 'drivers', driverId));
+  if (driverSnap.exists()) {
+    const d = driverSnap.data() as MotorizadoDriver;
+    if (d.assignedMotoId && d.assignedMotoId !== motoId) {
+      await updateDoc(doc(db, 'fleet_motos', d.assignedMotoId), {
+        currentDriverId: deleteField(),
+        status: 'available',
+        updatedAt: now,
+      });
+    }
+  }
+
+  await updateDoc(doc(db, 'fleet_motos', motoId), {
+    currentDriverId: driverId,
+    status: 'assigned',
+    updatedAt: now,
+  });
+  await updateDoc(doc(db, 'drivers', driverId), {
+    assignedMotoId: motoId,
+    plateNumber: moto.plateNumber,
+    motoModel: moto.motoModel,
+    fleetVehicleId: moto.fleetVehicleId || deleteField(),
+    updatedAt: now,
+  });
+}
+
+/** Desvincula la moto del transportista actual (queda disponible). */
+export async function unlinkFleetMoto(motoId: string): Promise<void> {
+  await assignMotoToDriver(motoId, null);
+}
+
+/**
+ * Registra moto de flota y la vincula fija al transportista (solo administrador).
+ * Placa, modelo y km inicial los ingresa el admin al asignar.
+ */
+export async function assignMotoToDriverWithSetup(params: {
+  driverId: string;
+  plateNumber: string;
+  motoModel: string;
+  initialOdometerKm: number;
+  fuelType?: 'gasolina' | 'diesel';
+  fleetVehicleId?: string;
+  notes?: string;
+}): Promise<FleetMoto> {
+  const plate = params.plateNumber.trim().toUpperCase();
+  const km = Math.round(params.initialOdometerKm);
+  if (!plate || km <= 0) {
+    throw new Error('Placa y kilometraje inicial son obligatorios.');
+  }
+
+  const motoId = `moto_${plate.replace(/\W/g, '').toLowerCase()}`;
+  const now = new Date().toISOString();
+  const fuelType = params.fuelType || 'gasolina';
+
+  const entry: FleetMoto = {
+    id: motoId,
+    plateNumber: plate,
+    label: `${params.motoModel.trim() || 'Moto'} · ${plate}`,
+    motoModel: params.motoModel.trim(),
+    fleetVehicleId: params.fleetVehicleId,
+    fuelType,
+    status: 'assigned',
+    currentDriverId: params.driverId,
+    lastOdometerKm: km,
+    assignedAtOdometerKm: km,
+    assignedAt: now,
+    lastFuelFillOdometerKm: km,
+    notes: params.notes?.trim(),
+    active: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const existingSnap = await getDoc(doc(db, 'fleet_motos', motoId));
+  if (existingSnap.exists()) {
+    const prev = existingSnap.data() as FleetMoto;
+    entry.createdAt = prev.createdAt;
+    if (prev.currentDriverId && prev.currentDriverId !== params.driverId) {
+      await updateDoc(doc(db, 'drivers', prev.currentDriverId), {
+        assignedMotoId: deleteField(),
+        updatedAt: now,
+      });
+    }
+  }
+
+  await setDoc(doc(db, 'fleet_motos', motoId), entry);
+
+  const driverSnap = await getDoc(doc(db, 'drivers', params.driverId));
+  if (driverSnap.exists()) {
+    const d = driverSnap.data() as MotorizadoDriver;
+    if (d.assignedMotoId && d.assignedMotoId !== motoId) {
+      await updateDoc(doc(db, 'fleet_motos', d.assignedMotoId), {
+        currentDriverId: deleteField(),
+        status: 'available',
+        updatedAt: now,
+      });
+    }
+  }
+
+  await updateDoc(doc(db, 'drivers', params.driverId), {
+    assignedMotoId: motoId,
+    plateNumber: plate,
+    motoModel: params.motoModel.trim(),
+    fleetVehicleId: params.fleetVehicleId || deleteField(),
+    lastOdometerKm: km,
+    updatedAt: now,
+  });
+
+  return entry;
+}
+
+export async function importFleetMotosFromDrivers(drivers: MotorizadoDriver[]): Promise<number> {
+  let count = 0;
+  const approved = drivers.filter((d) => d.status === 'approved' && d.plateNumber?.trim());
+  for (const d of approved) {
+    const id = `moto_${d.plateNumber.replace(/\W/g, '').toLowerCase()}`;
+    const snap = await getDoc(doc(db, 'fleet_motos', id));
+    if (snap.exists()) continue;
+    await setDoc(doc(db, 'fleet_motos', id), {
+      id,
+      plateNumber: d.plateNumber,
+      label: `${d.motoModel || 'Moto'} · ${d.plateNumber}`,
+      motoModel: d.motoModel || '',
+      fleetVehicleId: d.fleetVehicleId || '',
+      fuelType: 'gasolina',
+      status: 'assigned',
+      currentDriverId: d.id,
+      lastOdometerKm: d.lastOdometerKm,
+      lastOilChangeKm: d.lastOilChangeKm,
+      lastOilChangeAt: d.lastOilChangeAt,
+      active: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await updateDoc(doc(db, 'drivers', d.id), {
+      assignedMotoId: id,
+      updatedAt: new Date().toISOString(),
+    });
+    count++;
+  }
+  return count;
+}
+
+export async function updateDriverMotoFields(
+  driverId: string,
+  patch: Pick<
+    MotorizadoDriver,
+    'motoKmPerGallon' | 'lastOilChangeKm' | 'lastOilChangeAt' | 'fleetVehicleId' | 'motoModel'
+  >
+): Promise<void> {
+  await updateDoc(doc(db, 'drivers', driverId), {
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function subscribeMotoMaintenanceLogs(
+  driverId: string,
+  callback: (logs: MotoMaintenanceLog[]) => void
+) {
+  return onSnapshot(
+    collection(db, 'moto_maintenance_logs'),
+    (snapshot) => {
+      const list: MotoMaintenanceLog[] = [];
+      snapshot.forEach((docSnap) => {
+        const row = { id: docSnap.id, ...docSnap.data() } as MotoMaintenanceLog;
+        if (row.driverId === driverId) list.push(row);
+      });
+      list.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      callback(list);
+    },
+    () => callback([])
+  );
+}
+
+export async function addMotoMaintenanceLog(params: {
+  driverId: string;
+  fleetMotoId?: string;
+  driverName?: string;
+  plateNumber?: string;
+  motoModel?: string;
+  type: MotoMaintenanceType;
+  description: string;
+  odometerKm: number;
+  costCop?: number;
+  createdBy?: string;
+  updateOilChange?: boolean;
+}): Promise<MotoMaintenanceLog> {
+  const at = new Date().toISOString();
+  const id = 'mnt_' + Date.now();
+  const log = omitUndefined({
+    id,
+    driverId: params.driverId,
+    fleetMotoId: params.fleetMotoId,
+    driverName: params.driverName || '',
+    plateNumber: params.plateNumber || '',
+    motoModel: params.motoModel || '',
+    type: params.type,
+    description: params.description,
+    odometerKm: params.odometerKm,
+    costCop: params.costCop,
+    at,
+    createdBy: params.createdBy || '',
+  }) as MotoMaintenanceLog;
+  await setDoc(doc(db, 'moto_maintenance_logs', id), log);
+  if (params.updateOilChange || params.type === 'aceite') {
+    await updateDriverMotoFields(params.driverId, {
+      lastOilChangeKm: params.odometerKm,
+      lastOilChangeAt: at,
+    });
+    if (params.fleetMotoId) {
+      await updateDoc(doc(db, 'fleet_motos', params.fleetMotoId), {
+        lastOilChangeKm: params.odometerKm,
+        lastOilChangeAt: at,
+        updatedAt: at,
+      });
+    }
+  }
+  return log;
+}
+
 // ----------------- ATTENDANCE (biometría móvil) ----------------- //
 
 export async function saveDriverWebAuthnCredential(
@@ -1004,6 +1481,16 @@ export async function saveDriverWebAuthnCredential(
 ): Promise<void> {
   await updateDoc(doc(db, 'drivers', driverId), {
     webauthnCredentialId: credentialId,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function saveDriverKioskWebAuthnCredential(
+  driverId: string,
+  credentialId: string
+): Promise<void> {
+  await updateDoc(doc(db, 'drivers', driverId), {
+    webauthnKioskCredentialId: credentialId,
     updatedAt: new Date().toISOString(),
   });
 }
@@ -1020,16 +1507,71 @@ export async function recordAttendancePunch(params: {
   driverId: string;
   driverName?: string;
   type: AttendancePunchType;
-  credentialId: string;
+  credentialId?: string;
+  method?: AttendancePunch['method'];
   lat?: number;
   lng?: number;
   odometerKm?: number;
   odometerPhotoUrl?: string;
+  platePhotoUrl?: string;
+  facePhotoUrl?: string;
+  pinDayKey?: string;
+  mobilePhotosPending?: boolean;
+  entryOdometerKm?: number;
+  motoModel?: string;
+  motoKmPerGallon?: number;
 }): Promise<AttendancePunch> {
   const at = new Date().toISOString();
   const id = 'att_' + Date.now();
   const lat = Number(params.lat);
   const lng = Number(params.lng);
+  const method = params.method || ('webauthn' as const);
+  const mobilePhotosPending =
+    params.mobilePhotosPending ??
+    (method === 'pin_kiosk' && !params.odometerPhotoUrl);
+
+  let shiftFuelFields: Record<string, number | string | undefined> = {};
+  if (params.type === 'out' && params.odometerKm && params.entryOdometerKm) {
+    const fleetSnap = await getDoc(doc(db, 'settings', 'fleet'));
+    const fleet: FleetSettings = fleetSnap.exists()
+      ? ({ ...DEFAULT_FLEET_SETTINGS, ...fleetSnap.data(), id: 'fleet' as const } as FleetSettings)
+      : DEFAULT_FLEET_SETTINGS;
+    let motoModel = params.motoModel;
+    let motoKmPerGallon = params.motoKmPerGallon;
+    let fleetVehicleId: string | undefined;
+    if (!motoModel) {
+      const driverSnap = await getDoc(doc(db, 'drivers', params.driverId));
+      if (driverSnap.exists()) {
+        const d = driverSnap.data() as MotorizadoDriver;
+        motoModel = d.motoModel;
+        motoKmPerGallon = d.motoKmPerGallon;
+        fleetVehicleId = d.fleetVehicleId;
+      }
+    }
+    const fuel = calcShiftFuel({
+      kmIn: params.entryOdometerKm,
+      kmOut: params.odometerKm,
+      motoModel,
+      motoKmPerGallon,
+      fleetVehicleId,
+      fleet,
+    });
+    if (fuel) {
+      shiftFuelFields = {
+        shiftKmDriven: fuel.kmDriven,
+        shiftGallons: fuel.gallonsUsed,
+        shiftLiters: fuel.litersUsed,
+        shiftFuelCostCop: fuel.fuelCostCop,
+        kmPerGallonUsed: fuel.kmPerGallon,
+        kmPerLiterUsed: fuel.kmPerLiter,
+        litersPerKmUsed: fuel.litersPerKm,
+        copPerKmUsed: fuel.copPerKm,
+        fuelPricePerGallonUsed: fuel.fuelPricePerGallonCop,
+        motoCatalogId: fuel.motoCatalogId,
+      };
+    }
+  }
+
   const punch = omitUndefined({
     id,
     driverId: params.driverId,
@@ -1039,10 +1581,15 @@ export async function recordAttendancePunch(params: {
     dateKey: toDateKey(at),
     lat: Number.isFinite(lat) ? lat : undefined,
     lng: Number.isFinite(lng) ? lng : undefined,
-    method: 'webauthn' as const,
-    credentialId: params.credentialId,
+    method,
+    credentialId: params.credentialId || '',
     odometerKm: params.odometerKm,
     odometerPhotoUrl: params.odometerPhotoUrl || '',
+    platePhotoUrl: params.platePhotoUrl || '',
+    facePhotoUrl: params.facePhotoUrl || '',
+    pinDayKey: params.pinDayKey || '',
+    mobilePhotosPending,
+    ...shiftFuelFields,
   }) as AttendancePunch;
   await setDoc(doc(db, 'attendance_punches', id), punch);
   const driverPatch = omitUndefined({
@@ -1052,7 +1599,146 @@ export async function recordAttendancePunch(params: {
     updatedAt: at,
   });
   await updateDoc(doc(db, 'drivers', params.driverId), driverPatch);
+
+  if (params.odometerKm) {
+    const driverSnap = await getDoc(doc(db, 'drivers', params.driverId));
+    if (driverSnap.exists()) {
+      const d = driverSnap.data() as MotorizadoDriver;
+      if (d.assignedMotoId) {
+        const motoPatch: Record<string, unknown> = {
+          lastOdometerKm: params.odometerKm,
+          updatedAt: at,
+        };
+        if (params.type === 'out' && shiftFuelFields.kmPerLiterUsed) {
+          const motoSnap = await getDoc(doc(db, 'fleet_motos', d.assignedMotoId));
+          const prev = motoSnap.exists() ? (motoSnap.data() as FleetMoto).avgKmPerLiter : undefined;
+          const used = Number(shiftFuelFields.kmPerLiterUsed);
+          motoPatch.avgKmPerLiter = prev
+            ? Math.round(((prev + used) / 2) * 10) / 10
+            : used;
+        }
+        await updateDoc(doc(db, 'fleet_motos', d.assignedMotoId), motoPatch);
+      }
+    }
+  }
+
   return punch;
+}
+
+/**
+ * Obtiene o crea el PIN del día operativo (rota a la 01:00).
+ * El PIN NO se revela aquí: hace falta foto de rostro vía revealDailyAttendancePin.
+ */
+export async function ensureDailyAttendancePin(
+  driverId: string,
+  driverName?: string,
+  now: Date = new Date()
+): Promise<AttendanceDailyPin> {
+  const pinDayKey = getAttendancePinDayKey(now);
+  const id = dailyPinDocId(driverId, pinDayKey);
+  const refDoc = doc(db, 'attendance_daily_pins', id);
+  const snap = await getDoc(refDoc);
+  if (snap.exists()) {
+    return { id, ...snap.data() } as AttendanceDailyPin;
+  }
+  const createdAt = now.toISOString();
+  const record: AttendanceDailyPin = {
+    id,
+    driverId,
+    driverName: driverName || '',
+    pinDayKey,
+    pin: generateAttendancePin(6),
+    createdAt,
+    expiresAt: getAttendancePinExpiresAt(pinDayKey),
+  };
+  await setDoc(refDoc, record);
+  return record;
+}
+
+/**
+ * Tras subir foto de rostro en sede: guarda evidencia y devuelve el PIN del día.
+ * Sin foto no se debe llamar; el UI no muestra el PIN hasta este paso.
+ */
+export async function revealDailyAttendancePin(params: {
+  driverId: string;
+  driverName?: string;
+  facePhotoUrl: string;
+  now?: Date;
+}): Promise<AttendanceDailyPin> {
+  if (!params.facePhotoUrl?.trim()) {
+    throw new Error('Sin foto de rostro no se revela el PIN.');
+  }
+  const now = params.now || new Date();
+  const pinDoc = await ensureDailyAttendancePin(params.driverId, params.driverName, now);
+  const revealedAt = now.toISOString();
+  const patch = omitUndefined({
+    revealFacePhotoUrl: params.facePhotoUrl,
+    revealedAt,
+    driverName: params.driverName || pinDoc.driverName || '',
+  });
+  await updateDoc(doc(db, 'attendance_daily_pins', pinDoc.id), patch);
+  return { ...pinDoc, ...patch };
+}
+
+/** Valida el PIN digitado contra el del día operativo actual. */
+export async function verifyDailyAttendancePin(
+  driverId: string,
+  typedPin: string,
+  now: Date = new Date()
+): Promise<AttendanceDailyPin> {
+  const pinDayKey = getAttendancePinDayKey(now);
+  const id = dailyPinDocId(driverId, pinDayKey);
+  const snap = await getDoc(doc(db, 'attendance_daily_pins', id));
+  if (!snap.exists()) {
+    throw new Error('Aún no hay PIN de hoy. Toma primero la foto de rostro en sede.');
+  }
+  const data = { id, ...snap.data() } as AttendanceDailyPin;
+  if (!data.revealFacePhotoUrl) {
+    throw new Error('Debes tomar la foto de rostro antes de usar el PIN.');
+  }
+  const clean = String(typedPin || '').replace(/\D/g, '');
+  if (clean !== data.pin) {
+    throw new Error('PIN incorrecto. Revisa el número que se te reveló tras la foto.');
+  }
+  return data;
+}
+
+export async function getAttendancePunch(punchId: string): Promise<AttendancePunch | null> {
+  const snap = await getDoc(doc(db, 'attendance_punches', punchId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as AttendancePunch;
+}
+
+export function subscribeAttendancePunch(
+  punchId: string,
+  callback: (punch: AttendancePunch | null) => void
+) {
+  return onSnapshot(
+    doc(db, 'attendance_punches', punchId),
+    (snap) => {
+      callback(snap.exists() ? ({ id: snap.id, ...snap.data() } as AttendancePunch) : null);
+    },
+    () => callback(null)
+  );
+}
+
+/** Sube fotos de odómetro y placa desde el celular (QR del kiosco). */
+export async function updateAttendancePunchMobilePhotos(params: {
+  punchId: string;
+  odometerPhotoUrl: string;
+  platePhotoUrl?: string;
+}): Promise<AttendancePunch> {
+  const snap = await getDoc(doc(db, 'attendance_punches', params.punchId));
+  if (!snap.exists()) throw new Error('Marca de asistencia no encontrada.');
+  const existing = { id: snap.id, ...snap.data() } as AttendancePunch;
+  const patch = omitUndefined({
+    odometerPhotoUrl: params.odometerPhotoUrl,
+    platePhotoUrl: params.platePhotoUrl || existing.platePhotoUrl || '',
+    mobilePhotosPending: false,
+    updatedAt: new Date().toISOString(),
+  });
+  await updateDoc(doc(db, 'attendance_punches', params.punchId), patch);
+  return { ...existing, ...patch };
 }
 
 export function subscribeAttendancePunches(
@@ -1146,7 +1832,7 @@ export function subscribeAdmins(callback: (admins: AdminAccount[]) => void) {
     },
     (err) => {
       console.error('[Firebase] admins realtime error', err);
-      callback([]);
+      // No vaciar la lista: un [] momentáneo echaba al admin de la torre
     }
   );
 }
@@ -1164,12 +1850,24 @@ export async function requestAdminAccess(params: {
   uid?: string;
   displayName?: string;
 }): Promise<AdminAccount> {
+  return requestStaffAccess({ ...params, role: 'admin' });
+}
+
+/** Login/registro de personal de torre (admin o secretaría). */
+export async function requestStaffAccess(params: {
+  email: string;
+  uid?: string;
+  displayName?: string;
+  role: StaffRole;
+}): Promise<AdminAccount> {
   const email = params.email.trim().toLowerCase();
   const id = adminDocId(email);
   const refDoc = doc(db, 'admins', id);
   const existing = await getDoc(refDoc);
   const all = await listAdminsOnce();
-  const hasActive = all.some((a) => a.status === 'active');
+  const hasActiveAdmin = all.some(
+    (a) => a.status === 'active' && (a.role === 'admin' || !a.role)
+  );
   const now = new Date().toISOString();
 
   if (existing.exists()) {
@@ -1183,12 +1881,27 @@ export async function requestAdminAccess(params: {
     return { ...acc, ...patch };
   }
 
-  const isFounder = !hasActive;
+  if (params.role === 'secretary') {
+    const acc: AdminAccount = {
+      id,
+      email,
+      displayName: params.displayName || email,
+      status: 'pending',
+      role: 'secretary',
+      requestedAt: now,
+      ...(params.uid ? { uid: params.uid } : {}),
+    };
+    await setDoc(refDoc, acc);
+    return acc;
+  }
+
+  const isFounder = !hasActiveAdmin;
   const acc: AdminAccount = {
     id,
     email,
     displayName: params.displayName || email,
     status: isFounder ? 'active' : 'pending',
+    role: 'admin',
     isFounder,
     requestedAt: now,
     ...(params.uid ? { uid: params.uid } : {}),
@@ -1199,6 +1912,14 @@ export async function requestAdminAccess(params: {
 }
 
 export async function inviteAdmin(email: string, invitedBy: string): Promise<AdminAccount> {
+  return inviteStaff(email, invitedBy, 'admin');
+}
+
+export async function inviteStaff(
+  email: string,
+  invitedBy: string,
+  staffRole: StaffRole = 'admin'
+): Promise<AdminAccount> {
   const inviter = invitedBy.trim().toLowerCase();
   const inviterSnap = await getDoc(doc(db, 'admins', adminDocId(inviter)));
   if (!inviterSnap.exists() || inviterSnap.data().status !== 'active') {
@@ -1218,6 +1939,7 @@ export async function inviteAdmin(email: string, invitedBy: string): Promise<Adm
     email: target,
     displayName: target,
     status: 'pending',
+    role: staffRole,
     requestedAt: now,
     activatedBy: inviter,
   };
@@ -1277,4 +1999,66 @@ export async function revokeAdmin(targetEmail: string, revokedByEmail: string): 
     revokedAt: new Date().toISOString(),
     revokedBy: actor,
   });
+}
+
+const SECRETARIAT_COLLECTION = 'secretariat_files';
+
+export function subscribeSecretariatFiles(callback: (files: SecretariatFile[]) => void) {
+  return onSnapshot(
+    collection(db, SECRETARIAT_COLLECTION),
+    (snapshot) => {
+      const list: SecretariatFile[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as SecretariatFile);
+      });
+      list.sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+      callback(list);
+    },
+    (err) => console.error('[Firebase] secretariat_files error', err)
+  );
+}
+
+export async function uploadSecretariatFile(params: {
+  title: string;
+  category: string;
+  file: File;
+  uploadedBy: string;
+  uploadedByRole: StaffRole;
+}): Promise<SecretariatFile> {
+  const title = params.title.trim();
+  if (!title) throw new Error('Indica un título para el informe.');
+  if (!params.file.size) throw new Error('Selecciona un archivo válido.');
+
+  const id = `sec_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const safeName = params.file.name.replace(/[^\w.\-() ]+/g, '_').slice(0, 120);
+  const storagePath = `secretariat/${id}/${safeName}`;
+  const storageRef = ref(storage, storagePath);
+  await uploadBytes(storageRef, params.file, { contentType: params.file.type || undefined });
+  const downloadUrl = await getDownloadURL(storageRef);
+  const now = new Date().toISOString();
+  const record: SecretariatFile = {
+    id,
+    title,
+    category: params.category.trim() || 'General',
+    fileName: safeName,
+    storagePath,
+    downloadUrl,
+    sizeBytes: params.file.size,
+    uploadedBy: params.uploadedBy.trim().toLowerCase(),
+    uploadedByRole: params.uploadedByRole,
+    createdAt: now,
+  };
+  await setDoc(doc(db, SECRETARIAT_COLLECTION, id), record);
+  return record;
+}
+
+export async function deleteSecretariatFile(id: string, storagePath: string): Promise<void> {
+  await deleteDoc(doc(db, SECRETARIAT_COLLECTION, id));
+  try {
+    await deleteObject(ref(storage, storagePath));
+  } catch {
+    // El doc ya se eliminó; el blob huérfano se puede limpiar después
+  }
 }

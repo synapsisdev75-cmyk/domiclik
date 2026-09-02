@@ -13,7 +13,7 @@ import { DomiChatRadioIcon } from '../ui/CustomIcons';
 interface ChatWindowProps {
   chatId: string;
   driver: MotorizadoDriver;
-  currentRole: 'admin' | 'driver';
+  currentRole: 'admin' | 'driver' | 'secretary';
   senderName: string;
 }
 
@@ -38,6 +38,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const lastMsgIdRef = useRef<string | null>(null);
   const primedRef = useRef(false);
   const isAdmin = currentRole === 'admin';
+  const isTower = currentRole === 'admin' || currentRole === 'secretary';
 
   useEffect(() => {
     lastMsgIdRef.current = null;
@@ -73,9 +74,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
     await sendChatMessage({
       chatId,
-      senderId: currentRole === 'admin' ? 'admin' : driver.id,
+      senderId: isTower ? 'admin' : driver.id,
       senderName,
-      senderRole: currentRole,
+      senderRole: isTower ? 'admin' : 'driver',
       text: textToSend,
     });
   };
@@ -154,7 +155,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           )}
           <span className="text-[10px] bg-[#0B101D] text-[#00F0FF] px-2.5 py-1 rounded-lg border border-[#00F0FF]/40 font-black flex items-center gap-1.5 shadow-[0_0_10px_rgba(0,240,255,0.2)]">
             <DomiChatRadioIcon className="w-3.5 h-3.5" color="#00F0FF" />
-            <span>{isAdmin ? 'TORRE CENTRAL' : 'PILOTO MOTO'}</span>
+            <span>{isTower ? (currentRole === 'secretary' ? 'SECRETARÍA' : 'TORRE CENTRAL') : 'PILOTO MOTO'}</span>
           </span>
         </div>
       </div>
@@ -176,7 +177,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         ) : (
           messages.map((msg) => {
             const isMe =
-              (currentRole === 'admin' && msg.senderRole === 'admin') ||
+              (isTower && msg.senderRole === 'admin') ||
               (currentRole === 'driver' && msg.senderRole === 'driver');
 
             return (
@@ -245,8 +246,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           value={textInput}
           onChange={(e) => setTextInput(e.target.value)}
           placeholder={
-            isAdmin
-              ? 'Transmitir comando de radio al motorizado...'
+            isTower
+              ? 'Transmitir mensaje al motorizado…'
               : 'Escribir reporte radial a la Central...'
           }
           className="flex-1 bg-[#0B101D] border border-[#1E293B] rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00F0FF] transition font-sans"

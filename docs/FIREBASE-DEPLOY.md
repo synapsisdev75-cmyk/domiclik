@@ -1,5 +1,8 @@
 # Deploy DomiClick en Firebase Hosting
 
+> **iPhone muestra “no encuentra el servidor” con `domiclick.com`?**  
+> Ver guía: [DNS-DOMICLICK-IPHONE.md](./DNS-DOMICLICK-IPHONE.md) — es DNS en Hostinger, no código.
+
 Proyecto Firebase: **gen-lang-client-0954482957** (DomiClik)
 
 Hay **dos sitios**. Un dominio solo sirve la app del sitio al que está conectado.
@@ -34,7 +37,7 @@ Prueba inmediata (sin esperar DNS): https://domiclick-ops.web.app
 
 | Host | Tipo | Valor |
 |------|------|-------|
-| `@` | A | IPs que muestra Firebase en el sitio landing |
+| `@` | A | `199.36.158.100` (IPv4 — **obligatorio para iPhone**) |
 | `www` | CNAME | `gen-lang-client-0954482957.web.app` |
 
 ---

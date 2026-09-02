@@ -1,4 +1,12 @@
-export type UserRole = 'admin' | 'driver' | 'pending_driver' | 'pending_admin';
+export type UserRole =
+  | 'admin'
+  | 'secretary'
+  | 'driver'
+  | 'pending_driver'
+  | 'pending_admin'
+  | 'pending_secretary';
+
+export type StaffRole = 'admin' | 'secretary';
 
 export type AdminAccountStatus = 'pending' | 'active' | 'revoked';
 
@@ -8,6 +16,8 @@ export interface AdminAccount {
   uid?: string;
   displayName: string;
   status: AdminAccountStatus;
+  /** admin = control total · secretary = torre lectura + informes */
+  role?: StaffRole;
   /** Primer admin del sistema (auto-activado) */
   isFounder?: boolean;
   requestedAt: string;
@@ -15,6 +25,20 @@ export interface AdminAccount {
   activatedBy?: string;
   revokedAt?: string;
   revokedBy?: string;
+}
+
+/** Documento de secretaría (informes, actas, soporte). */
+export interface SecretariatFile {
+  id: string;
+  title: string;
+  category: string;
+  fileName: string;
+  storagePath: string;
+  downloadUrl: string;
+  sizeBytes?: number;
+  uploadedBy: string;
+  uploadedByRole: StaffRole;
+  createdAt: string;
 }
 
 export type DriverStatus = 'pending' | 'approved' | 'rejected';
@@ -35,9 +59,14 @@ export interface MotorizadoDriver {
   email: string;
   phone: string;
   documentId: string; // Cédula de Ciudadanía
-  licenseNumber: string; // Licencia de Conducción
-  plateNumber: string; // Placa de la moto (ej: ABC-12D)
-  motoModel: string; // Modelo y marca de la moto
+  /** Fecha de nacimiento (YYYY-MM-DD). */
+  birthDate?: string;
+  /** Licencia de conducción (A2) — la registra el transportista. */
+  licenseNumber?: string;
+  /** Placa — la asigna el administrador al vincular moto. */
+  plateNumber?: string;
+  /** Modelo moto — lo registra el administrador al vincular moto. */
+  motoModel?: string;
   photoUrl: string;
   status: DriverStatus;
   isActive: boolean; // Botón de disponibilidad (Activo / Inactivo)
@@ -49,10 +78,22 @@ export interface MotorizadoDriver {
   suspended?: boolean;
   /** Credencial WebAuthn (huella / Face ID del móvil) */
   webauthnCredentialId?: string;
+  /** Credencial WebAuthn registrada en terminal tablet compartida */
+  webauthnKioskCredentialId?: string;
   lastPunchType?: 'in' | 'out';
   lastPunchAt?: string;
   /** Último km de odómetro marcado (entrada o salida). */
   lastOdometerKm?: number;
+  /** Rendimiento manual km/galón (si difiere del catálogo por modelo). */
+  motoKmPerGallon?: number;
+  /** Vehículo de flota asignado por admin (catálogo personalizado). */
+  fleetVehicleId?: string;
+  /** Moto física asignada (inventario fleet_motos). */
+  assignedMotoId?: string;
+  /** Último cambio de aceite — km odómetro. */
+  lastOilChangeKm?: number;
+  /** Último cambio de aceite — fecha ISO. */
+  lastOilChangeAt?: string;
   approvedBy?: string;
   rejectionReason?: string;
   createdAt: string;
@@ -179,6 +220,24 @@ export interface DispatchSettings {
 
 export type AttendancePunchType = 'in' | 'out';
 
+export type AttendancePunchMethod = 'webauthn' | 'webauthn_kiosk' | 'pin_kiosk';
+
+/** PIN diario del kiosco (rota a la 01:00, jornada sede). */
+export interface AttendanceDailyPin {
+  id: string;
+  driverId: string;
+  driverName?: string;
+  /** Día operativo: cambia a la 01:00 locales. */
+  pinDayKey: string;
+  /** PIN de 6 dígitos; solo se revela tras foto de rostro. */
+  pin: string;
+  createdAt: string;
+  /** Primera foto de llegada a sede que desbloqueó el PIN hoy. */
+  revealFacePhotoUrl?: string;
+  revealedAt?: string;
+  expiresAt: string;
+}
+
 export interface AttendancePunch {
   id: string;
   driverId: string;
@@ -188,12 +247,31 @@ export interface AttendancePunch {
   dateKey: string;
   lat?: number;
   lng?: number;
-  method: 'webauthn';
-  credentialId: string;
+  method: AttendancePunchMethod;
+  /** WebAuthn credentialId, o el PIN usado en kiosco. */
+  credentialId?: string;
   /** Kilometraje del odómetro al marcar (km reales de la moto). */
   odometerKm?: number;
-  /** Foto del tablero / odómetro. */
+  /** Foto del tablero / odómetro (celular vía QR). */
   odometerPhotoUrl?: string;
+  /** Foto de la placa de la moto (celular vía QR; obligatoria en entrada). */
+  platePhotoUrl?: string;
+  /** Foto de rostro en sede (obligatoria para revelar PIN en tablet). */
+  facePhotoUrl?: string;
+  pinDayKey?: string;
+  /** Calculado al marcar salida. */
+  shiftKmDriven?: number;
+  shiftGallons?: number;
+  shiftLiters?: number;
+  shiftFuelCostCop?: number;
+  kmPerGallonUsed?: number;
+  kmPerLiterUsed?: number;
+  litersPerKmUsed?: number;
+  copPerKmUsed?: number;
+  fuelPricePerGallonUsed?: number;
+  motoCatalogId?: string;
+  /** Marca kiosco sin fotos móviles aún. */
+  mobilePhotosPending?: boolean;
 }
 
 /** Resumen del turno laboral del día (entrada + salida + km). */
@@ -209,6 +287,14 @@ export interface WorkShiftDay {
   hoursWorked: number;
   expectedHours: number;
   fuelEstimateCop: number;
+  gallonsUsed?: number;
+  litersUsed?: number;
+  litersPerKm?: number;
+  copPerKm?: number;
+  fuelPricePerGallonCop?: number;
+  kmPerGallonUsed?: number;
+  kmPerLiterUsed?: number;
+  motoCatalogId?: string;
   photoInUrl?: string;
   photoOutUrl?: string;
   open: boolean;
@@ -280,6 +366,110 @@ export interface PayrollRun {
   status: 'draft' | 'approved';
 }
 
+/** Vehículo de flota definido por el administrador (Firestore). */
+export interface FleetVehicleSpec {
+  id: string;
+  label: string;
+  /** Palabras para auto-detectar desde motoModel (ej. "boxer", "125"). */
+  matchKeywords: string[];
+  kmPerLiter: number;
+  kmPerGallonMin?: number;
+  kmPerGallonMax?: number;
+  fuelType: 'gasolina' | 'diesel';
+  maintenance: {
+    firstServiceKm: number;
+    firstServiceDays: number;
+    oilChangeKm: number;
+    chainLubeKm: number;
+    airFilterCleanKm: number;
+    airFilterReplaceKm: number;
+    sparkPlugReplaceKm: number;
+    fuelBowlCleanKm: number;
+    carbBowlCleanKm: number;
+    engineOilLiters?: number;
+    tankLiters?: number;
+    notes?: string;
+  };
+  tankLiters?: number;
+  notes?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** Estado operativo de una moto física. */
+export type FleetMotoStatus = 'available' | 'assigned' | 'maintenance' | 'unavailable';
+
+/** Moto física de la flota (placa, odómetro, asignación). */
+export interface FleetMoto {
+  id: string;
+  plateNumber: string;
+  label: string;
+  motoModel: string;
+  /** Perfil técnico (FleetVehicleSpec). */
+  fleetVehicleId?: string;
+  fuelType: 'gasolina' | 'diesel';
+  status: FleetMotoStatus;
+  currentDriverId?: string;
+  lastOdometerKm?: number;
+  /** Km odómetro al momento de vincular la moto al transportista. */
+  assignedAtOdometerKm?: number;
+  /** Fecha vinculación al transportista actual. */
+  assignedAt?: string;
+  lastOilChangeKm?: number;
+  lastOilChangeAt?: string;
+  /** Último tanque lleno — km odómetro. */
+  lastFuelFillOdometerKm?: number;
+  /** Promedio km/L de turnos recientes. */
+  avgKmPerLiter?: number;
+  notes?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** Configuración de rotación semanal de motos. @deprecated Sin rotación — vinculación fija moto ↔ transportista. */
+export interface FleetRotationSettings {
+  enabled: boolean;
+  intervalDays: number;
+  dayOfWeek: number;
+  lastRunAt?: string;
+  lastRunWeekKey?: string;
+}
+
+/** Ajustes de flota: combustible y mantenimiento. */
+export interface FleetSettings {
+  id: 'fleet';
+  /** Precio galón gasolina/diésel (COP). */
+  fuelPricePerGallonCop: number;
+  /** Rendimiento por defecto km/galón si el modelo no está en catálogo. */
+  defaultKmPerGallon: number;
+  /** Intervalo cambio de aceite (km). */
+  oilChangeIntervalKm: number;
+  /** Intervalo cambio de aceite (días). */
+  oilChangeIntervalDays: number;
+  /** Motos/vehículos agregados por el administrador. */
+  customVehicles?: FleetVehicleSpec[];
+  updatedAt: string;
+}
+
+export type MotoMaintenanceType = 'aceite' | 'llantas' | 'frenos' | 'cadena' | 'general' | 'otro';
+
+export interface MotoMaintenanceLog {
+  id: string;
+  driverId: string;
+  fleetMotoId?: string;
+  driverName?: string;
+  plateNumber?: string;
+  motoModel?: string;
+  type: MotoMaintenanceType;
+  description: string;
+  odometerKm: number;
+  costCop?: number;
+  at: string;
+  createdBy?: string;
+}
+
 export interface ChatMessage {
   id: string;
   chatId: string;
@@ -322,6 +512,10 @@ export interface OpsIncident {
   resolvedAt?: string;
   resolvedBy?: string;
   resolutionNote?: string;
+  /** Botón de pánico del transportista */
+  isPanic?: boolean;
+  lat?: number;
+  lng?: number;
 }
 
 export interface VillavicencioPoint {
@@ -344,4 +538,18 @@ export interface DriverLocationHistoryPoint {
   addressName?: string;
   timestamp: string;
   dateKey: string; // e.g. YYYY-MM-DD
+}
+
+/** Videos de la pantalla secundaria (monitor radar). */
+export interface MapWallSettings {
+  id: 'map_wall';
+  /** Video corto (~6 s) — se reproduce completo, luego mapa. */
+  videoAUrl: string;
+  videoALabel?: string;
+  /** Video largo (~8 s) — se reproduce completo, luego mapa. */
+  videoBUrl: string;
+  videoBLabel?: string;
+  /** Cuánto tiempo mostrar el mapa entre videos (ms). */
+  mapDurationMs: number;
+  updatedAt: string;
 }

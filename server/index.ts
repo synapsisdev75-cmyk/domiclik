@@ -12,6 +12,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { isServiceBlockedAt, SERVICE_BLOCKED_MESSAGE } from '../shared/riskZones.ts';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -100,6 +101,24 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
       });
     }
 
+    const pickupLat = Number(body.pickupLat);
+    const pickupLng = Number(body.pickupLng);
+    const deliveryLat = Number(body.deliveryLat);
+    const deliveryLng = Number(body.deliveryLng);
+    const hasPickup = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
+    const hasDelivery = Number.isFinite(deliveryLat) && Number.isFinite(deliveryLng);
+
+    if (
+      (hasPickup && isServiceBlockedAt(pickupLat, pickupLng)) ||
+      (hasDelivery && isServiceBlockedAt(deliveryLat, deliveryLng))
+    ) {
+      return res.status(403).json({
+        ok: false,
+        error: SERVICE_BLOCKED_MESSAGE,
+        code: 'ZONE_BLOCKED',
+      });
+    }
+
     const orderId = 'ord_' + Date.now();
     const trackingCode = 'DMC-' + Math.floor(1000 + Math.random() * 9000);
     const deliveryConfirmCode = String(Math.floor(100000 + Math.random() * 900000));
@@ -133,14 +152,14 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
       customerPhotoURL: body.customerPhotoURL || '',
       pickupAddress: body.pickupAddress || 'Origen tienda / Bodega DomiClick',
       pickupCoords: {
-        lat: Number(body.pickupLat) || 4.142,
-        lng: Number(body.pickupLng) || -73.6266,
+        lat: hasPickup ? pickupLat : 4.142,
+        lng: hasPickup ? pickupLng : -73.6266,
         addressName: body.pickupAddress || 'Origen',
       },
       deliveryAddress,
       deliveryCoords: {
-        lat: Number(body.deliveryLat) || 4.15,
-        lng: Number(body.deliveryLng) || -73.63,
+        lat: hasDelivery ? deliveryLat : 4.15,
+        lng: hasDelivery ? deliveryLng : -73.63,
         addressName: deliveryAddress,
       },
       description: body.description || 'Pedido desde página de ventas',

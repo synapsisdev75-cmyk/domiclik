@@ -332,7 +332,11 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
 
       const photoUrl = await uploadOdometerPhoto(odometerFile, driver.id, type);
       const geo = await getPunchGeo();
-      await recordAttendancePunch({
+      const entryKm =
+        type === 'out'
+          ? todayPunches.find((p) => p.type === 'in')?.odometerKm ?? todayShift.kmIn
+          : undefined;
+      const punch = await recordAttendancePunch({
         driverId: driver.id,
         driverName: driver.fullName,
         type,
@@ -341,6 +345,9 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
         lng: geo.lng,
         odometerKm: km,
         odometerPhotoUrl: photoUrl,
+        entryOdometerKm: entryKm,
+        motoModel: driver.motoModel,
+        motoKmPerGallon: driver.motoKmPerGallon,
       });
       setOdometerKm('');
       setOdometerFile(null);
@@ -349,7 +356,9 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
       setAttendanceMsg(
         type === 'in'
           ? `Entrada + km ${km.toLocaleString('es-CO')} · ${new Date().toLocaleTimeString('es-CO')}`
-          : `Salida + km ${km.toLocaleString('es-CO')} · ${new Date().toLocaleTimeString('es-CO')}`
+          : punch.shiftKmDriven != null
+            ? `Salida · ${punch.shiftKmDriven.toLocaleString('es-CO')} km recorridos · ${(punch.shiftGallons || 0).toFixed(2)} gal · gasolina est. ${formatCOP(punch.shiftFuelCostCop || 0)}`
+            : `Salida + km ${km.toLocaleString('es-CO')} · ${new Date().toLocaleTimeString('es-CO')}`
       );
     } catch (err: any) {
       setAttendanceMsg(err?.message || 'No se pudo marcar asistencia.');
@@ -359,19 +368,34 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
   };
 
   const handleReportIncident = async (panic = false) => {
-    if (!currentActiveOrder) return;
+    if (panic) {
+      const ok = window.confirm(
+        '¿Activar BOTÓN DE PÁNICO?\n\nLa torre de control recibirá una alerta urgente con tu ubicación GPS.'
+      );
+      if (!ok) return;
+    } else if (!currentActiveOrder) {
+      setIncidentMsg('Usa el botón PÁNICO de emergencia, o reporta incidencia cuando tengas un envío activo.');
+      return;
+    }
+
     const category = panic ? 'Accidente / incidente' : incidentCategory;
-    const title = panic ? 'Botón de pánico' : category;
+    const title = panic ? '🚨 Botón de pánico' : category;
     const description = panic
       ? 'El repartidor activó el botón de pánico. Contactar de inmediato.'
       : window.prompt('Describe el problema para la torre:') || '';
     if (!panic && !description.trim()) return;
+
+    const coords = liveCoords ||
+      (driver.location?.lat && driver.location?.lng
+        ? { lat: driver.location.lat, lng: driver.location.lng }
+        : null);
+
     setIncidentBusy(true);
     setIncidentMsg('');
     try {
       await createIncident({
-        orderId: currentActiveOrder.id,
-        trackingCode: currentActiveOrder.trackingCode,
+        orderId: currentActiveOrder?.id,
+        trackingCode: currentActiveOrder?.trackingCode,
         driverId: driver.id,
         driverName: driver.fullName,
         reportedByRole: 'driver',
@@ -379,10 +403,19 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
         category,
         title,
         description: description.trim() || title,
+        isPanic: panic,
+        ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
       });
+      if (panic) {
+        try {
+          navigator.vibrate?.([200, 80, 200, 80, 400]);
+        } catch {
+          /* ignore */
+        }
+      }
       setIncidentMsg(
         panic
-          ? 'Alerta de pánico enviada a la torre.'
+          ? '🚨 Alerta de pánico enviada. La torre fue notificada.'
           : 'Incidencia enviada a la torre. El administrador la resolverá.'
       );
     } catch (err: any) {
@@ -393,7 +426,18 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 relative">
+      {/* Botón de pánico — siempre visible para el transportista */}
+      <button
+        type="button"
+        disabled={incidentBusy}
+        onClick={() => void handleReportIncident(true)}
+        className="fixed bottom-6 right-4 sm:right-6 z-[200] flex items-center gap-2 rounded-2xl border-2 border-red-300 bg-red-600 px-4 py-3 text-white font-black text-xs sm:text-sm uppercase tracking-wider shadow-[0_0_28px_rgba(220,38,38,0.55)] hover:bg-red-500 active:scale-[0.98] disabled:opacity-60 animate-pulse"
+        title="Emergencia — avisa a la torre de control"
+      >
+        <AlertTriangle className="w-5 h-5 shrink-0" />
+        <span>Pánico</span>
+      </button>
       <div className="bg-[#0B101D] border border-[#FF5722]/50 rounded-2xl p-6 shadow-[0_0_30px_rgba(255,87,34,0.15)] relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-[#FF5722]/5 rounded-full blur-3xl pointer-events-none" />
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">

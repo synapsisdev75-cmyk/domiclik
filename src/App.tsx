@@ -10,11 +10,13 @@ import {
   subscribeRealtimeStatus,
   subscribeAdmins,
   requestAdminAccess,
+  requestStaffAccess,
   connectFirestore,
   subscribeDispatchSettings,
+  subscribeIncidents,
   RealtimeSyncMeta,
 } from './lib/firebase';
-import { alertDeliveryComplete, alertOrderAssigned } from './lib/alerts';
+import { alertDeliveryComplete, alertOrderAssigned, alertPanic } from './lib/alerts';
 import { dispatchAllPendingOrders } from './lib/autoDispatch';
 import { isLiveOrderStatus } from './lib/orderFlow';
 import { DEFAULT_DISPATCH_SETTINGS } from './lib/adminMetrics';
@@ -28,8 +30,23 @@ import { AuthModal } from './components/auth/AuthModal';
 import { LoginPage } from './components/auth/LoginPage';
 import { BrandIdentityModal } from './components/brand/BrandIdentityModal';
 import { MapWallScreen, isMapWallView } from './components/admin/MapWallScreen';
+import {
+  AttendanceKioskScreen,
+  isAttendanceKioskView,
+} from './components/driver/AttendanceKioskScreen';
+import {
+  AttendanceMobilePhotoScreen,
+  isAttendanceMobilePhotoView,
+} from './components/driver/AttendanceMobilePhotoScreen';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { completeGoogleSignInFromRedirect } from './lib/googleAuth';
+import { completeGoogleSignInFromRedirect, readLoginRole, clearLoginRole, saveLoginRole } from './lib/googleAuth';
+import {
+  safeGetItem,
+  safeRemoveItem,
+  safeSetItem,
+  safeLocalStorage,
+} from './lib/safeStorage';
+import { staffRoleOf, canAccessSection } from './lib/staffAccess';
 
 function SessionLoading({ message }: { message: string }) {
   return (
@@ -60,9 +77,32 @@ function PendingAdminPanel({ email }: { email?: string }) {
   );
 }
 
+function PendingSecretaryPanel({ email }: { email?: string }) {
+  return (
+    <div className="max-w-lg mx-auto my-16 text-center glass-panel rounded-3xl p-8 border border-violet-500/30">
+      <h2 className="text-xl font-black text-white mb-2">Acceso de secretaría pendiente</h2>
+      <p className="text-sm text-slate-400 mb-3">
+        Tu cuenta <span className="text-white font-semibold">{email}</span> ya está autenticada, pero{' '}
+        <span className="text-violet-300">un administrador activo</span> debe activarte en{' '}
+        <span className="text-white">Usuarios → Administradores</span>.
+      </p>
+      <p className="text-xs text-slate-500">
+        Cuando estés activa podrás registrar pedidos, atender radios con transportistas y
+        monitorear alertas de pánico en la torre.
+      </p>
+    </div>
+  );
+}
+
 export default function App() {
   if (isMapWallView()) {
     return <MapWallScreen />;
+  }
+  if (isAttendanceKioskView()) {
+    return <AttendanceKioskScreen />;
+  }
+  if (isAttendanceMobilePhotoView()) {
+    return <AttendanceMobilePhotoScreen />;
   }
   return <MainApp />;
 }
@@ -85,16 +125,20 @@ function MainApp() {
   );
   const [opsDataReady, setOpsDataReady] = useState(false);
   const prevOrdersRef = useRef<Map<string, string>>(new Map());
+  const prevIncidentsRef = useRef<Set<string>>(new Set());
+  const incidentsPrimedRef = useRef(false);
   const alertsReadyRef = useRef(false);
   const autoDispatchingRef = useRef(false);
 
   // Limpia caches locales/SW que podían mostrar demos borrados en Firebase
   useEffect(() => {
-    if (!localStorage.getItem('domiclick_cleared_cache_v4')) {
+    const ls = safeLocalStorage();
+    if (!ls) return;
+    if (!safeGetItem(ls, 'domiclick_cleared_cache_v4')) {
       clearDemoLocalCache();
-      localStorage.setItem('domiclick_cleared_cache_v4', '1');
-      localStorage.removeItem('domiclick_cleared_cache_v3');
-      localStorage.removeItem('domiclick_cleared_demo_v1');
+      safeSetItem(ls, 'domiclick_cleared_cache_v4', '1');
+      safeRemoveItem(ls, 'domiclick_cleared_cache_v3');
+      safeRemoveItem(ls, 'domiclick_cleared_demo_v1');
     }
   }, []);
 
@@ -140,13 +184,32 @@ function MainApp() {
     };
   }, []);
 
-  // Completa retorno de Google aunque LoginPage no alcance a montarse
+  // Completa retorno de Google (compartido con LoginPage; no se pierde el resultado)
   useEffect(() => {
-    completeGoogleSignInFromRedirect().catch(() => undefined);
+    void completeGoogleSignInFromRedirect();
   }, []);
 
   // Config de despacho (radio, auto-asignar, tarifas)
   useEffect(() => subscribeDispatchSettings(setDispatchSettings), []);
+
+  // Alerta sonora cuando un transportista activa pánico (torre admin y secretaría)
+  useEffect(() => {
+    if (currentRole !== 'admin' && currentRole !== 'secretary') return;
+    return subscribeIncidents((list) => {
+      const openPanic = list.filter((i) => i.status === 'open' && i.isPanic);
+      if (!incidentsPrimedRef.current) {
+        openPanic.forEach((i) => prevIncidentsRef.current.add(i.id));
+        incidentsPrimedRef.current = true;
+        return;
+      }
+      for (const inc of openPanic) {
+        if (!prevIncidentsRef.current.has(inc.id)) {
+          prevIncidentsRef.current.add(inc.id);
+          alertPanic();
+        }
+      }
+    });
+  }, [currentRole]);
 
   // Torre: asigna automáticamente al conductor activo + libre más cercano
   useEffect(() => {
@@ -245,15 +308,19 @@ function MainApp() {
       if (user && user.email) {
         setCurrentUserEmail(user.email);
         setIsAuthenticated(true);
-        const saved = sessionStorage.getItem('domiclick_login_role') as UserRole | null;
+        const saved = readLoginRole() as UserRole | null;
         if (saved === 'admin') {
           setRequestedRole('admin');
           setCurrentRole('pending_admin');
-          sessionStorage.removeItem('domiclick_login_role');
+          clearLoginRole();
+        } else if (saved === 'secretary') {
+          setRequestedRole('secretary');
+          setCurrentRole('pending_secretary');
+          clearLoginRole();
         } else if (saved === 'driver' || saved === 'pending_driver') {
           setRequestedRole(saved);
           setCurrentRole(saved);
-          sessionStorage.removeItem('domiclick_login_role');
+          clearLoginRole();
         }
       } else {
         setCurrentUserEmail(undefined);
@@ -265,38 +332,56 @@ function MainApp() {
 
   // Brand: solo intenta una vez; si Storage niega (403), usa /public/brand y no reintenta
   useEffect(() => {
-    if (localStorage.getItem('domiclick_brand_uploaded_v2')) return;
-    if (localStorage.getItem('domiclick_brand_upload_skip') === '1') return;
+    const ls = safeLocalStorage();
+    if (!ls) return;
+    if (safeGetItem(ls, 'domiclick_brand_uploaded_v2')) return;
+    if (safeGetItem(ls, 'domiclick_brand_upload_skip') === '1') return;
     uploadBrandAssetsToStorage()
       .then((urls) => {
         if (Object.keys(urls).length > 0) {
-          localStorage.setItem('domiclick_brand_uploaded_v2', '1');
-          localStorage.setItem('domiclick_brand_urls', JSON.stringify(urls));
+          safeSetItem(ls, 'domiclick_brand_uploaded_v2', '1');
+          safeSetItem(ls, 'domiclick_brand_urls', JSON.stringify(urls));
         }
       })
       .catch(() => {
-        localStorage.setItem('domiclick_brand_upload_skip', '1');
+        safeSetItem(ls, 'domiclick_brand_upload_skip', '1');
       });
   }, []);
 
   const myAdmin = adminAccounts.find(
     (a) => currentUserEmail && a.email.toLowerCase() === currentUserEmail.toLowerCase()
   );
-  const isActiveAdmin = myAdmin?.status === 'active';
+  const isActiveStaff = myAdmin?.status === 'active';
+  const staffRole = staffRoleOf(myAdmin);
+  const isSecretary = staffRole === 'secretary';
   const adminPending =
-    currentRole === 'pending_admin' ||
-    (currentRole === 'admin' && myAdmin?.status === 'pending');
-  const adminBootstrapping =
+    !isSecretary &&
+    (currentRole === 'pending_admin' ||
+      (currentRole === 'admin' && myAdmin?.status === 'pending'));
+  const secretaryPending =
+    isSecretary &&
+    (currentRole === 'pending_secretary' ||
+      (currentRole === 'secretary' && myAdmin?.status === 'pending'));
+  const towerBootstrapping =
     isAuthenticated &&
-    (requestedRole === 'admin' || currentRole === 'admin' || currentRole === 'pending_admin') &&
-    !isActiveAdmin &&
+    (requestedRole === 'admin' ||
+      requestedRole === 'pending_admin' ||
+      requestedRole === 'secretary' ||
+      requestedRole === 'pending_secretary' ||
+      currentRole === 'admin' ||
+      currentRole === 'pending_admin' ||
+      currentRole === 'secretary' ||
+      currentRole === 'pending_secretary') &&
+    !isActiveStaff &&
     !adminPending &&
+    !secretaryPending &&
     !opsDataReady;
 
-  // Resolver acceso admin: primer admin se auto-activa; los demás esperan aprobación
+  // Resolver acceso admin
   useEffect(() => {
     if (!isAuthenticated || !currentUserEmail) return;
     if (requestedRole !== 'admin' && requestedRole !== 'pending_admin') return;
+    if (isSecretary) return;
 
     let cancelled = false;
     requestAdminAccess({
@@ -308,24 +393,71 @@ function MainApp() {
         if (cancelled) return;
         setCurrentRole(acc.status === 'active' ? 'admin' : 'pending_admin');
       })
-      .catch(() => {
-        if (!cancelled) setCurrentRole('pending_admin');
+      .catch((err) => {
+        console.warn('[admin] requestAdminAccess', err);
+        // No degradar a pendiente si ya estamos en torre como admin activo
+        if (!cancelled && !isActiveStaff) setCurrentRole('pending_admin');
       });
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, currentUserEmail, requestedRole]);
+  }, [isAuthenticated, currentUserEmail, requestedRole, isActiveStaff, isSecretary]);
 
-  // Si otro admin activa/revoca en vivo, actualizar vista
+  // Resolver acceso secretaría (siempre requiere activación manual)
+  useEffect(() => {
+    if (!isAuthenticated || !currentUserEmail) return;
+    if (requestedRole !== 'secretary' && requestedRole !== 'pending_secretary') return;
+    if (!isSecretary && myAdmin && staffRoleOf(myAdmin) === 'admin') return;
+
+    let cancelled = false;
+    requestStaffAccess({
+      email: currentUserEmail,
+      uid: auth.currentUser?.uid || undefined,
+      displayName: auth.currentUser?.displayName || currentUserEmail,
+      role: 'secretary',
+    })
+      .then((acc) => {
+        if (cancelled) return;
+        setCurrentRole(acc.status === 'active' ? 'secretary' : 'pending_secretary');
+      })
+      .catch((err) => {
+        console.warn('[secretary] requestStaffAccess', err);
+        if (!cancelled && !isActiveStaff) setCurrentRole('pending_secretary');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, currentUserEmail, requestedRole, isActiveStaff, isSecretary, myAdmin]);
+
+  // Si otro admin activa/revoca en vivo, actualizar vista (sin degradar por lista vacía momentánea)
   useEffect(() => {
     if (!currentUserEmail || !myAdmin) return;
-    if (myAdmin.status === 'active' && (requestedRole === 'admin' || currentRole === 'pending_admin')) {
-      setCurrentRole('admin');
+    const resolvedRole = isSecretary ? 'secretary' : 'admin';
+    const resolvedPending = isSecretary ? 'pending_secretary' : 'pending_admin';
+
+    if (myAdmin.status === 'active') {
+      if (
+        requestedRole === 'admin' ||
+        requestedRole === 'pending_admin' ||
+        requestedRole === 'secretary' ||
+        requestedRole === 'pending_secretary' ||
+        currentRole === 'pending_admin' ||
+        currentRole === 'pending_secretary'
+      ) {
+        setCurrentRole(resolvedRole);
+      }
     }
-    if (myAdmin.status !== 'active' && currentRole === 'admin') {
-      setCurrentRole('pending_admin');
+    if (
+      myAdmin.status === 'pending' &&
+      (currentRole === 'admin' || currentRole === 'secretary') &&
+      (requestedRole === 'admin' ||
+        requestedRole === 'pending_admin' ||
+        requestedRole === 'secretary' ||
+        requestedRole === 'pending_secretary')
+    ) {
+      setCurrentRole(resolvedPending);
     }
-  }, [myAdmin?.status, currentUserEmail]);
+  }, [myAdmin?.status, myAdmin?.role, currentUserEmail, requestedRole, currentRole, isSecretary]);
 
   /** Perfil de motorizado vinculado al email autenticado (sin fallback a otro). */
   const myDriverProfile =
@@ -338,16 +470,51 @@ function MainApp() {
   const activeApprovedDriver =
     myDriverProfile?.status === 'approved' ? myDriverProfile : null;
 
-  // Auto-detectar rol: admin activo → torre; repartidor aprobado → cabina (sin dropdown)
+  // Auto-detectar rol: torre (admin/secretaría) vs transportista
   useEffect(() => {
     if (!isAuthenticated || !currentUserEmail) return;
-    // Esperar a que carguen listas (evita flash incorrecto)
+
+    const wantsTower =
+      requestedRole === 'admin' ||
+      requestedRole === 'pending_admin' ||
+      requestedRole === 'secretary' ||
+      requestedRole === 'pending_secretary' ||
+      currentRole === 'admin' ||
+      currentRole === 'pending_admin' ||
+      currentRole === 'secretary' ||
+      currentRole === 'pending_secretary';
+
+    if (wantsTower) {
+      const resolvedRole = isSecretary ? 'secretary' : 'admin';
+      const resolvedPending = isSecretary ? 'pending_secretary' : 'pending_admin';
+
+      if (isActiveStaff) {
+        if (currentRole !== resolvedRole) {
+          setRequestedRole(resolvedRole);
+          setCurrentRole(resolvedRole);
+        }
+        return;
+      }
+      if (!opsDataReady && adminAccounts.length === 0) return;
+      if (adminAccounts.length > 0 && !myAdmin) {
+        if (currentRole !== resolvedPending && currentRole !== resolvedRole) {
+          setCurrentRole(resolvedPending);
+        }
+        return;
+      }
+      if (myAdmin?.status === 'pending' && currentRole !== resolvedPending) {
+        setCurrentRole(resolvedPending);
+      }
+      return;
+    }
+
     if (adminAccounts.length === 0 && drivers.length === 0) return;
 
-    if (isActiveAdmin) {
-      if (currentRole !== 'admin') {
-        setRequestedRole('admin');
-        setCurrentRole('admin');
+    if (isActiveStaff) {
+      const resolvedRole = isSecretary ? 'secretary' : 'admin';
+      if (currentRole !== resolvedRole) {
+        setRequestedRole(resolvedRole);
+        setCurrentRole(resolvedRole);
       }
       return;
     }
@@ -368,28 +535,34 @@ function MainApp() {
       return;
     }
 
-    // Pidió admin y no es activo → pendiente admin
-    if (requestedRole === 'admin' || requestedRole === 'pending_admin') {
-      if (currentRole !== 'pending_admin') setCurrentRole('pending_admin');
-      return;
-    }
-
-    // Sin perfil de flota: prerregistro
-    if (currentRole !== 'pending_driver' && currentRole !== 'pending_admin') {
+    if (
+      currentRole !== 'pending_driver' &&
+      currentRole !== 'pending_admin' &&
+      currentRole !== 'pending_secretary'
+    ) {
       setRequestedRole('pending_driver');
       setCurrentRole('pending_driver');
     }
   }, [
     isAuthenticated,
     currentUserEmail,
-    isActiveAdmin,
+    isActiveStaff,
+    isSecretary,
     activeApprovedDriver?.id,
     myDriverProfile?.status,
     adminAccounts.length,
     drivers.length,
     requestedRole,
     currentRole,
+    opsDataReady,
+    myAdmin?.status,
   ]);
+
+  useEffect(() => {
+    if (staffRole === 'secretary' && !canAccessSection(staffRole, activeSidebarTab)) {
+      setActiveSidebarTab('dashboard');
+    }
+  }, [staffRole, activeSidebarTab]);
 
   const isDriverCabin =
     currentRole === 'driver' || currentRole === 'pending_driver';
@@ -406,6 +579,7 @@ function MainApp() {
     } catch (e) {
       // Ignored
     }
+    clearLoginRole();
     setCurrentUserEmail(undefined);
     setIsAuthenticated(false);
     setRequestedRole('driver');
@@ -418,39 +592,56 @@ function MainApp() {
       <LoginPage
         onLoginSuccess={(email, role) => {
           setCurrentUserEmail(email);
-          setRequestedRole(role === 'admin' ? 'admin' : role);
-          if (role === 'admin') setCurrentRole('pending_admin');
-          else setCurrentRole(role);
+          if (role === 'admin') {
+            setRequestedRole('admin');
+            setCurrentRole('pending_admin');
+            saveLoginRole('admin');
+          } else if (role === 'secretary') {
+            setRequestedRole('secretary');
+            setCurrentRole('pending_secretary');
+            saveLoginRole('secretary');
+          } else {
+            setRequestedRole(role);
+            setCurrentRole(role);
+            saveLoginRole(role);
+          }
           setIsAuthenticated(true);
         }}
       />
     );
   }
 
-  if (adminBootstrapping) {
+  if (towerBootstrapping) {
     return <SessionLoading message="Preparando tu acceso a la torre de control…" />;
   }
+
+  const isTowerActive =
+    isActiveStaff && (currentRole === 'admin' || currentRole === 'secretary');
 
   return (
     <div className="min-h-screen bg-[#05080f] text-[#e8eef9] flex flex-col font-sans selection:bg-[#FF5722] selection:text-white">
       <HeaderBar
         currentUserEmail={currentUserEmail}
         onOpenBrandModal={
-          currentRole === 'admin' || currentRole === 'pending_admin'
+          currentRole === 'admin' && isActiveStaff && !isSecretary
             ? () => setIsBrandModalOpen(true)
             : undefined
         }
         onLogout={handleLogout}
         onSelectRole={undefined}
-        canAccessAdmin={isActiveAdmin}
+        canAccessAdmin={isActiveStaff && !isSecretary}
         roleLabel={
           currentRole === 'admin'
             ? 'Admin Operador'
-            : currentRole === 'pending_admin'
-              ? 'Admin pendiente'
-              : currentRole === 'driver'
-                ? activeApprovedDriver?.fullName || 'Transportista'
-                : 'Preregistro'
+            : currentRole === 'secretary'
+              ? 'Secretaría'
+              : currentRole === 'pending_admin'
+                ? 'Admin pendiente'
+                : currentRole === 'pending_secretary'
+                  ? 'Secretaría pendiente'
+                  : currentRole === 'driver'
+                    ? activeApprovedDriver?.fullName || 'Transportista'
+                    : 'Preregistro'
         }
         compact={isDriverCabin}
         hideRoleMenu
@@ -471,16 +662,17 @@ function MainApp() {
       />
 
       <div className="flex flex-1 overflow-hidden">
-        {(currentRole === 'admin' || currentRole === 'pending_admin') && (
+        {isTowerActive && (
           <Sidebar
             activeTab={activeSidebarTab}
             onSelectTab={(tab) => setActiveSidebarTab(tab)}
             onLogout={handleLogout}
+            staffRole={staffRole}
           />
         )}
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 bg-transparent">
-          {currentRole === 'admin' && isActiveAdmin && (
+          {isTowerActive && (
             <AdminDashboard
               drivers={drivers}
               orders={orders}
@@ -488,13 +680,19 @@ function MainApp() {
               onNavigate={(section) => setActiveSidebarTab(section)}
               adminAccounts={adminAccounts}
               currentAdminEmail={currentUserEmail || ''}
+              staffRole={staffRole}
             />
           )}
 
           {adminPending && <PendingAdminPanel email={currentUserEmail} />}
 
-          {currentRole === 'admin' && !isActiveAdmin && !adminPending && (
-            <SessionLoading message="Verificando permisos de administrador…" />
+          {secretaryPending && <PendingSecretaryPanel email={currentUserEmail} />}
+
+          {(currentRole === 'admin' || currentRole === 'secretary') &&
+            !isActiveStaff &&
+            !adminPending &&
+            !secretaryPending && (
+            <SessionLoading message="Verificando permisos de torre…" />
           )}
 
           {currentRole === 'driver' && activeApprovedDriver && (

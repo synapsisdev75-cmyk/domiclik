@@ -1,11 +1,26 @@
 import { getRedirectResult, signInWithPopup, signInWithRedirect, type User } from 'firebase/auth';
-import { auth, googleProvider } from './firebase';
+import { auth, googleProvider, LOGIN_ROLE_KEY } from './firebase';
+import {
+  safeGetItem,
+  safeRemoveItem,
+  safeSetItem,
+  safeLocalStorage,
+  safeSessionStorage,
+} from './safeStorage';
 
 const REDIRECT_PENDING_KEY = 'domiclick_google_redirecting';
 
 function isMobileBrowser(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+/** En hosting real el popup de Google falla a menudo; redirect es más estable. */
+function preferRedirectFlow(): boolean {
+  if (isMobileBrowser()) return true;
+  if (typeof window === 'undefined') return true;
+  const host = window.location.hostname;
+  return host !== 'localhost' && host !== '127.0.0.1';
 }
 
 function clearOAuthUrl() {
@@ -25,11 +40,48 @@ export function isLegacyGoogleOAuthReturn() {
 export function isGoogleOAuthReturn() {
   if (typeof window === 'undefined') return false;
   if (isLegacyGoogleOAuthReturn()) return true;
-  try {
-    return sessionStorage.getItem(REDIRECT_PENDING_KEY) === '1';
-  } catch {
-    return false;
-  }
+  const ss = safeSessionStorage();
+  const ls = safeLocalStorage();
+  if (ss && safeGetItem(ss, REDIRECT_PENDING_KEY) === '1') return true;
+  if (ls && safeGetItem(ls, REDIRECT_PENDING_KEY) === '1') return true;
+  return false;
+}
+
+export function saveLoginRole(role: string) {
+  const ss = safeSessionStorage();
+  const ls = safeLocalStorage();
+  if (ss) safeSetItem(ss, LOGIN_ROLE_KEY, role);
+  if (ls) safeSetItem(ls, LOGIN_ROLE_KEY, role);
+}
+
+export function readLoginRole(): string | null {
+  const ss = safeSessionStorage();
+  const ls = safeLocalStorage();
+  return (
+    (ss ? safeGetItem(ss, LOGIN_ROLE_KEY) : null) ||
+    (ls ? safeGetItem(ls, LOGIN_ROLE_KEY) : null)
+  );
+}
+
+export function clearLoginRole() {
+  const ss = safeSessionStorage();
+  const ls = safeLocalStorage();
+  if (ss) safeRemoveItem(ss, LOGIN_ROLE_KEY);
+  if (ls) safeRemoveItem(ls, LOGIN_ROLE_KEY);
+}
+
+function markRedirectPending() {
+  const ss = safeSessionStorage();
+  const ls = safeLocalStorage();
+  if (ss) safeSetItem(ss, REDIRECT_PENDING_KEY, '1');
+  if (ls) safeSetItem(ls, REDIRECT_PENDING_KEY, '1');
+}
+
+function clearRedirectPending() {
+  const ss = safeSessionStorage();
+  const ls = safeLocalStorage();
+  if (ss) safeRemoveItem(ss, REDIRECT_PENDING_KEY);
+  if (ls) safeRemoveItem(ls, REDIRECT_PENDING_KEY);
 }
 
 export function googleRedirectUri() {
@@ -43,39 +95,53 @@ export function describeAuthError(err: unknown): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
   if (code === 'auth/unauthorized-domain') {
-    return `Este dominio (${host}) no está autorizado en Firebase Auth → Authorized domains.`;
+    return (
+      `Este dominio (${host}) no está autorizado. En Firebase Console → Authentication → Settings → ` +
+      `Authorized domains, agrega: domiclick-ops.web.app, ops.domiclick.com, localhost.`
+    );
   }
   if (code === 'auth/operation-not-allowed') {
     return 'Activa el proveedor Google en Firebase → Authentication → Sign-in method.';
   }
-  if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+  if (code === 'auth/network-request-failed') {
+    return (
+      'No se pudo conectar con Google (red o popup bloqueado). Recarga la página, permite ventanas ' +
+      'emergentes y vuelve a intentar. Si persiste, agrega este dominio en Firebase Auth → Authorized domains.'
+    );
+  }
+  if (
+    code === 'auth/popup-blocked' ||
+    code === 'auth/popup-closed-by-user' ||
+    code === 'auth/cancelled-popup-request'
+  ) {
     return 'Ventana de Google cerrada o bloqueada. Permite ventanas emergentes e inténtalo de nuevo.';
   }
   if (/origin_mismatch|redirect_uri|invalid_client|unauthorized_client/i.test(raw)) {
     return (
-      `Google bloqueó el login desde ${origin}. En Google Cloud Console → Client ID OAuth web, agrega ` +
-      `${origin} en Orígenes de JavaScript autorizados.`
+      `Google bloqueó el login desde ${origin}. En Google Cloud Console → Credenciales → Client ID OAuth web, agrega ` +
+      `${origin} en Orígenes de JavaScript autorizados y ${origin}/__/auth/handler en URIs de redirección.`
     );
   }
   if (code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
-    return 'Correo o contraseña incorrectos. Si es tu primera vez, pulsa «Solicita tu registro».';
+    return 'Correo o contraseña incorrectos. Si es tu primera vez, pulsa «Crea tu cuenta».';
   }
   if (code === 'auth/user-not-found') {
-    return 'Ese correo no existe. Usa «Solicita tu registro» o Google.';
+    return 'Ese correo no existe. Usa «Crea tu cuenta» o Google.';
   }
   if (code === 'auth/too-many-requests') {
     return 'Demasiados intentos. Espera un minuto o entra con Google.';
   }
-  if (code) return `No se pudo entrar (${code}). Prueba correo/contraseña.`;
+  if (code) return `No se pudo entrar (${code}). Prueba correo/contraseña o recarga e intenta Google otra vez.`;
   return raw || 'No se pudo iniciar sesión.';
 }
 
 export async function startGoogleSignInRedirect() {
-  if (isMobileBrowser()) {
-    sessionStorage.setItem(REDIRECT_PENDING_KEY, '1');
+  if (preferRedirectFlow()) {
+    markRedirectPending();
     await signInWithRedirect(auth, googleProvider);
     return new Promise<User>(() => undefined);
   }
+
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
@@ -84,9 +150,12 @@ export async function startGoogleSignInRedirect() {
     if (
       code === 'auth/popup-blocked' ||
       code === 'auth/popup-closed-by-user' ||
-      code === 'auth/cancelled-popup-request'
+      code === 'auth/cancelled-popup-request' ||
+      code === 'auth/network-request-failed' ||
+      code === 'auth/internal-error' ||
+      code === 'auth/operation-not-supported-in-this-environment'
     ) {
-      sessionStorage.setItem(REDIRECT_PENDING_KEY, '1');
+      markRedirectPending();
       await signInWithRedirect(auth, googleProvider);
       return new Promise<User>(() => undefined);
     }
@@ -98,22 +167,30 @@ export async function signInWithGoogleAccount(): Promise<User> {
   return startGoogleSignInRedirect();
 }
 
-let completing = false;
+let completing: Promise<User | null> | null = null;
 
-export async function completeGoogleSignInFromRedirect(): Promise<User | null> {
-  if (completing || typeof window === 'undefined') return null;
-  completing = true;
-  try {
-    if (isLegacyGoogleOAuthReturn()) {
-      clearOAuthUrl();
-      throw new Error(
-        'El login anterior falló al canjear el token. Pulsa otra vez Continuar con Google.'
-      );
-    }
-    const result = await getRedirectResult(auth);
-    sessionStorage.removeItem(REDIRECT_PENDING_KEY);
-    return result?.user ?? null;
-  } finally {
-    completing = false;
+/** Una sola llamada compartida: App y LoginPage no se pisan el resultado del redirect. */
+export function completeGoogleSignInFromRedirect(): Promise<User | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+  if (!completing) {
+    completing = (async () => {
+      try {
+        if (isLegacyGoogleOAuthReturn()) {
+          clearOAuthUrl();
+          throw new Error(
+            'El login anterior falló al canjear el token. Pulsa otra vez Continuar con Google.'
+          );
+        }
+        const result = await getRedirectResult(auth);
+        clearRedirectPending();
+        return result?.user ?? null;
+      } finally {
+        // Liberar tras un tick para callers concurrentes en el mismo montaje
+        window.setTimeout(() => {
+          completing = null;
+        }, 0);
+      }
+    })();
   }
+  return completing;
 }

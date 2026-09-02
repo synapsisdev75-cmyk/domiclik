@@ -5,6 +5,9 @@ export const BRAND = {
   logoNeon: '/brand/logo-neon.png',
   logo192: '/brand/logo-192.png',
   favicon: '/brand/favicon.png',
+  /** Torre / administración — distinto del landing clientes */
+  opsFavicon: '/brand/ops-favicon.png',
+  opsLogo192: '/brand/ops-logo-192.png',
   iconSheet: '/brand/icon-sheet.png',
   brandSheet: '/brand/brand-sheet.png',
 } as const;

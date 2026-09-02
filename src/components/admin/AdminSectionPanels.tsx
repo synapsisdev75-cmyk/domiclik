@@ -26,6 +26,8 @@ import {
 import { AdminControlCenter } from './AdminControlCenter';
 import { AdminStaffPanel } from './AdminStaffPanel';
 import { AttendancePanel } from './AttendancePanel';
+import { FleetControlPanel } from './FleetControlPanel';
+import { FleetMotoPanel } from './FleetMotoPanel';
 import { DEFAULT_DISPATCH_SETTINGS, formatCOP } from '../../lib/adminMetrics';
 import {
   MapPin,
@@ -51,6 +53,12 @@ import {
   DomiRadarIcon,
 } from '../ui/CustomIcons';
 import { openMapWallWindow } from './MapWallScreen';
+import { MapWallVideoPanel } from './MapWallVideoPanel';
+import { RiskSectorMapPanel } from './RiskSectorMapPanel';
+import { SecretariatPanel } from './SecretariatPanel';
+import { SecretaryChatsPanel } from './SecretaryChatsPanel';
+import { canAccessSection, staffCan } from '../../lib/staffAccess';
+import type { StaffRole } from '../../types';
 
 export type AdminSection =
   | 'dashboard'
@@ -58,10 +66,13 @@ export type AdminSection =
   | 'flota'
   | 'envios'
   | 'incidentes'
+  | 'sectores'
   | 'rutas'
   | 'historial'
   | 'reportes'
   | 'nomina'
+  | 'secretaria'
+  | 'chats'
   | 'usuarios'
   | 'ajustes';
 
@@ -120,6 +131,7 @@ interface PanelsProps {
   onOpenCreateOrder: () => void;
   adminAccounts?: AdminAccount[];
   currentAdminEmail?: string;
+  staffRole?: StaffRole;
 }
 
 export const AdminSectionPanels: React.FC<PanelsProps> = ({
@@ -129,6 +141,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
   onOpenCreateOrder,
   adminAccounts = [],
   currentAdminEmail = '',
+  staffRole = 'admin',
 }) => {
   const approvedDrivers = drivers.filter((d) => d.status === 'approved');
   const pendingDrivers = drivers.filter((d) => d.status === 'pending');
@@ -154,6 +167,15 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
   }, []);
 
   useEffect(() => subscribeIncidents(setIncidents), []);
+
+  if (!canAccessSection(staffRole, section)) {
+    return (
+      <EmptyState
+        title="Sección no disponible"
+        text="Tu perfil de secretaría no tiene acceso a esta área de la torre."
+      />
+    );
+  }
 
   const googleMapsKey = getGoogleMapsApiKey();
   const useGoogleMaps = Boolean(googleMapsKey) && mapStyleToggle === 'map';
@@ -318,7 +340,10 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
         >
           {ORDER_STATUS_LABEL[ord.status] || ord.status}
         </span>
-        {showAssign && ord.status === 'pending' && approvedDrivers.length > 0 && (
+        {showAssign &&
+          staffCan(staffRole, 'orders.assign') &&
+          ord.status === 'pending' &&
+          approvedDrivers.length > 0 && (
           <select
             className="bg-[#070B16] border border-[#1a2744] rounded-lg text-[10px] px-2 py-1.5 text-white max-w-[160px]"
             defaultValue=""
@@ -335,7 +360,9 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             ))}
           </select>
         )}
-        {ord.status !== 'cancelled' && ord.status !== 'delivered' && (
+        {staffCan(staffRole, 'orders.cancel') &&
+          ord.status !== 'cancelled' &&
+          ord.status !== 'delivered' && (
           <button
             type="button"
             title="Cancelar pedido (solo admin)"
@@ -346,6 +373,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             <Ban className="w-3.5 h-3.5" /> Cancelar
           </button>
         )}
+        {staffCan(staffRole, 'orders.delete') && (
         <button
           type="button"
           title="Borrar pedido (solo admin)"
@@ -355,6 +383,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
         >
           <Trash2 className="w-3.5 h-3.5" /> Borrar
         </button>
+        )}
       </div>
     </div>
   );
@@ -366,6 +395,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           title="Solicitudes"
           subtitle="Pedidos pendientes de asignación"
           action={
+            staffCan(staffRole, 'orders.create') ? (
             <button
               type="button"
               onClick={onOpenCreateOrder}
@@ -373,6 +403,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             >
               <Plus className="w-4 h-4" /> Nueva solicitud
             </button>
+            ) : undefined
           }
         />
         <div className="relative max-w-md">
@@ -405,8 +436,15 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
       <div className="space-y-5">
         <SectionHeader
           title="Flota de Motorizados"
-          subtitle={`${activeDrivers.length} activos · ${approvedDrivers.length} aprobados · Clic en el perfil para ver km y asistencia`}
+          subtitle={`${activeDrivers.length} activos · ${approvedDrivers.length} aprobados · Motos vinculadas fijas por transportista`}
         />
+        <FleetMotoPanel drivers={drivers} />
+        <div className="border-t border-[#162748] pt-5">
+          <SectionHeader
+            title="Transportistas"
+            subtitle="Clic en el perfil para ver km y asistencia"
+          />
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="bg-[#0A1020] border border-[#FF5722]/40 rounded-2xl p-4">
             <div className="text-[10px] text-slate-400 font-tech uppercase">En línea</div>
@@ -460,7 +498,11 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                   <div>
                     <div className="text-sm font-bold text-white">{drv.fullName}</div>
                     <div className="text-[10px] text-slate-400 font-tech">
-                      {drv.plateNumber} · {drv.phone}
+                      {drv.plateNumber ? `${drv.plateNumber} · ` : ''}
+                      {drv.phone}
+                      {!drv.assignedMotoId && !drv.plateNumber && (
+                        <span className="text-amber-400"> · Sin moto</span>
+                      )}
                     </div>
                     <div className="text-[10px] text-slate-500 truncate max-w-xs">
                       {drv.location?.addressName || 'Sin ubicación'}
@@ -569,7 +611,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           </h3>
           <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
             {orders.filter(filterText).map((ord) => (
-              <OrderRow key={ord.id} ord={ord} showAssign />
+              <OrderRow key={ord.id} ord={ord} showAssign={staffCan(staffRole, 'orders.assign')} />
             ))}
           </div>
         </div>
@@ -581,8 +623,12 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
     return (
       <div className="space-y-5">
         <SectionHeader
-          title="Incidentes"
-          subtitle={`${openIncidents.length} abiertos · solo el administrador puede resolver o borrar`}
+          title="Incidentes y pánico"
+          subtitle={
+            staffRole === 'secretary'
+              ? `${openIncidents.length} abiertos · monitoreo de botón de pánico (solo lectura)`
+              : `${openIncidents.length} abiertos · solo el administrador puede resolver o borrar`
+          }
         />
         {incidents.length === 0 ? (
           <EmptyState
@@ -595,17 +641,34 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
               <div
                 key={inc.id}
                 className={`bg-[#0A1020] border rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-start justify-between gap-3 ${
-                  inc.status === 'open'
-                    ? 'border-amber-500/40'
-                    : 'border-[#162748]'
+                  inc.isPanic && inc.status === 'open'
+                    ? 'border-red-500/60 bg-red-950/20 animate-pulse'
+                    : inc.status === 'open'
+                      ? 'border-amber-500/40'
+                      : 'border-[#162748]'
                 }`}
               >
                 <div className="flex items-start gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center shrink-0">
-                    <AlertTriangle className="w-5 h-5 text-amber-400" />
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                      inc.isPanic
+                        ? 'bg-red-600/25 border-red-500/60'
+                        : 'bg-amber-500/15 border-amber-500/40'
+                    }`}
+                  >
+                    <AlertTriangle
+                      className={`w-5 h-5 ${inc.isPanic ? 'text-red-400' : 'text-amber-400'}`}
+                    />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white font-tech">{inc.title}</div>
+                    <div className="text-xs font-bold text-white font-tech flex items-center gap-2">
+                      {inc.title}
+                      {inc.isPanic && (
+                        <span className="text-[9px] font-black uppercase tracking-wider text-red-300 bg-red-600/30 px-2 py-0.5 rounded-full border border-red-500/50">
+                          Pánico
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[11px] text-slate-400 mt-0.5 whitespace-pre-wrap">
                       {inc.description}
                     </p>
@@ -616,6 +679,11 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                       </span>
                       {inc.trackingCode && <span>· {inc.trackingCode}</span>}
                       {inc.driverName && <span>· {inc.driverName}</span>}
+                      {inc.lat != null && inc.lng != null && (
+                        <span>
+                          · GPS {inc.lat.toFixed(5)}, {inc.lng.toFixed(5)}
+                        </span>
+                      )}
                       <span>· {new Date(inc.createdAt).toLocaleString('es-CO')}</span>
                     </div>
                     {inc.status === 'resolved' && (
@@ -636,7 +704,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                   >
                     {inc.status === 'open' ? 'ABIERTA' : 'RESUELTA'}
                   </span>
-                  {inc.status === 'open' && (
+                  {inc.status === 'open' && staffCan(staffRole, 'incidents.resolve') && (
                     <button
                       type="button"
                       disabled={incidentBusyId === inc.id}
@@ -646,6 +714,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                       <CheckCircle2 className="w-3.5 h-3.5" /> Resolver
                     </button>
                   )}
+                  {staffCan(staffRole, 'incidents.delete') && (
                   <button
                     type="button"
                     disabled={incidentBusyId === inc.id}
@@ -654,11 +723,24 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Borrar
                   </button>
+                  )}
                 </div>
               </div>
             ))}
           </div>
         )}
+      </div>
+    );
+  }
+
+  if (section === 'sectores') {
+    return (
+      <div className="space-y-5">
+        <SectionHeader
+          title="Sectores de riesgo"
+          subtitle="Mapa operativo 2026 · incidentes + zonas sin cobertura al cliente"
+        />
+        <RiskSectorMapPanel incidents={incidents} />
       </div>
     );
   }
@@ -726,6 +808,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             />
           )}
         </div>
+        <MapWallVideoPanel />
       </div>
     );
   }
@@ -771,6 +854,16 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
     );
   }
 
+  if (section === 'chats') {
+    return (
+      <SecretaryChatsPanel
+        drivers={drivers}
+        staffRole={staffRole}
+        currentEmail={currentAdminEmail}
+      />
+    );
+  }
+
   if (section === 'reportes' || section === 'nomina') {
     return (
       <AdminControlCenter
@@ -778,6 +871,18 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
         orders={orders}
         initialTab={section === 'nomina' ? 'nomina' : 'metricas'}
       />
+    );
+  }
+
+  if (section === 'secretaria') {
+    return (
+      <div className="space-y-5">
+        <SectionHeader
+          title="Secretaría · Informes"
+          subtitle="Gestión documental compartida con secretaría"
+        />
+        <SecretariatPanel currentEmail={currentAdminEmail} staffRole={staffRole} />
+      </div>
     );
   }
 
@@ -988,6 +1093,10 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
 
           <div className="bg-[#0A1020] border border-[#162748] rounded-2xl p-5">
             <AttendancePanel drivers={drivers} />
+          </div>
+
+          <div className="bg-[#0A1020] border border-[#162748] rounded-2xl p-5">
+            <FleetControlPanel drivers={drivers} />
           </div>
         </div>
       </div>

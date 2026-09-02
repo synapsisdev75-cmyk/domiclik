@@ -32,6 +32,12 @@ import {
   Loader2,
 } from 'lucide-react';
 import { BRAND } from './brand/BrandAssets';
+import {
+  cartoRasterLeafletUrl,
+  createLeafletBasemapLayer,
+  mapBasemapAttribution,
+  type CartoRasterStyle,
+} from '../lib/cartoBasemaps';
 
 // Google Maps React SDK
 import { APIProvider, Map as GoogleMap, AdvancedMarker as GoogleAdvancedMarker, Pin } from '@vis.gl/react-google-maps';
@@ -64,14 +70,14 @@ interface MapComponentProps {
 
 const TILE_LAYERS: Record<MapStyleType, { url: string; attribution: string; name: string; icon: string; subdomains?: string }> = {
   dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    url: cartoRasterLeafletUrl('dark_all'),
+    attribution: mapBasemapAttribution('dark_all'),
     name: 'Noche Operativa',
     icon: '🌑',
   },
   google_map: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; CARTO Dark · DomiClick',
+    url: cartoRasterLeafletUrl('dark_nolabels'),
+    attribution: mapBasemapAttribution('dark_nolabels'),
     name: 'Radar Oscuro',
     icon: '🗺️',
   },
@@ -90,14 +96,14 @@ const TILE_LAYERS: Record<MapStyleType, { url: string; attribution: string; name
     subdomains: '0123',
   },
   cyber: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; CARTO',
+    url: cartoRasterLeafletUrl('dark_only_labels'),
+    attribution: mapBasemapAttribution('dark_only_labels'),
     name: 'Neon Labels',
     icon: '⚡',
   },
   light: {
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; CARTO',
+    url: cartoRasterLeafletUrl('light_all'),
+    attribution: mapBasemapAttribution('light_all'),
     name: 'Día',
     icon: '☀️',
   },
@@ -108,6 +114,24 @@ const TILE_LAYERS: Record<MapStyleType, { url: string; attribution: string; name
     icon: '📜',
   },
 };
+
+const CARTO_MAP_STYLES: Partial<Record<MapStyleType, CartoRasterStyle>> = {
+  dark: 'dark_all',
+  google_map: 'dark_nolabels',
+  cyber: 'dark_only_labels',
+  light: 'light_all',
+};
+
+function createMapTileLayer(style: MapStyleType): L.TileLayer {
+  const cartoStyle = CARTO_MAP_STYLES[style];
+  if (cartoStyle) return createLeafletBasemapLayer(cartoStyle);
+  const activeConfig = TILE_LAYERS[style];
+  return L.tileLayer(activeConfig.url, {
+    attribution: activeConfig.attribution,
+    maxZoom: 19,
+    subdomains: activeConfig.subdomains || 'abcd',
+  });
+}
 
 export const MapComponent: React.FC<MapComponentProps> = ({
   drivers,
@@ -214,12 +238,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       zoomControl: false,
     });
 
-    const activeConfig = TILE_LAYERS[currentStyle];
-    const initialLayer = L.tileLayer(activeConfig.url, {
-      attribution: activeConfig.attribution,
-      maxZoom: 19,
-      subdomains: activeConfig.subdomains || 'abcd',
-    }).addTo(map);
+    const initialLayer = createMapTileLayer(currentStyle).addTo(map);
 
     tileLayerRef.current = initialLayer;
     L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -245,12 +264,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       map.removeLayer(tileLayerRef.current);
     }
 
-    const activeConfig = TILE_LAYERS[currentStyle];
-    const newLayer = L.tileLayer(activeConfig.url, {
-      attribution: activeConfig.attribution,
-      maxZoom: 19,
-      subdomains: activeConfig.subdomains || 'abcd',
-    }).addTo(map);
+    const newLayer = createMapTileLayer(currentStyle).addTo(map);
 
     tileLayerRef.current = newLayer;
   }, [currentStyle]);

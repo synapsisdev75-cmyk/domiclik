@@ -3,6 +3,7 @@ import L from 'leaflet';
 import { MotorizadoDriver, DriverLocationHistoryPoint } from '../../types';
 import { fetchDriverLocationHistory, subscribeDriverLocationHistory } from '../../lib/firebase';
 import { VILLAVICENCIO_CENTER } from '../../data/villavicencio';
+import { createLeafletBasemapLayer } from '../../lib/cartoBasemaps';
 import {
   Calendar,
   Clock,
@@ -89,10 +90,7 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
       zoomControl: false,
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; CARTO',
-      maxZoom: 19,
-    }).addTo(map);
+    createLeafletBasemapLayer('dark_all').addTo(map);
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     mapInstanceRef.current = map;
