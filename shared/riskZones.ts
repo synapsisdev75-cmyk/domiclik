@@ -43,7 +43,7 @@ export const VILLAVICENCIO_RISK_ZONES: RiskZone[] = [
     reason: 'Microtráfico, hurto y violencia cerca de instituciones educativas (2026).',
     source: 'Diario del Sur / Seguridad al Barrio · ago 2026',
     polygon: box(4.136, -73.652, 0.011, 0.013),
-    serviceBlocked: true,
+    serviceBlocked: false,
   },
   {
     id: 'malvinas-c3',
@@ -53,7 +53,7 @@ export const VILLAVICENCIO_RISK_ZONES: RiskZone[] = [
     reason: 'Intervención focalizada por hurto y microtráfico — comuna priorizada.',
     source: 'Observatorio Seguridad Villavicencio · 2026',
     polygon: box(4.132, -73.645, 0.010, 0.012),
-    serviceBlocked: true,
+    serviceBlocked: false,
   },
   {
     id: 'porvenir-c7',
@@ -63,7 +63,7 @@ export const VILLAVICENCIO_RISK_ZONES: RiskZone[] = [
     reason: 'Mayor concentración de hurtos y capturas flagrancia — Consejo Seguridad 2026.',
     source: 'Secretaría de Gobierno Meta · 2026',
     polygon: box(4.122, -73.628, 0.014, 0.016),
-    serviceBlocked: true,
+    serviceBlocked: false,
   },
   {
     id: 'morichal-c7',
@@ -73,7 +73,7 @@ export const VILLAVICENCIO_RISK_ZONES: RiskZone[] = [
     reason: 'Operativos Plan Fastidio y patrullaje reforzado en 2026.',
     source: 'Alcaldía Villavicencio · Seguridad al Barrio',
     polygon: box(4.156, -73.618, 0.009, 0.011),
-    serviceBlocked: true,
+    serviceBlocked: false,
   },
   {
     id: 'el-triunfo-c4',
@@ -83,7 +83,7 @@ export const VILLAVICENCIO_RISK_ZONES: RiskZone[] = [
     reason: 'Sector priorizado en mesas de seguridad departamental 2026.',
     source: 'Consejo Seguridad Departamental · 2026',
     polygon: box(4.154, -73.658, 0.011, 0.013),
-    serviceBlocked: true,
+    serviceBlocked: false,
   },
   {
     id: 'la-esmeralda-c5',
@@ -93,7 +93,7 @@ export const VILLAVICENCIO_RISK_ZONES: RiskZone[] = [
     reason: 'Comuna 5 — intervención integral Seguridad al Barrio.',
     source: 'Observatorio Seguridad · 2026',
     polygon: box(4.145, -73.672, 0.011, 0.012),
-    serviceBlocked: true,
+    serviceBlocked: false,
   },
   {
     id: 'brisas-c8',
@@ -103,7 +103,7 @@ export const VILLAVICENCIO_RISK_ZONES: RiskZone[] = [
     reason: 'Comuna 8 — puntos de intervención estratégica 2026.',
     source: 'Plan Villavo Somos Todos · 2026',
     polygon: box(4.112, -73.662, 0.013, 0.014),
-    serviceBlocked: true,
+    serviceBlocked: false,
   },
   {
     id: 'amarilo-sur',
@@ -113,7 +113,7 @@ export const VILLAVICENCIO_RISK_ZONES: RiskZone[] = [
     reason: 'Periferia sur — patrullaje mixto y controles nocturnos.',
     source: 'Mevil / MOSER · 2026',
     polygon: box(4.108, -73.595, 0.016, 0.018),
-    serviceBlocked: true,
+    serviceBlocked: false,
   },
   {
     id: 'catama-c6',
@@ -123,7 +123,7 @@ export const VILLAVICENCIO_RISK_ZONES: RiskZone[] = [
     reason: 'Reportes de hurto y recuperación de espacio público.',
     source: 'Seguridad al Barrio · 2026',
     polygon: box(4.128, -73.64, 0.009, 0.011),
-    serviceBlocked: true,
+    serviceBlocked: false,
   },
 ];
 
