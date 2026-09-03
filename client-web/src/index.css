@@ -259,3 +259,8 @@
   color: var(--domi-cyan);
   animation: domi-bot-blink 0.85s step-end infinite;
 }
+
+/* Safe area para barra de navegación inferior en móvil (notch / gesture bar) */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
