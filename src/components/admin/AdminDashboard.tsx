@@ -22,7 +22,6 @@ import { subscribeIncidents } from '../../lib/firebase';
 import type { OpsIncident } from '../../types';
 import { AlertTriangle } from 'lucide-react';
 
-import type { AdminSection } from './AdminSectionPanels';
 import type { StaffRole } from '../../types';
 
 interface AdminDashboardProps {
