@@ -56,7 +56,6 @@ export function sidebarSectionsFor(role: StaffRole): AdminSection[] {
       'flota',
       'envios',
       'incidentes',
-      'sectores',
       'rutas',
       'historial',
       'reportes',

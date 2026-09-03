@@ -6,6 +6,21 @@ import {
   categoryMatchesPlace,
   type PlaceCategory,
 } from './placeCategories';
+import {
+  extractStreetFromQuery,
+  foldText,
+  isStreetSearchQuery,
+  normalizeStreetQuery,
+  parseColombianAddress,
+  viaNumberInLabel,
+  viaTypeInLabel,
+} from '../../../shared/colombianAddress.ts';
+
+export {
+  extractStreetFromQuery,
+  isStreetSearchQuery,
+  normalizeStreetQuery,
+} from '../../../shared/colombianAddress.ts';
 
 type NamedPlace = {
   label: string;
@@ -326,10 +341,7 @@ export const VILLAVICENCIO_PLACES: Array<{
 ];
 
 function fold(s: string) {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+  return foldText(s);
 }
 
 const STOP_WORDS = new Set([
@@ -351,65 +363,6 @@ const STOP_WORDS = new Set([
 ]);
 
 const GENERIC_KINDS = new Set(['calle / avenida', 'direccion', 'dirección', 'lugar', 'negocio']);
-
-const STREET_WORDS = new Set([
-  'calle',
-  'carrera',
-  'avenida',
-  'diagonal',
-  'transversal',
-  'travesia',
-  'circunvalar',
-  'cl',
-  'cra',
-  'cr',
-  'kr',
-  'av',
-  'ak',
-  'dg',
-  'diag',
-  'trans',
-  'trv',
-  'tv',
-]);
-
-const STREET_ABBREV: Array<[RegExp, string]> = [
-  [/\bcl\.?\b/gi, 'calle'],
-  [/\bcra\.?\b/gi, 'carrera'],
-  [/\bcr\.?\b/gi, 'carrera'],
-  [/\bkr\.?\b/gi, 'carrera'],
-  [/\bav\.?\b/gi, 'avenida'],
-  [/\bak\.?\b/gi, 'avenida'],
-  [/\bdg\.?\b/gi, 'diagonal'],
-  [/\bdiag\.?\b/gi, 'diagonal'],
-  [/\btrans\.?\b/gi, 'transversal'],
-  [/\btrv\.?\b/gi, 'travesia'],
-  [/\btv\.?\b/gi, 'travesia'],
-];
-
-export function normalizeStreetQuery(query: string): string {
-  let q = query.trim();
-  for (const [re, rep] of STREET_ABBREV) q = q.replace(re, rep);
-  return q.replace(/\s+/g, ' ').trim();
-}
-
-/** Quita ciudad / departamento cuando el usuario pega una dirección completa. */
-export function extractStreetFromQuery(query: string): string {
-  return normalizeStreetQuery(query)
-    .replace(/,?\s*villavicencio\b[\s,].*$/i, '')
-    .replace(/,?\s*meta\b[\s,].*$/i, '')
-    .replace(/,?\s*colombia\b\s*$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-export function isStreetSearchQuery(query: string): boolean {
-  const raw = fold(query.trim());
-  if (/\b(cl|cra|cr|kr|av|ak|dg|diag|trans|trv|tv)\b/.test(raw)) return true;
-  if (/\d+\s*[-#]\s*\d+/.test(raw)) return true;
-  const q = fold(normalizeStreetQuery(query));
-  return /\b(calle|carrera|avenida|diagonal|transversal|travesia|circunvalar)\b/.test(q);
-}
 
 export function parseSearchTokens(query: string): string[] {
   return fold(query.trim())
@@ -449,16 +402,16 @@ export function matchesSearchAnchor(
   );
 
   if (streetQuery) {
-    const numTokens = tokens.filter((t) => /\d/.test(t));
-    const typeTokens = tokens.filter((t) => STREET_WORDS.has(t));
-    const labelMatch = (t: string) => labelHay.includes(t);
+    const parsed = parseColombianAddress(query);
+    const hay = `${labelHay} ${fullHay}`;
+    if (parsed.namedWay && hay.includes(fold(parsed.namedWay))) return true;
     const typeOk =
-      !typeTokens.length ||
-      typeTokens.some((t) => labelMatch(t) || (t.length >= 3 && labelHay.includes(t)));
+      !parsed.viaType || viaTypeInLabel(labelHay, parsed.viaType) || viaTypeInLabel(fullHay, parsed.viaType);
     const numOk =
-      !numTokens.length || numTokens.every((n) => labelHay.includes(n) || fullHay.includes(n));
-    if (typeOk && numOk) return true;
-    return false;
+      !parsed.viaNumber ||
+      viaNumberInLabel(labelHay, parsed.viaNumber) ||
+      viaNumberInLabel(fullHay, parsed.viaNumber);
+    return typeOk && numOk;
   }
 
   const anchor = tokens[0];
@@ -503,33 +456,42 @@ function scorePlace(place: NamedPlace, query: string): number {
   return 40 + labelMatches * 20 + hayMatches * 5;
 }
 
+const CITY_CENTER = { lat: 4.142, lng: -73.6266 };
+
+function distKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function pickStreetPoint(places: NamedPlace[]): NamedPlace {
+  const nearby = places.filter((p) => distKm(p, CITY_CENTER) <= 12);
+  const pool = nearby.length ? nearby : places;
+  return pool.reduce((best, p) => (distKm(p, CITY_CENTER) < distKm(best, CITY_CENTER) ? p : best));
+}
+
 function scoreStreet(place: NamedPlace, query: string): number {
-  const streetPart = extractStreetFromQuery(query);
-  const q = fold(streetPart);
-  const tokens = parseSearchTokens(q);
-  if (!tokens.length) return 0;
-
+  const parsed = parseColombianAddress(query);
   const label = fold(normalizeStreetQuery(place.label));
-  const numTokens = tokens.filter((t) => /\d/.test(t));
-  const typeTokens = tokens.filter((t) => STREET_WORDS.has(t));
 
-  const typeOk =
-    !typeTokens.length ||
-    typeTokens.some((t) => {
-      if (label.includes(t)) return true;
-      if (t === 'carrera' && /\bcarrera\b|\bcra\b|\bcr\b/.test(label)) return true;
-      if (t === 'calle' && /\bcalle\b|\bcl\b/.test(label)) return true;
-      if (t === 'avenida' && /\bavenida\b|\bav\b|\bak\b/.test(label)) return true;
-      return t.length >= 3 && label.includes(t);
-    });
-  const numOk = !numTokens.length || numTokens.every((n) => label.includes(n));
-  if (!typeOk || !numOk) return 0;
+  if (parsed.namedWay) {
+    if (!label.includes(fold(parsed.namedWay))) return 0;
+    return 100;
+  }
+  if (!parsed.viaType || !parsed.viaNumber) return 0;
+  if (!viaTypeInLabel(label, parsed.viaType)) return 0;
+  if (!viaNumberInLabel(label, parsed.viaNumber)) return 0;
 
-  if (label === q) return 130;
-  if (label.startsWith(q)) return 120;
-  if (numTokens.length && typeTokens.length) return 110;
-  if (numTokens.length) return 95;
-  return 70;
+  const viaFold = fold(parsed.displayVia);
+  if (label === viaFold) return 130;
+  if (label.startsWith(viaFold)) return 120;
+  if (parsed.cardinal && label.includes(parsed.cardinal)) return 115;
+  return 105;
 }
 
 function foldStreetLabel(label: string): string {
@@ -577,14 +539,13 @@ const BUSINESS_INDEX: NamedPlace[] = (businesses.places as NamedPlace[]).map((p)
 const LOCAL_POOL: NamedPlace[] = [...VILLAVICENCIO_PLACES, ...BUSINESS_INDEX, ...MAP_INDEX];
 
 function searchLocalStreets(query: string): PlaceSuggestion[] {
-  const streetPart = extractStreetFromQuery(query);
-  const q = fold(streetPart);
-  if (q.length < 2) return [];
+  const parsed = parseColombianAddress(query);
+  if (!parsed.isStreet) return [];
 
   const groups = new Map<string, { places: NamedPlace[]; score: number; i: number }>();
 
   STREET_INDEX.forEach((place, i) => {
-    const score = scoreStreet(place, streetPart);
+    const score = scoreStreet(place, query);
     if (!score) return;
     const key = foldStreetLabel(place.label);
     const group = groups.get(key);
@@ -598,19 +559,17 @@ function searchLocalStreets(query: string): PlaceSuggestion[] {
 
   return [...groups.values()]
     .sort((a, b) => b.score - a.score || a.i - b.i)
-    .slice(0, 20)
+    .slice(0, 12)
     .map(({ places }) => {
-      const lat = places.reduce((sum, p) => sum + p.lat, 0) / places.length;
-      const lng = places.reduce((sum, p) => sum + p.lng, 0) / places.length;
-      const label = places[0].label;
+      const point = pickStreetPoint(places);
       return {
-        id: `street-${foldStreetLabel(label)}`,
-        label,
-        secondary: places[0].secondary,
-        kind: places[0].kind,
+        id: `street-${foldStreetLabel(point.label)}`,
+        label: point.label,
+        secondary: point.secondary,
+        kind: 'Calle / avenida',
         source: 'local' as const,
-        lat,
-        lng,
+        lat: point.lat,
+        lng: point.lng,
       };
     });
 }
@@ -619,7 +578,9 @@ export function searchLocalPlaces(query: string): PlaceSuggestion[] {
   const q = fold(query.trim());
   if (q.length < 2) return [];
 
-  if (isStreetSearchQuery(query)) {
+  const parsed = parseColombianAddress(query);
+  if (parsed.isStreet) {
+    if (parsed.hasComplement) return [];
     return searchLocalStreets(query);
   }
 

@@ -54,7 +54,6 @@ import {
 } from '../ui/CustomIcons';
 import { openMapWallWindow } from './MapWallScreen';
 import { MapWallVideoPanel } from './MapWallVideoPanel';
-import { RiskSectorMapPanel } from './RiskSectorMapPanel';
 import { SecretariatPanel } from './SecretariatPanel';
 import { SecretaryChatsPanel } from './SecretaryChatsPanel';
 import { canAccessSection, staffCan } from '../../lib/staffAccess';
@@ -729,18 +728,6 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             ))}
           </div>
         )}
-      </div>
-    );
-  }
-
-  if (section === 'sectores') {
-    return (
-      <div className="space-y-5">
-        <SectionHeader
-          title="Sectores de riesgo"
-          subtitle="Mapa operativo 2026 · incidentes + zonas sin cobertura al cliente"
-        />
-        <RiskSectorMapPanel incidents={incidents} />
       </div>
     );
   }

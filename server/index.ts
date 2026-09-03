@@ -12,7 +12,6 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
-import { isServiceBlockedAt, SERVICE_BLOCKED_MESSAGE } from '../shared/riskZones.ts';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -107,17 +106,6 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
     const deliveryLng = Number(body.deliveryLng);
     const hasPickup = Number.isFinite(pickupLat) && Number.isFinite(pickupLng);
     const hasDelivery = Number.isFinite(deliveryLat) && Number.isFinite(deliveryLng);
-
-    if (
-      (hasPickup && isServiceBlockedAt(pickupLat, pickupLng)) ||
-      (hasDelivery && isServiceBlockedAt(deliveryLat, deliveryLng))
-    ) {
-      return res.status(403).json({
-        ok: false,
-        error: SERVICE_BLOCKED_MESSAGE,
-        code: 'ZONE_BLOCKED',
-      });
-    }
 
     const orderId = 'ord_' + Date.now();
     const trackingCode = 'DMC-' + Math.floor(1000 + Math.random() * 9000);

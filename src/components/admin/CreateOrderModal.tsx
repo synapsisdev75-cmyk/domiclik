@@ -197,7 +197,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
             accent="delivery"
             required
             value={deliveryAddress}
-            placeholder="Negocio, barrio o dirección…"
+            placeholder="Calle, carrera, avenida o lugar…"
             onQueryChange={setDeliveryAddress}
             onPlacePicked={(hit) => {
               setDeliveryAddress(hit.label);

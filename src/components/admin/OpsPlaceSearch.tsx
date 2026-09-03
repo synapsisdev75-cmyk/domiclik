@@ -2,6 +2,10 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, MapPin, Search } from 'lucide-react';
 import { VILLAVICENCIO_CENTER } from '../../data/villavicencio';
+import {
+  formatColombianGeocodeQueries,
+  isStreetSearchQuery,
+} from '../../../shared/colombianAddress.ts';
 
 export type OpsPlaceHit = { label: string; lat: number; lng: number };
 
@@ -119,11 +123,49 @@ async function textSearch(q: string): Promise<Suggestion[]> {
   });
 }
 
+async function geocodeStreets(q: string): Promise<Suggestion[]> {
+  const g = (window as unknown as { google?: typeof google }).google?.maps;
+  if (!g?.Geocoder) return [];
+  const geo = new g.Geocoder();
+  const queries = formatColombianGeocodeQueries(q).slice(0, 2);
+  const batches = await Promise.all(
+    queries.map(async (address) => {
+      try {
+        const res = await geo.geocode({
+          address,
+          componentRestrictions: { country: 'CO' },
+        });
+        return (res.results || []).slice(0, 6).map((r) => {
+          const loc = r.geometry.location;
+          return {
+            id: `gc-${r.place_id}`,
+            placeId: r.place_id,
+            label: r.formatted_address || q,
+            secondary: 'Villavicencio, Meta',
+            kind: r.types?.includes('route') ? 'Calle / avenida' : 'Dirección',
+            lat: loc.lat(),
+            lng: loc.lng(),
+          } satisfies Suggestion;
+        });
+      } catch {
+        return [] as Suggestion[];
+      }
+    }),
+  );
+  return batches.flat();
+}
+
 async function searchGoogle(q: string): Promise<Suggestion[]> {
-  const [textHits, autoHits] = await Promise.all([textSearch(q), predict(q)]);
+  const street = isStreetSearchQuery(q);
+  const [textHits, autoHits, geoHits] = await Promise.all([
+    street ? Promise.resolve([] as Suggestion[]) : textSearch(q),
+    predict(q),
+    geocodeStreets(q),
+  ]);
   const seen = new Set<string>();
   const out: Suggestion[] = [];
-  for (const hit of [...textHits, ...autoHits]) {
+  const ordered = street ? [...geoHits, ...autoHits, ...textHits] : [...textHits, ...autoHits, ...geoHits];
+  for (const hit of ordered) {
     const key = hit.placeId || hit.label;
     if (seen.has(key)) continue;
     seen.add(key);

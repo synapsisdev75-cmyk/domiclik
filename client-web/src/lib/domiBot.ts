@@ -112,7 +112,7 @@ const INTENTS: Intent[] = [
     ],
     reply: () => ({
       text:
-        'Operamos en Villavicencio (Meta) y zonas aledañas. Si tu dirección queda lejos del centro o en un sector nuevo, escribe a Central antes de solicitar para confirmar cobertura y tiempo estimado.',
+        'Operamos en Villavicencio (Meta) y zonas aledañas. Escribe calle, carrera, avenida o el nombre del lugar; el mapa ubica el punto y calcula la ruta.',
       suggestions: ['¿Cómo solicito?', 'WhatsApp', 'Horarios'],
     }),
   },

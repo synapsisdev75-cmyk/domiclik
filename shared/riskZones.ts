@@ -160,17 +160,14 @@ export function findRiskZoneAt(lat: number, lng: number): RiskZone | null {
   return best;
 }
 
-export function findBlockedZoneAt(lat: number, lng: number): RiskZone | null {
-  const zone = findRiskZoneAt(lat, lng);
-  return zone?.serviceBlocked ? zone : null;
+export function findBlockedZoneAt(_lat: number, _lng: number): RiskZone | null {
+  return null;
 }
 
-export function isServiceBlockedAt(lat: number, lng: number): boolean {
-  return findBlockedZoneAt(lat, lng) != null;
+export function isServiceBlockedAt(_lat: number, _lng: number): boolean {
+  return false;
 }
 
-export function assertServiceAllowedAt(lat: number, lng: number): void {
-  if (isServiceBlockedAt(lat, lng)) {
-    throw new Error(SERVICE_BLOCKED_MESSAGE);
-  }
+export function assertServiceAllowedAt(_lat: number, _lng: number): void {
+  /* Cobertura por sectores retirada: el mapa solo marca recolección y entrega. */
 }
