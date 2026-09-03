@@ -6,7 +6,6 @@ import {
   isGoogleOAuthReturn,
   describeAuthError,
   saveLoginRole,
-  clearLoginRole,
   readLoginRole,
 } from '../../lib/googleAuth';
 import {
@@ -229,7 +228,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         if (cancelled) return;
         if (user?.email) {
           const saved = (readLoginRole() as LoginRole) || role;
-          clearLoginRole();
           clearAuthQueryParams();
           onLoginSuccess(user.email, saved);
           return;
@@ -250,7 +248,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         try {
           const user = await startGoogleSignInRedirect();
           if (user?.email) {
-            clearLoginRole();
             onLoginSuccess(user.email, role);
           }
         } catch (err: unknown) {
@@ -321,9 +318,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     try {
       const user = await startGoogleSignInRedirect();
       if (user?.email) {
-        // Dejar el rol guardado hasta que App lea onAuthStateChanged / onLoginSuccess
+        // Dejar el rol guardado hasta que App lea onAuthStateChanged
         onLoginSuccess(user.email, role);
-        clearLoginRole();
         return;
       }
       // Redirect en curso: googleBusy se mantiene hasta el retorno

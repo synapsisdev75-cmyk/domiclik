@@ -71,6 +71,7 @@ import {
   getAttendancePinExpiresAt,
 } from './attendance';
 import { calcShiftFuel, DEFAULT_FLEET_SETTINGS } from './motoFuel';
+import { findStaffAccount } from './staffAccount';
 
 const firebaseConfig = getFirebaseConfig();
 
@@ -1817,6 +1818,17 @@ export function subscribeAdmins(callback: (admins: AdminAccount[]) => void) {
     collection(db, 'admins'),
     { includeMetadataChanges: true },
     (snapshot) => {
+      // La caché en memoria arranca vacía: no publicar [] ni marcar “listo”
+      // o el login admin se queda en “pendiente” un instante (o para siempre).
+      if (snapshot.metadata.fromCache && snapshot.empty) {
+        emitSync({
+          collection: 'admins',
+          fromCache: true,
+          hasPendingWrites: snapshot.metadata.hasPendingWrites,
+          live: false,
+        });
+        return;
+      }
       const list: AdminAccount[] = [];
       snapshot.forEach((docSnap) => {
         list.push({ id: docSnap.id, ...docSnap.data() } as AdminAccount);
@@ -1853,6 +1865,25 @@ export async function requestAdminAccess(params: {
   return requestStaffAccess({ ...params, role: 'admin' });
 }
 
+async function patchStaffDoc(
+  id: string,
+  acc: AdminAccount,
+  params: { email: string; uid?: string; displayName?: string }
+): Promise<AdminAccount> {
+  const refDoc = doc(db, 'admins', id);
+  const patch: Partial<AdminAccount> = {
+    email: params.email,
+    displayName: params.displayName || acc.displayName || params.email,
+  };
+  if (params.uid) patch.uid = params.uid;
+  try {
+    await updateDoc(refDoc, patch);
+  } catch (err) {
+    console.warn('[admin] no se pudo actualizar ficha de torre; se usa la existente', err);
+  }
+  return { ...acc, ...patch, id };
+}
+
 /** Login/registro de personal de torre (admin o secretaría). */
 export async function requestStaffAccess(params: {
   email: string;
@@ -1863,23 +1894,36 @@ export async function requestStaffAccess(params: {
   const email = params.email.trim().toLowerCase();
   const id = adminDocId(email);
   const refDoc = doc(db, 'admins', id);
+
+  let all: AdminAccount[] = [];
+  try {
+    all = await listAdminsOnce();
+  } catch (err) {
+    console.warn('[admin] listAdminsOnce', err);
+  }
+
+  const known = findStaffAccount(all, email, params.uid);
+  if (known) {
+    return patchStaffDoc(known.id, known, {
+      email,
+      uid: params.uid,
+      displayName: params.displayName,
+    });
+  }
+
   const existing = await getDoc(refDoc);
-  const all = await listAdminsOnce();
+  if (existing.exists()) {
+    return patchStaffDoc(id, { id, ...existing.data() } as AdminAccount, {
+      email,
+      uid: params.uid,
+      displayName: params.displayName,
+    });
+  }
+
   const hasActiveAdmin = all.some(
     (a) => a.status === 'active' && (a.role === 'admin' || !a.role)
   );
   const now = new Date().toISOString();
-
-  if (existing.exists()) {
-    const acc = { id, ...existing.data() } as AdminAccount;
-    const patch: Partial<AdminAccount> = {
-      email,
-      displayName: params.displayName || acc.displayName || email,
-    };
-    if (params.uid) patch.uid = params.uid;
-    await updateDoc(refDoc, patch);
-    return { ...acc, ...patch };
-  }
 
   if (params.role === 'secretary') {
     const acc: AdminAccount = {

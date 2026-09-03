@@ -46,7 +46,7 @@ import {
   safeSetItem,
   safeLocalStorage,
 } from './lib/safeStorage';
-import { staffRoleOf, canAccessSection } from './lib/staffAccess';
+import { staffRoleOf, canAccessSection, findStaffAccount } from './lib/staffAccess';
 
 function SessionLoading({ message }: { message: string }) {
   return (
@@ -358,30 +358,32 @@ function MainApp() {
       });
   }, []);
 
-  const myAdmin = adminAccounts.find(
-    (a) => currentUserEmail && a.email.toLowerCase() === currentUserEmail.toLowerCase()
+  const myAdmin = findStaffAccount(
+    adminAccounts,
+    currentUserEmail,
+    auth.currentUser?.uid
   );
   const isActiveStaff = myAdmin?.status === 'active';
   const staffRole = staffRoleOf(myAdmin);
   const isSecretary = staffRole === 'secretary';
+  const wantsTowerRole =
+    requestedRole === 'admin' ||
+    requestedRole === 'pending_admin' ||
+    requestedRole === 'secretary' ||
+    requestedRole === 'pending_secretary' ||
+    currentRole === 'admin' ||
+    currentRole === 'pending_admin' ||
+    currentRole === 'secretary' ||
+    currentRole === 'pending_secretary';
+  // Solo “pendiente” cuando Firestore ya confirmó la ficha. currentRole=pending_admin
+  // es el estado inicial y NO debe bloquear a un admin activo.
   const adminPending =
-    !isSecretary &&
-    (currentRole === 'pending_admin' ||
-      (currentRole === 'admin' && myAdmin?.status === 'pending'));
+    !isSecretary && wantsTowerRole && myAdmin?.status === 'pending';
   const secretaryPending =
-    isSecretary &&
-    (currentRole === 'pending_secretary' ||
-      (currentRole === 'secretary' && myAdmin?.status === 'pending'));
+    isSecretary && wantsTowerRole && myAdmin?.status === 'pending';
   const towerBootstrapping =
     isAuthenticated &&
-    (requestedRole === 'admin' ||
-      requestedRole === 'pending_admin' ||
-      requestedRole === 'secretary' ||
-      requestedRole === 'pending_secretary' ||
-      currentRole === 'admin' ||
-      currentRole === 'pending_admin' ||
-      currentRole === 'secretary' ||
-      currentRole === 'pending_secretary') &&
+    wantsTowerRole &&
     !isActiveStaff &&
     !adminPending &&
     !secretaryPending &&
@@ -403,7 +405,7 @@ function MainApp() {
         if (cancelled) return;
         // Evita carrera: el snapshot de admins aún no incluye al usuario recién escrito.
         setAdminAccounts((prev) => {
-          const rest = prev.filter((a) => a.id !== acc.id && a.email.toLowerCase() !== acc.email.toLowerCase());
+          const rest = prev.filter((a) => a.id !== acc.id);
           return [acc, ...rest];
         });
         setRequestedRole('admin');
@@ -435,7 +437,7 @@ function MainApp() {
       .then((acc) => {
         if (cancelled) return;
         setAdminAccounts((prev) => {
-          const rest = prev.filter((a) => a.id !== acc.id && a.email.toLowerCase() !== acc.email.toLowerCase());
+          const rest = prev.filter((a) => a.id !== acc.id);
           return [acc, ...rest];
         });
         setRequestedRole('secretary');
@@ -636,8 +638,7 @@ function MainApp() {
     return <SessionLoading message="Preparando tu acceso a la torre de control…" />;
   }
 
-  const isTowerActive =
-    isActiveStaff && (currentRole === 'admin' || currentRole === 'secretary');
+  const isTowerActive = isActiveStaff;
 
   return (
     <div className="min-h-screen bg-[#05080f] text-[#e8eef9] flex flex-col font-sans selection:bg-[#FF5722] selection:text-white">
@@ -652,17 +653,21 @@ function MainApp() {
         onSelectRole={undefined}
         canAccessAdmin={isActiveStaff && !isSecretary}
         roleLabel={
-          currentRole === 'admin'
+          isActiveStaff && !isSecretary
             ? 'Admin Operador'
-            : currentRole === 'secretary'
+            : isActiveStaff && isSecretary
               ? 'Secretaría'
-              : currentRole === 'pending_admin'
-                ? 'Admin pendiente'
-                : currentRole === 'pending_secretary'
-                  ? 'Secretaría pendiente'
-                  : currentRole === 'driver'
-                    ? activeApprovedDriver?.fullName || 'Transportista'
-                    : 'Preregistro'
+              : currentRole === 'admin'
+                ? 'Admin Operador'
+                : currentRole === 'secretary'
+                  ? 'Secretaría'
+                  : currentRole === 'pending_admin'
+                    ? 'Admin pendiente'
+                    : currentRole === 'pending_secretary'
+                      ? 'Secretaría pendiente'
+                      : currentRole === 'driver'
+                        ? activeApprovedDriver?.fullName || 'Transportista'
+                        : 'Preregistro'
         }
         compact={isDriverCabin}
         hideRoleMenu
@@ -709,8 +714,9 @@ function MainApp() {
 
           {secretaryPending && <PendingSecretaryPanel email={currentUserEmail} />}
 
-          {(currentRole === 'admin' || currentRole === 'secretary') &&
-            !isActiveStaff &&
+          {isAuthenticated &&
+            wantsTowerRole &&
+            !isTowerActive &&
             !adminPending &&
             !secretaryPending && (
             <SessionLoading message="Verificando permisos de torre…" />
