@@ -2,6 +2,10 @@ import { ROAD_FACTOR } from './pricing';
 import { GOOGLE_MAPS_API_KEY } from './config';
 import { searchLocalPlaces, matchesSearchAnchor, isStreetSearchQuery, extractStreetFromQuery, dedupeStreetSuggestions, streetSuggestionKey } from './villavicencioPlaces';
 import {
+  formatColombianGeocodeQueries,
+  parseColombianAddress,
+} from '../../../shared/colombianAddress.ts';
+import {
   resolvePlaceCategory,
   categorySearchQuery,
   categoryMatchesPlace,
@@ -154,15 +158,9 @@ async function predictGoogle(
           const request: google.maps.places.AutocompletionRequest = {
             input,
             componentRestrictions: { country: 'co' },
-            locationRestriction: {
-              west: VILLAVICENCIO_MAP_BOUNDS.west,
-              south: VILLAVICENCIO_MAP_BOUNDS.south,
-              east: VILLAVICENCIO_MAP_BOUNDS.east,
-              north: VILLAVICENCIO_MAP_BOUNDS.north,
-            },
             locationBias: {
               center: VILLAVICENCIO_CENTER,
-              radius: 22000,
+              radius: 28000,
             },
           };
           if (streetQuery) {
@@ -248,41 +246,51 @@ async function geocodeGoogle(q: string): Promise<PlaceSuggestion[]> {
   const g = (window as unknown as { google?: typeof google }).google?.maps;
   if (!g?.Geocoder) return [];
   const geo = new g.Geocoder();
-  const streetPart = isStreetSearchQuery(q) ? extractStreetFromQuery(q) : q;
-  try {
-    const res = await geo.geocode({
-      address: `${streetPart}, Villavicencio, Meta, Colombia`,
-      componentRestrictions: { country: 'CO' },
-      bounds: {
-        north: VILLAVICENCIO_MAP_BOUNDS.north,
-        south: VILLAVICENCIO_MAP_BOUNDS.south,
-        east: VILLAVICENCIO_MAP_BOUNDS.east,
-        west: VILLAVICENCIO_MAP_BOUNDS.west,
-      },
-    });
-    return (res.results || [])
-      .filter((r) => {
-        const loc = r.geometry.location;
-        return isWithinServiceArea(loc.lat(), loc.lng());
-      })
-      .slice(0, 8)
-      .map((r) => {
-      const loc = r.geometry.location;
-      return {
-        id: `gc-${r.place_id}`,
-        placeId: r.place_id,
-        label: r.formatted_address || q,
-        secondary: r.formatted_address || 'Villavicencio, Meta',
-        kind: 'Dirección',
-        source: 'google' as const,
-        lat: loc.lat(),
-        lng: loc.lng(),
-      };
-    });
-  } catch (err) {
-    console.warn('[DomiClick] Geocoder', err);
-    return [];
-  }
+  const queries = formatColombianGeocodeQueries(q).slice(0, 3);
+  const batches = await Promise.all(
+    queries.map(async (address) => {
+      try {
+        const res = await geo.geocode({
+          address,
+          componentRestrictions: { country: 'CO' },
+          bounds: {
+            north: VILLAVICENCIO_MAP_BOUNDS.north,
+            south: VILLAVICENCIO_MAP_BOUNDS.south,
+            east: VILLAVICENCIO_MAP_BOUNDS.east,
+            west: VILLAVICENCIO_MAP_BOUNDS.west,
+          },
+        });
+        return (res.results || [])
+          .filter((r) => {
+            const loc = r.geometry.location;
+            return isWithinServiceArea(loc.lat(), loc.lng());
+          })
+          .map((r) => {
+            const loc = r.geometry.location;
+            const types = r.types || [];
+            const kind = types.includes('street_address') || types.includes('premise')
+              ? 'Dirección'
+              : types.includes('route')
+                ? 'Calle / avenida'
+                : 'Dirección';
+            return {
+              id: `gc-${r.place_id}`,
+              placeId: r.place_id,
+              label: r.formatted_address || q,
+              secondary: r.formatted_address || 'Villavicencio, Meta',
+              kind,
+              source: 'google' as const,
+              lat: loc.lat(),
+              lng: loc.lng(),
+            } satisfies PlaceSuggestion;
+          });
+      } catch (err) {
+        console.warn('[DomiClick] Geocoder', err);
+        return [] as PlaceSuggestion[];
+      }
+    }),
+  );
+  return mergeSuggestions(batches, q);
 }
 
 function placeDisplayName(value: unknown): string {
@@ -375,24 +383,41 @@ function inServiceAreaHit(hit: PlaceSuggestion): boolean {
 function mergeSuggestions(groups: PlaceSuggestion[][], query?: string): PlaceSuggestion[] {
   const category = query ? resolvePlaceCategory(query) : null;
   const streetQuery = query ? isStreetSearchQuery(query) : null;
-  const limit = category ? 12 : streetQuery ? 20 : 10;
+  const parsed = query ? parseColombianAddress(query) : null;
+  const limit = category ? 12 : streetQuery ? 16 : 10;
   const seen = new Set<string>();
   const out: PlaceSuggestion[] = [];
-  for (const group of groups) {
-    for (const hit of group) {
-      if (!inServiceAreaHit(hit)) continue;
-      if (query && !matchesSearchAnchor(hit, query)) continue;
-      const key = streetQuery && (hit.kind === 'Calle / avenida' || hit.kind === 'Dirección')
+  const ranked = groups.flat().filter((hit) => {
+    if (!inServiceAreaHit(hit)) return false;
+    if (query && !matchesSearchAnchor(hit, query)) return false;
+    return true;
+  });
+  ranked.sort((a, b) => suggestionRank(b, parsed) - suggestionRank(a, parsed));
+  for (const hit of ranked) {
+    const key =
+      streetQuery && (hit.kind === 'Calle / avenida' || hit.kind === 'Dirección')
         ? streetSuggestionKey(hit.label)
         : foldKey(`${hit.label} ${hit.lat?.toFixed(4) || ''} ${hit.lng?.toFixed(4) || ''}`);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      out.push(hit);
-      if (out.length >= limit) break;
-    }
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(hit);
     if (out.length >= limit) break;
   }
   return out;
+}
+
+function suggestionRank(
+  hit: PlaceSuggestion,
+  parsed: ReturnType<typeof parseColombianAddress> | null,
+): number {
+  let score = 0;
+  if (hit.source === 'google') score += 20;
+  if (hit.source === 'local') score += 8;
+  if (hit.lat != null && hit.lng != null) score += 10;
+  if (parsed?.hasComplement && hit.kind === 'Dirección') score += 40;
+  if (parsed?.isStreet && hit.kind === 'Calle / avenida') score += 12;
+  if (!parsed?.isStreet && hit.kind !== 'Calle / avenida' && hit.kind !== 'Dirección') score += 15;
+  return score;
 }
 
 async function searchPhoton(query: string): Promise<PlaceSuggestion[]> {
@@ -466,48 +491,53 @@ async function searchPhoton(query: string): Promise<PlaceSuggestion[]> {
 }
 
 async function searchNominatimSuggestions(query: string): Promise<PlaceSuggestion[]> {
-  const normalized = extractStreetFromQuery(query);
-  const url =
-    'https://nominatim.openstreetmap.org/search?' +
-    new URLSearchParams({
-      q: `${normalized}, Villavicencio, Meta, Colombia`,
-      format: 'json',
-      limit: '15',
-      countrycodes: 'co',
-      addressdetails: '1',
-    });
-  try {
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
-    if (!res.ok) return [];
-    const data = (await res.json()) as Array<{
-      lat: string;
-      lon: string;
-      display_name: string;
-      class?: string;
-      type?: string;
-      address?: { road?: string; suburb?: string; city?: string };
-    }>;
-    return (data || [])
-      .map((row) => {
-        const lat = Number(row.lat);
-        const lng = Number(row.lon);
-        if (!isWithinServiceArea(lat, lng)) return null;
-        const road = row.address?.road;
-        const label = road || row.display_name.split(',')[0] || normalized;
-        return {
-          id: `nom-${row.lon}-${row.lat}-${label}`,
-          label,
-          secondary: row.display_name.replace(/^[^,]+,?\s*/, '') || 'Villavicencio, Meta',
-          kind: nominatimKind(row.class, row.type),
-          source: 'nominatim' as const,
-          lat,
-          lng,
-        };
-      })
-      .filter(Boolean) as PlaceSuggestion[];
-  } catch {
-    return [];
-  }
+  const queries = formatColombianGeocodeQueries(query).slice(0, 2);
+  const batches = await Promise.all(
+    queries.map(async (q) => {
+      const url =
+        'https://nominatim.openstreetmap.org/search?' +
+        new URLSearchParams({
+          q,
+          format: 'json',
+          limit: '8',
+          countrycodes: 'co',
+          addressdetails: '1',
+        });
+      try {
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!res.ok) return [] as PlaceSuggestion[];
+        const data = (await res.json()) as Array<{
+          lat: string;
+          lon: string;
+          display_name: string;
+          class?: string;
+          type?: string;
+          address?: { road?: string; suburb?: string; city?: string };
+        }>;
+        return (data || [])
+          .map((row) => {
+            const lat = Number(row.lat);
+            const lng = Number(row.lon);
+            if (!isWithinServiceArea(lat, lng)) return null;
+            const road = row.address?.road;
+            const label = road || row.display_name.split(',')[0] || q;
+            return {
+              id: `nom-${row.lon}-${row.lat}-${label}`,
+              label,
+              secondary: row.display_name.replace(/^[^,]+,?\s*/, '') || 'Villavicencio, Meta',
+              kind: nominatimKind(row.class, row.type),
+              source: 'nominatim' as const,
+              lat,
+              lng,
+            };
+          })
+          .filter(Boolean) as PlaceSuggestion[];
+      } catch {
+        return [] as PlaceSuggestion[];
+      }
+    }),
+  );
+  return mergeSuggestions(batches, query);
 }
 
 export async function searchPlaceSuggestions(
@@ -518,7 +548,8 @@ export async function searchPlaceSuggestions(
   if (q.length < 2) return [];
 
   const streetQuery = isStreetSearchQuery(q);
-  const localHits = searchLocalPlaces(q);
+  const parsed = parseColombianAddress(q);
+  const localHits = parsed.hasComplement ? [] : searchLocalPlaces(q);
   const places = placesFromLib(placesLib);
   const googlePromise = places
     ? searchGooglePlaces(places, q).catch((err) => {
@@ -527,17 +558,18 @@ export async function searchPlaceSuggestions(
       })
     : geocodeGoogle(q).catch(() => [] as PlaceSuggestion[]);
 
-  const nominatimPromise = streetQuery
-    ? searchNominatimSuggestions(q).catch(() => [] as PlaceSuggestion[])
-    : Promise.resolve([] as PlaceSuggestion[]);
+  const nominatimPromise =
+    streetQuery || parsed.hasComplement
+      ? searchNominatimSuggestions(q).catch(() => [] as PlaceSuggestion[])
+      : Promise.resolve([] as PlaceSuggestion[]);
 
   const [googleHits, photonHits, nominatimHits] = await Promise.all([
     googlePromise,
     searchPhoton(q),
     nominatimPromise,
   ]);
-  const groups = streetQuery
-    ? [localHits, googleHits, nominatimHits, photonHits]
+  const groups = parsed.hasComplement
+    ? [googleHits, nominatimHits, photonHits, localHits]
     : [localHits, googleHits, nominatimHits, photonHits];
   return dedupeStreetSuggestions(mergeSuggestions(groups, q));
 }
@@ -604,24 +636,27 @@ function qSafe(q: string) {
 
 async function geocodeAddressNominatim(q: string): Promise<(LatLng & { label: string }) | null> {
   if (q.length < 3) return null;
-  const url =
-    'https://nominatim.openstreetmap.org/search?' +
-    new URLSearchParams({
-      q: `${q}, Villavicencio, Meta, Colombia`,
-      format: 'json',
-      limit: '8',
-      countrycodes: 'co',
+  const queries = formatColombianGeocodeQueries(q).slice(0, 2);
+  for (const address of queries) {
+    const url =
+      'https://nominatim.openstreetmap.org/search?' +
+      new URLSearchParams({
+        q: address,
+        format: 'json',
+        limit: '8',
+        countrycodes: 'co',
+      });
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
     });
-  const res = await fetch(url, {
-    headers: { Accept: 'application/json' },
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
-  for (const row of data || []) {
-    const lat = Number(row.lat);
-    const lng = Number(row.lon);
-    if (!isWithinServiceArea(lat, lng)) continue;
-    return { lat, lng, label: row.display_name };
+    if (!res.ok) continue;
+    const data = (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
+    for (const row of data || []) {
+      const lat = Number(row.lat);
+      const lng = Number(row.lon);
+      if (!isWithinServiceArea(lat, lng)) continue;
+      return { lat, lng, label: row.display_name };
+    }
   }
   return null;
 }

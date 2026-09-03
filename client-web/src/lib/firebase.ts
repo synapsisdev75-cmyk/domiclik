@@ -24,7 +24,6 @@ import {
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import fallback from '../firebase-applet-config.json' with { type: 'json' };
-import { assertServiceAllowedAt } from './riskZones';
 
 function env(key: string): string {
   try {
@@ -455,8 +454,6 @@ export async function resolveCouponDiscount(
  * Usado como canal principal/respaldo para que Central vea la solicitud en vivo.
  */
 export async function createClientOrder(input: ClientOrderInput) {
-  assertServiceAllowedAt(input.pickupLat, input.pickupLng);
-  assertServiceAllowedAt(input.deliveryLat, input.deliveryLng);
 
   const orderId = 'ord_' + Date.now();
   const trackingCode = 'DMC-' + Math.floor(1000 + Math.random() * 9000);

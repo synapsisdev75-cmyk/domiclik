@@ -1,6 +1,8 @@
 import type { StaffRole } from '../types';
 import type { AdminSection } from '../components/admin/AdminSectionPanels';
 
+export { findStaffAccount } from './staffAccount';
+
 /** Torre operativa de secretaría: pedidos, radios y pánico. */
 export const SECRETARY_SECTIONS: AdminSection[] = [
   'dashboard',
@@ -56,7 +58,6 @@ export function sidebarSectionsFor(role: StaffRole): AdminSection[] {
       'flota',
       'envios',
       'incidentes',
-      'sectores',
       'rutas',
       'historial',
       'reportes',

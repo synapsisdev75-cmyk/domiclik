@@ -1,4 +1,4 @@
-/* DomiClick PWA — v18: mapa sectores CARTO rastertiles */
+/* DomiClick PWA — v19: mapa operativo CARTO rastertiles */
 const CACHE = 'domiclick-v18-shell';
 const PRECACHE = [
   '/manifest.webmanifest',

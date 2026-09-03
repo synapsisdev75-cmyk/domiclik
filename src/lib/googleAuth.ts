@@ -15,12 +15,9 @@ function isMobileBrowser(): boolean {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
 
-/** En hosting real el popup de Google falla a menudo; redirect es más estable. */
+/** Móvil: redirect. Escritorio: popup (más fiable en ops.domiclick.com). */
 function preferRedirectFlow(): boolean {
-  if (isMobileBrowser()) return true;
-  if (typeof window === 'undefined') return true;
-  const host = window.location.hostname;
-  return host !== 'localhost' && host !== '127.0.0.1';
+  return isMobileBrowser();
 }
 
 function clearOAuthUrl() {
@@ -144,6 +141,7 @@ export async function startGoogleSignInRedirect() {
 
   try {
     const result = await signInWithPopup(auth, googleProvider);
+    clearRedirectPending();
     return result.user;
   } catch (err) {
     const code = (err as { code?: string })?.code || '';
