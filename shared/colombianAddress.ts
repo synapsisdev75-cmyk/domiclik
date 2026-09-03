@@ -202,6 +202,13 @@ export function formatColombianGeocodeQueries(query: string): string[] {
       const nomenclatura = hs ? `${cr}-${hs}` : cr;
       add(`${via} #${nomenclatura}, ${city}`);
       add(`${via} # ${nomenclatura}, ${city}`);
+      if (cr) {
+        const cruz =
+          parsed.viaType === 'carrera' || parsed.viaType === 'avenida'
+            ? `Calle ${cr}`
+            : `Carrera ${cr}`;
+        add(`${via} con ${cruz}, ${city}`);
+      }
     }
     add(`${via}, ${city}`);
   } else if (parsed.namedWay) {

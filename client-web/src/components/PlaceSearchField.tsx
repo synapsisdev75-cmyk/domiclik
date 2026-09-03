@@ -11,6 +11,7 @@ import {
   type PlaceSuggestion,
 } from '../lib/geo';
 import { searchLocalPlaces, dedupeStreetSuggestions } from '../lib/villavicencioPlaces';
+import { parseColombianAddress } from '../../../shared/colombianAddress.ts';
 
 function mergeInstantAndRemote(instant: PlaceSuggestion[], remote: PlaceSuggestion[]): PlaceSuggestion[] {
   return dedupeStreetSuggestions([...instant, ...remote]).slice(0, 20);
@@ -145,14 +146,28 @@ export function PlaceSearchField({
     setOpen(false);
     setFieldError(null);
     try {
-      const hit = await resolvePlaceSuggestion(item, placesLib || undefined);
+      const typed = value.trim();
+      const parsed = parseColombianAddress(typed);
+      // Si el usuario escribió nomenclatura (# 20-10) y eligió solo la vía, geocodifica la dirección completa.
+      const preferFullAddress =
+        parsed.hasComplement &&
+        (item.kind === 'Calle / avenida' || item.kind === 'Dirección') &&
+        !/#\s*\d/.test(item.label);
+      const hit = preferFullAddress
+        ? (await geocodeAddress(typed, placesLib || undefined)) ||
+          (await resolvePlaceSuggestion(item, placesLib || undefined))
+        : await resolvePlaceSuggestion(item, placesLib || undefined);
       if (!hit) {
         setFieldError(OUT_OF_AREA_MESSAGE);
         return;
       }
       skipSearch.current = true;
-      onQueryChange(hit.label);
-      onPlacePicked(hit);
+      onQueryChange(preferFullAddress && parsed.displayVia ? typed : hit.label);
+      onPlacePicked(
+        preferFullAddress
+          ? { ...hit, label: typed.includes('#') ? typed : hit.label }
+          : hit,
+      );
     } finally {
       setResolving(false);
     }
