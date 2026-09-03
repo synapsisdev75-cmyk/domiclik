@@ -17,7 +17,9 @@
     "deploy:rules": "npx firebase deploy --only firestore:rules,storage",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:address": "tsx scripts/test-address-search.ts",
+    "test:staff": "tsx scripts/test-staff-account.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

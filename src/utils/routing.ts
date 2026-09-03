@@ -348,7 +348,7 @@ function generateFallbackSteps(
       streetName: 'Avenida 40',
     },
     {
-      instruction: 'Continúa por el Anillo Vial hacia el sector de destino',
+      instruction: 'Continúa por el Anillo Vial hacia el destino',
       distanceMeters: Math.round(distanceKm * 450),
       durationSeconds: 220,
       iconName: 'straight',

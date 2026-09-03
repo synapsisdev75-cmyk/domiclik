@@ -68,7 +68,7 @@ export const VILLAVICENCIO_KEY_POINTS: VillavicencioPoint[] = [
     neighborhood: 'San Benito',
     lat: 4.1470,
     lng: -73.6380,
-    description: 'Sector céntrico tradicional',
+    description: 'Barrio céntrico tradicional',
   },
   {
     name: 'Amarilo / Llano Lindo',
