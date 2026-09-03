@@ -65,7 +65,6 @@ export type AdminSection =
   | 'flota'
   | 'envios'
   | 'incidentes'
-  | 'sectores'
   | 'rutas'
   | 'historial'
   | 'reportes'

@@ -84,9 +84,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const transitPct = totalOrders ? Math.round((transitOrders / totalOrders) * 100) : 0;
   const pendingPct = Math.max(0, 100 - deliveredPct - transitPct);
 
-  const currentSection = (
-    section === 'sectores' ? 'dashboard' : section || 'dashboard'
-  ) as AdminSection;
+  const currentSection = (section || 'dashboard') as AdminSection;
 
   useEffect(() => subscribeIncidents(setIncidents), []);
 

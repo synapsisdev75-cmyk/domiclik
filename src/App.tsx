@@ -109,7 +109,7 @@ export default function App() {
 
 function MainApp() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [currentRole, setCurrentRole] = useState<UserRole>('driver');
+  const [currentRole, setCurrentRole] = useState<UserRole>('pending_admin');
   const [activeSidebarTab, setActiveSidebarTab] = useState<string>('dashboard');
   const [drivers, setDrivers] = useState<MotorizadoDriver[]>([]);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
@@ -119,7 +119,8 @@ function MainApp() {
   const [submittedCandidateId, setSubmittedCandidateId] = useState<string | null>(null);
   const [realtimeMeta, setRealtimeMeta] = useState<RealtimeSyncMeta | null>(null);
   const [adminAccounts, setAdminAccounts] = useState<AdminAccount[]>([]);
-  const [requestedRole, setRequestedRole] = useState<UserRole>('driver');
+  /** Torre ops: por defecto se pide acceso admin (no transportista). */
+  const [requestedRole, setRequestedRole] = useState<UserRole>('admin');
   const [dispatchSettings, setDispatchSettings] = useState<DispatchSettings>(
     DEFAULT_DISPATCH_SETTINGS
   );
@@ -321,6 +322,15 @@ function MainApp() {
           setRequestedRole(saved);
           setCurrentRole(saved);
           clearLoginRole();
+        } else {
+          // Sin rol guardado (p. ej. carrera con LoginPage): en ops asumir torre admin.
+          // Antes quedaban como transportista y no podían entrar a la torre.
+          setRequestedRole((prev) =>
+            prev === 'driver' || prev === 'pending_driver' ? 'admin' : prev,
+          );
+          setCurrentRole((prev) =>
+            prev === 'driver' || prev === 'pending_driver' ? 'pending_admin' : prev,
+          );
         }
       } else {
         setCurrentUserEmail(undefined);
@@ -391,6 +401,12 @@ function MainApp() {
     })
       .then((acc) => {
         if (cancelled) return;
+        // Evita carrera: el snapshot de admins aún no incluye al usuario recién escrito.
+        setAdminAccounts((prev) => {
+          const rest = prev.filter((a) => a.id !== acc.id && a.email.toLowerCase() !== acc.email.toLowerCase());
+          return [acc, ...rest];
+        });
+        setRequestedRole('admin');
         setCurrentRole(acc.status === 'active' ? 'admin' : 'pending_admin');
       })
       .catch((err) => {
@@ -418,6 +434,11 @@ function MainApp() {
     })
       .then((acc) => {
         if (cancelled) return;
+        setAdminAccounts((prev) => {
+          const rest = prev.filter((a) => a.id !== acc.id && a.email.toLowerCase() !== acc.email.toLowerCase());
+          return [acc, ...rest];
+        });
+        setRequestedRole('secretary');
         setCurrentRole(acc.status === 'active' ? 'secretary' : 'pending_secretary');
       })
       .catch((err) => {
@@ -582,8 +603,8 @@ function MainApp() {
     clearLoginRole();
     setCurrentUserEmail(undefined);
     setIsAuthenticated(false);
-    setRequestedRole('driver');
-    setCurrentRole('driver');
+    setRequestedRole('admin');
+    setCurrentRole('pending_admin');
   };
 
   // If not authenticated, show full Login Screen first

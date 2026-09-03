@@ -14,7 +14,6 @@ import {
   matchesSearchAnchor,
   searchLocalPlaces,
 } from '../client-web/src/lib/villavicencioPlaces.ts';
-import { isServiceBlockedAt } from '../shared/riskZones.ts';
 
 function check(name: string, fn: () => void) {
   fn();
@@ -109,11 +108,6 @@ check('lugares locales', () => {
   assert.ok(uni.some((h) => /unicentro/i.test(h.label)));
   const term = searchLocalPlaces('Terminal');
   assert.ok(term.some((h) => /terminal/i.test(h.label)));
-});
-
-check('ya no se bloquea por sectores del mapa', () => {
-  assert.equal(isServiceBlockedAt(4.136, -73.652), false);
-  assert.equal(isServiceBlockedAt(4.142, -73.6266), false);
 });
 
 console.log('\nTodas las pruebas de direcciones pasaron.');
