@@ -200,7 +200,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     localStorage.getItem('domiclick_gmaps_key') ||
     '';
   const [googleKeyInput, setGoogleKeyInput] = useState<string>(gmpKey);
-  const [showKeyModal, setShowKeyModal] = useState<boolean>(!gmpKey);
+  const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
 
   // Auto-inject Google Maps JS SDK script if API key is present
   useEffect(() => {
