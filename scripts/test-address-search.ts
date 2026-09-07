@@ -10,7 +10,9 @@ import {
   parseColombianAddress,
   viaNumberInLabel,
 } from '../shared/colombianAddress.ts';
+import { haversineKm } from '../shared/serviceArea.ts';
 import {
+  estimateLocalAddressPoint,
   matchesSearchAnchor,
   searchLocalPlaces,
 } from '../client-web/src/lib/villavicencioPlaces.ts';
@@ -53,6 +55,29 @@ check('geocode queries colombianas', () => {
   const qs = formatColombianGeocodeQueries('Calle 15 # 20-10');
   assert.ok(qs.some((q) => q.includes('Calle 15 #20-10')));
   assert.ok(qs.every((q) => q.includes('Villavicencio')));
+  assert.ok(
+    !qs.some((q) => /^Calle 15,\s*Villavicencio/.test(q)),
+    'no debe geocodificar la vía suelta cuando hay nomenclatura',
+  );
+});
+
+check('parse cruce con / dos vías / casa sin #', () => {
+  const con = parseColombianAddress('Calle 15 con Carrera 20');
+  assert.equal(con.viaType, 'calle');
+  assert.equal(con.viaNumber, '15');
+  assert.equal(con.crossing, '20');
+  assert.equal(con.hasComplement, true);
+
+  const two = parseColombianAddress('Carrera 30 Calle 15');
+  assert.equal(two.viaType, 'carrera');
+  assert.equal(two.viaNumber, '30');
+  assert.equal(two.crossing, '15');
+
+  const loose = parseColombianAddress('Calle 23 37k 28');
+  assert.equal(loose.viaType, 'calle');
+  assert.equal(loose.viaNumber, '23');
+  assert.equal(loose.crossing, '37k');
+  assert.equal(loose.house, '28');
 });
 
 check('extractStreetFromQuery quita ciudad', () => {
@@ -62,10 +87,12 @@ check('extractStreetFromQuery quita ciudad', () => {
   );
 });
 
-check('viaNumber no confunde 15 con 150', () => {
+check('viaNumber no confunde 15 con 150 ni 30 con 30A', () => {
   assert.equal(viaNumberInLabel('calle 15', '15'), true);
   assert.equal(viaNumberInLabel('calle 150', '15'), false);
   assert.equal(viaNumberInLabel('carrera 30', '30'), true);
+  assert.equal(viaNumberInLabel('carrera 30a', '30'), false);
+  assert.equal(viaNumberInLabel('carrera 30a', '30a'), true);
 });
 
 check('nomenclatura no exige el # en el nombre de la vía', () => {
@@ -81,6 +108,10 @@ check('nomenclatura no exige el # en el nombre de la vía', () => {
     matchesSearchAnchor({ label: 'Avenida 40', kind: 'Calle / avenida' }, 'av 40'),
     true,
   );
+  assert.equal(
+    matchesSearchAnchor({ label: 'Carrera 30A', kind: 'Calle / avenida' }, 'Cra 30'),
+    false,
+  );
 });
 
 check('busqueda local de calle usa un punto cerca del centro', () => {
@@ -95,12 +126,43 @@ check('busqueda local de calle usa un punto cerca del centro', () => {
 check('carrera y avenida locales', () => {
   const cra = searchLocalPlaces('Carrera 30');
   assert.ok(cra.some((h) => /carrera 30/i.test(h.label)));
+  assert.ok(
+    cra.every((h) => !/carrera 30a/i.test(h.label)),
+    'Cra 30 no debe devolver Carrera 30A',
+  );
   const av = searchLocalPlaces('Avenida 40');
   assert.ok(av.some((h) => /avenida 40/i.test(h.label)));
 });
 
-check('direccion con casa no usa centroide local', () => {
-  assert.deepEqual(searchLocalPlaces('Calle 15 # 20-10'), []);
+check('nomenclatura interpola el cruce, no el centroide de la calle', () => {
+  const hits = searchLocalPlaces('Calle 15 # 20-10');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].kind, 'Dirección');
+  assert.match(hits[0].label, /calle 15/i);
+  assert.match(hits[0].label, /#\s*20/);
+  assert.equal(hits[0].precision, 'intersection');
+
+  assert.ok(hits[0].lat != null && hits[0].lng != null);
+  const cra20 = searchLocalPlaces('Carrera 20')[0];
+  assert.ok(cra20?.lat != null);
+  const toCraCenterPin = haversineKm(
+    { lat: hits[0].lat!, lng: hits[0].lng! },
+    { lat: cra20.lat!, lng: cra20.lng! },
+  );
+  assert.ok(
+    toCraCenterPin < 1.5,
+    `el cruce debe quedar en la grilla urbana cerca de Carrera 20 (${toCraCenterPin.toFixed(2)} km)`,
+  );
+  assert.ok(hits[0].lat! > 4.12 && hits[0].lat! < 4.16, `lat urbana ${hits[0].lat}`);
+  assert.ok(hits[0].lng! < -73.60 && hits[0].lng! > -73.64, `lng urbana ${hits[0].lng}`);
+});
+
+check('estimateLocalAddressPoint usa la vía principal cerca del cruce', () => {
+  const hit = estimateLocalAddressPoint('Carrera 30 # 15-20');
+  assert.ok(hit);
+  assert.equal(hit?.precision, 'intersection');
+  assert.ok(Math.abs(hit!.lat! - 4.14) < 0.08);
+  assert.ok(Math.abs(hit!.lng! + 73.63) < 0.08);
 });
 
 check('lugares locales', () => {

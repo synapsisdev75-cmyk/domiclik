@@ -5,7 +5,10 @@ import { VILLAVICENCIO_CENTER } from '../../data/villavicencio';
 import {
   formatColombianGeocodeQueries,
   isStreetSearchQuery,
+  parseColombianAddress,
 } from '../../../shared/colombianAddress.ts';
+import { isWithinServiceArea } from '../../../shared/serviceArea.ts';
+import { searchLocalPlaces } from '../../../client-web/src/lib/villavicencioPlaces';
 
 export type OpsPlaceHit = { label: string; lat: number; lng: number };
 
@@ -135,14 +138,25 @@ async function geocodeStreets(q: string): Promise<Suggestion[]> {
           address,
           componentRestrictions: { country: 'CO' },
         });
-        return (res.results || []).slice(0, 6).map((r) => {
+        return (res.results || [])
+          .filter((r) => isWithinServiceArea(r.geometry.location.lat(), r.geometry.location.lng()))
+          .slice(0, 6)
+          .map((r) => {
           const loc = r.geometry.location;
+          const types = r.types || [];
+          const locType = String(r.geometry.location_type || '');
+          const isPrecise =
+            locType === 'ROOFTOP' ||
+            locType === 'RANGE_INTERPOLATED' ||
+            types.includes('street_address') ||
+            types.includes('intersection') ||
+            types.includes('premise');
           return {
             id: `gc-${r.place_id}`,
             placeId: r.place_id,
             label: r.formatted_address || q,
             secondary: 'Villavicencio, Meta',
-            kind: r.types?.includes('route') ? 'Calle / avenida' : 'Dirección',
+            kind: types.includes('route') && !isPrecise ? 'Calle / avenida' : 'Dirección',
             lat: loc.lat(),
             lng: loc.lng(),
           } satisfies Suggestion;
@@ -164,7 +178,20 @@ async function searchGoogle(q: string): Promise<Suggestion[]> {
   ]);
   const seen = new Set<string>();
   const out: Suggestion[] = [];
-  const ordered = street ? [...geoHits, ...autoHits, ...textHits] : [...textHits, ...autoHits, ...geoHits];
+  const localHits: Suggestion[] = searchLocalPlaces(q).map((h) => ({
+    id: h.id,
+    label: h.label,
+    secondary: h.secondary,
+    kind: h.kind,
+    lat: h.lat,
+    lng: h.lng,
+  }));
+  const parsed = parseColombianAddress(q);
+  const ordered = parsed.hasComplement
+    ? [...geoHits.filter((h) => h.kind === 'Dirección'), ...localHits, ...geoHits, ...autoHits]
+    : street
+      ? [...localHits, ...geoHits, ...autoHits, ...textHits]
+      : [...textHits, ...autoHits, ...geoHits, ...localHits];
   for (const hit of ordered) {
     const key = hit.placeId || hit.label;
     if (seen.has(key)) continue;
@@ -284,7 +311,26 @@ export function OpsPlaceSearch({
 
   async function pick(item: Suggestion) {
     setOpen(false);
+    const typed = value.trim();
+    const parsed = parseColombianAddress(typed);
+    const streetOnlyPick =
+      parsed.hasComplement &&
+      (item.kind === 'Calle / avenida' || item.kind === 'Dirección') &&
+      !/#\s*\d/.test(item.label);
+
+    if (streetOnlyPick) {
+      const precise = (await geocodeStreets(typed)).find((h) => h.kind === 'Dirección' && h.lat != null) ||
+        searchLocalPlaces(typed)[0];
+      if (precise?.lat != null && precise.lng != null) {
+        skip.current = true;
+        onQueryChange(typed);
+        onPlacePicked({ label: typed, lat: precise.lat, lng: precise.lng });
+        return;
+      }
+    }
+
     if (item.lat != null && item.lng != null) {
+      if (!isWithinServiceArea(item.lat, item.lng)) return;
       skip.current = true;
       onQueryChange(item.label);
       onPlacePicked({ label: item.secondary ? `${item.label}, ${item.secondary}` : item.label, lat: item.lat, lng: item.lng });
@@ -292,7 +338,7 @@ export function OpsPlaceSearch({
     }
     if (!item.placeId) return;
     const hit = await resolvePlace(item.placeId, item.label);
-    if (!hit) return;
+    if (!hit || !isWithinServiceArea(hit.lat, hit.lng)) return;
     skip.current = true;
     onQueryChange(hit.label);
     onPlacePicked(hit);

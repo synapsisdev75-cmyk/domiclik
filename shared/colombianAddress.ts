@@ -126,11 +126,21 @@ export function parseColombianAddress(query: string): ColombianAddress {
     house = hash[2] || null;
     viaPart = folded.slice(0, hash.index).trim();
   } else {
-    const dash = folded.match(/\s(\d+[a-z]?)\s*[-–]\s*(\d+[a-z]?)\s*$/);
-    if (dash) {
-      crossing = dash[1];
-      house = dash[2];
-      viaPart = folded.slice(0, dash.index).trim();
+    const con = folded.match(
+      new RegExp(
+        `\\s+con\\s+(?:avenida\\s+)?(${VIA_TYPE_RE})\\s+(\\d+[a-z]?)\\b`,
+      ),
+    );
+    if (con && con.index != null) {
+      crossing = con[2];
+      viaPart = folded.slice(0, con.index).trim();
+    } else {
+      const dash = folded.match(/\s(\d+[a-z]?)\s*[-–]\s*(\d+[a-z]?)\s*$/);
+      if (dash && dash.index != null) {
+        crossing = dash[1];
+        house = dash[2];
+        viaPart = folded.slice(0, dash.index).trim();
+      }
     }
   }
 
@@ -142,15 +152,33 @@ export function parseColombianAddress(query: string): ColombianAddress {
     }
   }
 
-  const viaMatch = viaPart.match(
+  const twoVias = viaPart.match(
     new RegExp(
-      `(?:avenida\\s+)?(${VIA_TYPE_RE})\\s+(\\d+[a-z]?)(?:\\s+(sur|norte|este|oeste|bis))?\\b`,
+      `(${VIA_TYPE_RE})\\s+(\\d+[a-z]?)(?:\\s+(sur|norte|este|oeste|bis))?\\s+(${VIA_TYPE_RE})\\s+(\\d+[a-z]?)\\b`,
     ),
   );
+  const viaMatch =
+    twoVias ||
+    viaPart.match(
+      new RegExp(
+        `(?:avenida\\s+)?(${VIA_TYPE_RE})\\s+(\\d+[a-z]?)(?:\\s+(sur|norte|este|oeste|bis))?\\b`,
+      ),
+    );
 
   const viaType = viaMatch ? viaMatch[1] : namedWay === 'circunvalar' ? 'circunvalar' : null;
   const viaNumber = viaMatch ? viaMatch[2] : null;
   const cardinal = viaMatch?.[3] || null;
+  if (twoVias && !crossing) crossing = twoVias[5];
+
+  if (!crossing && viaMatch && viaMatch.index != null) {
+    const rest = viaPart.slice(viaMatch.index + viaMatch[0].length).trim();
+    const loose = rest.match(/^(\d+[a-z]?)(?:\s*[-–]\s*|\s+)(\d+[a-z]?)$/);
+    if (loose) {
+      crossing = loose[1];
+      house = loose[2];
+    }
+  }
+
   const hasComplement = Boolean(crossing || house);
   const isStreet = Boolean((viaType && viaNumber) || namedWay);
 
@@ -203,14 +231,13 @@ export function formatColombianGeocodeQueries(query: string): string[] {
       add(`${via} #${nomenclatura}, ${city}`);
       add(`${via} # ${nomenclatura}, ${city}`);
       if (cr) {
-        const cruz =
-          parsed.viaType === 'carrera' || parsed.viaType === 'avenida'
-            ? `Calle ${cr}`
-            : `Carrera ${cr}`;
+        const cruz = crossingStreetTitle(parsed.viaType, cr);
         add(`${via} con ${cruz}, ${city}`);
       }
+      // No agregar la vía suelta: Google/OSM devuelven el centroide de toda la calle.
+    } else {
+      add(`${via}, ${city}`);
     }
-    add(`${via}, ${city}`);
   } else if (parsed.namedWay) {
     add(`${parsed.displayVia}, ${city}`);
   }
@@ -230,9 +257,41 @@ export function viaTypeInLabel(labelFold: string, viaType: string): boolean {
   return false;
 }
 
+/** Cruce típico: Calle N # M → Carrera M; Carrera/Av M # N → Calle N. */
+export function crossingStreetTitle(viaType: string, crossing: string): string {
+  const num = crossing.toUpperCase();
+  if (viaType === 'carrera' || viaType === 'avenida') return `Calle ${num}`;
+  return `Carrera ${num}`;
+}
+
+export function crossingStreetType(viaType: string | null): string | null {
+  if (!viaType) return null;
+  if (viaType === 'carrera' || viaType === 'avenida') return 'calle';
+  return 'carrera';
+}
+
+/**
+ * Número de vía exacto: "30" no debe coincidir con "30A" ni "300".
+ * Si el usuario escribió "30A", solo coincide "30A".
+ */
 export function viaNumberInLabel(labelFold: string, viaNumber: string): boolean {
   const n = foldText(viaNumber);
   if (!n) return true;
-  const re = new RegExp(`(?:^|[^a-z0-9])${n}(?:[a-z])?(?:[^a-z0-9]|$)`, 'i');
+  const re = new RegExp(`(?:^|[^a-z0-9])${n}(?:[^a-z0-9]|$)`, 'i');
   return re.test(labelFold);
+}
+
+const EXTRA_STREET_SUFFIX = /\b(sur|norte|este|oeste|bis)\b/;
+
+/** La etiqueta es esa vía (sin 15A / 15 Sur si el usuario no las pidió). */
+export function streetLabelIsExactVia(
+  labelFold: string,
+  viaType: string,
+  viaNumber: string,
+  cardinal: string | null,
+): boolean {
+  if (!viaTypeInLabel(labelFold, viaType)) return false;
+  if (!viaNumberInLabel(labelFold, viaNumber)) return false;
+  if (cardinal) return labelFold.includes(foldText(cardinal));
+  return !EXTRA_STREET_SUFFIX.test(labelFold);
 }

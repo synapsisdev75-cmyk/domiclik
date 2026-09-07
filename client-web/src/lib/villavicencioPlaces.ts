@@ -12,9 +12,12 @@ import {
   isStreetSearchQuery,
   normalizeStreetQuery,
   parseColombianAddress,
+  streetLabelIsExactVia,
   viaNumberInLabel,
   viaTypeInLabel,
+  crossingStreetType,
 } from '../../../shared/colombianAddress.ts';
+import { VILLAVICENCIO_CENTER, haversineKm } from '../../../shared/serviceArea.ts';
 
 export {
   extractStreetFromQuery,
@@ -405,6 +408,12 @@ export function matchesSearchAnchor(
     const parsed = parseColombianAddress(query);
     const hay = `${labelHay} ${fullHay}`;
     if (parsed.namedWay && hay.includes(fold(parsed.namedWay))) return true;
+    if (parsed.viaType && parsed.viaNumber) {
+      return (
+        streetLabelIsExactVia(labelHay, parsed.viaType, parsed.viaNumber, parsed.cardinal) ||
+        streetLabelIsExactVia(fullHay, parsed.viaType, parsed.viaNumber, parsed.cardinal)
+      );
+    }
     const typeOk =
       !parsed.viaType || viaTypeInLabel(labelHay, parsed.viaType) || viaTypeInLabel(fullHay, parsed.viaType);
     const numOk =
@@ -456,17 +465,12 @@ function scorePlace(place: NamedPlace, query: string): number {
   return 40 + labelMatches * 20 + hayMatches * 5;
 }
 
-const CITY_CENTER = { lat: 4.142, lng: -73.6266 };
+const CITY_CENTER = VILLAVICENCIO_CENTER;
+const URBAN_KM = 14;
+const INTERSECTION_MAX_KM = 2;
 
 function distKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return haversineKm(a, b);
 }
 
 function pickStreetPoint(places: NamedPlace[]): NamedPlace {
@@ -484,14 +488,87 @@ function scoreStreet(place: NamedPlace, query: string): number {
     return 100;
   }
   if (!parsed.viaType || !parsed.viaNumber) return 0;
-  if (!viaTypeInLabel(label, parsed.viaType)) return 0;
-  if (!viaNumberInLabel(label, parsed.viaNumber)) return 0;
+  if (!streetLabelIsExactVia(label, parsed.viaType, parsed.viaNumber, parsed.cardinal)) return 0;
 
   const viaFold = fold(parsed.displayVia);
   if (label === viaFold) return 130;
   if (label.startsWith(viaFold)) return 120;
   if (parsed.cardinal && label.includes(parsed.cardinal)) return 115;
   return 105;
+}
+
+function urbanStreetPoints(viaType: string, viaNumber: string, cardinal: string | null): NamedPlace[] {
+  return STREET_INDEX.filter((place) => {
+    const label = fold(normalizeStreetQuery(place.label));
+    if (!streetLabelIsExactVia(label, viaType, viaNumber, cardinal)) return false;
+    return distKm(place, CITY_CENTER) <= URBAN_KM;
+  });
+}
+
+function formatNomenclaturaLabel(parsed: ReturnType<typeof parseColombianAddress>, fallback: string): string {
+  if (!parsed.viaType || !parsed.viaNumber) return fallback;
+  if (!parsed.hasComplement) return parsed.displayVia;
+  const cr = parsed.crossing || '';
+  const hs = parsed.house || '';
+  const nomenclatura = hs ? `${cr}-${hs}` : cr;
+  return `${parsed.displayVia} #${nomenclatura}`;
+}
+
+/**
+ * Pin local preciso: cruce vía × carrera/calle (#), no el centroide de toda la vía.
+ */
+export function estimateLocalAddressPoint(query: string): PlaceSuggestion | null {
+  const parsed = parseColombianAddress(query);
+  if (!parsed.viaType || !parsed.viaNumber) return null;
+
+  const primary = urbanStreetPoints(parsed.viaType, parsed.viaNumber, parsed.cardinal);
+  if (!primary.length) return null;
+
+  const label = formatNomenclaturaLabel(parsed, query);
+  let lat: number;
+  let lng: number;
+  let precision: PlaceSuggestion['precision'] = 'street';
+
+  if (parsed.crossing) {
+    const cruzType = crossingStreetType(parsed.viaType);
+    const crossingPts = cruzType ? urbanStreetPoints(cruzType, parsed.crossing, null) : [];
+    let best: { dist: number; a: NamedPlace; b: NamedPlace } | null = null;
+    for (const a of primary) {
+      for (const b of crossingPts) {
+        const dist = distKm(a, b);
+        if (!best || dist < best.dist) best = { dist, a, b };
+      }
+    }
+    if (best && best.dist <= INTERSECTION_MAX_KM) {
+      lat = best.a.lat * 0.65 + best.b.lat * 0.35;
+      lng = best.a.lng * 0.65 + best.b.lng * 0.35;
+      precision = 'intersection';
+      return {
+        id: `addr-${fold(label)}`,
+        label,
+        secondary: 'Villavicencio, Meta',
+        kind: 'Dirección',
+        source: 'local',
+        lat,
+        lng,
+        precision,
+      };
+    }
+  }
+
+  const point = pickStreetPoint(primary);
+  lat = point.lat;
+  lng = point.lng;
+  return {
+    id: parsed.hasComplement ? `addr-${fold(label)}` : `street-${foldStreetLabel(point.label)}`,
+    label: parsed.hasComplement ? label : point.label,
+    secondary: point.secondary,
+    kind: parsed.hasComplement ? 'Dirección' : 'Calle / avenida',
+    source: 'local',
+    lat,
+    lng,
+    precision: parsed.hasComplement ? 'street' : 'street',
+  };
 }
 
 function foldStreetLabel(label: string): string {
@@ -580,7 +657,10 @@ export function searchLocalPlaces(query: string): PlaceSuggestion[] {
 
   const parsed = parseColombianAddress(query);
   if (parsed.isStreet) {
-    if (parsed.hasComplement) return [];
+    if (parsed.hasComplement) {
+      const hit = estimateLocalAddressPoint(query);
+      return hit ? [hit] : [];
+    }
     return searchLocalStreets(query);
   }
 

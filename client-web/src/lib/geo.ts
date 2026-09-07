@@ -6,46 +6,32 @@ import {
   parseColombianAddress,
 } from '../../../shared/colombianAddress.ts';
 import {
+  VILLAVICENCIO_CENTER,
+  VILLAVICENCIO_MAP_BOUNDS,
+  isWithinServiceArea,
+  haversineKm,
+  descriptionInServiceArea,
+} from '../../../shared/serviceArea.ts';
+import {
   resolvePlaceCategory,
   categorySearchQuery,
   categoryMatchesPlace,
 } from './placeCategories';
 
-export const VILLAVICENCIO_CENTER = { lat: 4.142, lng: -73.6266 };
-
-/** Villavicencio + Restrepo, Acacías, Cumaral y vía Puerto López. */
-export const VILLAVICENCIO_MAP_BOUNDS = {
-  south: 3.95,
-  west: -73.88,
-  north: 4.32,
-  east: -73.38,
+export {
+  VILLAVICENCIO_CENTER,
+  VILLAVICENCIO_MAP_BOUNDS,
+  isWithinServiceArea,
 };
-
-export function isWithinServiceArea(lat: number, lng: number): boolean {
-  return (
-    lat >= VILLAVICENCIO_MAP_BOUNDS.south &&
-    lat <= VILLAVICENCIO_MAP_BOUNDS.north &&
-    lng >= VILLAVICENCIO_MAP_BOUNDS.west &&
-    lng <= VILLAVICENCIO_MAP_BOUNDS.east
-  );
-}
 
 export const OUT_OF_AREA_MESSAGE =
   'Solo realizamos entregas en Villavicencio y alrededores (Meta).';
 
 export type LatLng = { lat: number; lng: number };
 
-export function haversineKm(a: LatLng, b: LatLng): number {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
+export { haversineKm };
+
+export type PlacePrecision = 'rooftop' | 'interpolated' | 'intersection' | 'street' | 'approx';
 
 export type PlaceSuggestion = {
   id: string;
@@ -56,6 +42,7 @@ export type PlaceSuggestion = {
   placeId?: string;
   lat?: number;
   lng?: number;
+  precision?: PlacePrecision;
 };
 
 const PLACE_KIND_ES: Record<string, string> = {
@@ -142,15 +129,18 @@ async function predictGoogle(
 ): Promise<PlaceSuggestion[]> {
   const service = new places.AutocompleteService();
   const streetQuery = isStreetSearchQuery(q);
+  const parsed = parseColombianAddress(q);
   const normalized = streetQuery ? extractStreetFromQuery(q) : q;
   const category = resolvePlaceCategory(q);
   const inputs = category
     ? [categorySearchQuery(category, q)]
-    : streetQuery
-      ? [`${normalized}, Villavicencio, Meta`, normalized]
-      : normalized.toLowerCase().includes('villavicencio')
-        ? [normalized]
-        : [normalized, `${normalized} Villavicencio, Meta`];
+    : parsed.hasComplement
+      ? formatColombianGeocodeQueries(q).slice(0, 2)
+      : streetQuery
+        ? [`${normalized}, Villavicencio, Meta`, normalized]
+        : normalized.toLowerCase().includes('villavicencio')
+          ? [normalized]
+          : [normalized, `${normalized} Villavicencio, Meta`];
   const batches = await Promise.all(
     inputs.map(
       (input) =>
@@ -268,11 +258,22 @@ async function geocodeGoogle(q: string): Promise<PlaceSuggestion[]> {
           .map((r) => {
             const loc = r.geometry.location;
             const types = r.types || [];
+            const locType = String(r.geometry.location_type || '');
             const kind = types.includes('street_address') || types.includes('premise')
               ? 'Dirección'
-              : types.includes('route')
-                ? 'Calle / avenida'
-                : 'Dirección';
+              : types.includes('intersection')
+                ? 'Dirección'
+                : types.includes('route')
+                  ? 'Calle / avenida'
+                  : 'Dirección';
+            const precision: PlacePrecision =
+              locType === 'ROOFTOP' || types.includes('street_address') || types.includes('premise')
+                ? 'rooftop'
+                : locType === 'RANGE_INTERPOLATED' || types.includes('intersection')
+                  ? 'interpolated'
+                  : types.includes('route')
+                    ? 'street'
+                    : 'approx';
             return {
               id: `gc-${r.place_id}`,
               placeId: r.place_id,
@@ -282,6 +283,7 @@ async function geocodeGoogle(q: string): Promise<PlaceSuggestion[]> {
               source: 'google' as const,
               lat: loc.lat(),
               lng: loc.lng(),
+              precision,
             } satisfies PlaceSuggestion;
           });
       } catch (err) {
@@ -376,8 +378,8 @@ function foldKey(s: string) {
 }
 
 function inServiceAreaHit(hit: PlaceSuggestion): boolean {
-  if (hit.lat == null || hit.lng == null) return true;
-  return isWithinServiceArea(hit.lat, hit.lng);
+  if (hit.lat != null && hit.lng != null) return isWithinServiceArea(hit.lat, hit.lng);
+  return descriptionInServiceArea(`${hit.label} ${hit.secondary}`);
 }
 
 function mergeSuggestions(groups: PlaceSuggestion[][], query?: string): PlaceSuggestion[] {
@@ -414,8 +416,12 @@ function suggestionRank(
   if (hit.source === 'google') score += 20;
   if (hit.source === 'local') score += 8;
   if (hit.lat != null && hit.lng != null) score += 10;
+  if (hit.precision === 'rooftop') score += 80;
+  if (hit.precision === 'interpolated') score += 55;
+  if (hit.precision === 'intersection') score += 50;
   if (parsed?.hasComplement && hit.kind === 'Dirección') score += 40;
-  if (parsed?.isStreet && hit.kind === 'Calle / avenida') score += 12;
+  if (parsed?.hasComplement && (hit.precision === 'street' || hit.precision === 'approx')) score -= 30;
+  if (parsed?.isStreet && !parsed.hasComplement && hit.kind === 'Calle / avenida') score += 12;
   if (!parsed?.isStreet && hit.kind !== 'Calle / avenida' && hit.kind !== 'Dirección') score += 15;
   return score;
 }
@@ -565,7 +571,7 @@ export async function searchPlaceSuggestions(
 
   const [googleHits, photonHits, nominatimHits] = await Promise.all([
     googlePromise,
-    searchPhoton(q),
+    parsed.hasComplement ? Promise.resolve([] as PlaceSuggestion[]) : searchPhoton(q),
     nominatimPromise,
   ]);
   const groups = parsed.hasComplement
@@ -667,10 +673,22 @@ export async function geocodeAddress(
 ): Promise<(LatLng & { label: string }) | null> {
   const q = query.trim();
   if (q.length < 3) return null;
+  const parsed = parseColombianAddress(q);
   const hits = await searchPlaceSuggestions(q, placesLib);
-  if (hits[0]) {
-    const resolved = await resolvePlaceSuggestion(hits[0], placesLib);
-    if (resolved) return resolved;
+  const ordered = parsed.hasComplement
+    ? [...hits].sort((a, b) => {
+        const rank = (h: PlaceSuggestion) =>
+          h.precision === 'rooftop' ? 4
+            : h.precision === 'interpolated' ? 3
+              : h.precision === 'intersection' ? 2
+                : h.kind === 'Dirección' ? 1
+                  : 0;
+        return rank(b) - rank(a);
+      })
+    : hits;
+  for (const hit of ordered.slice(0, 4)) {
+    const resolved = await resolvePlaceSuggestion(hit, placesLib);
+    if (resolved) return { ...resolved, label: parsed.hasComplement ? q : resolved.label };
   }
   return geocodeAddressNominatim(q);
 }
