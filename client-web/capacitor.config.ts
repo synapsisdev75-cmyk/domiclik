@@ -20,9 +20,18 @@ const config: CapacitorConfig = {
     StatusBar: {
       backgroundColor: '#05080f',
       style: 'LIGHT',
+      overlaysWebView: false,
     },
     Geolocation: {
       // Permisos se solicitan al usar
+    },
+    SocialLogin: {
+      providers: {
+        google: true,
+        facebook: false,
+        apple: true,
+        twitter: false,
+      },
     },
   },
 };

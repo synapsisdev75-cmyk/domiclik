@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { CalendarClock, Loader2, Package } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { submitOrder } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { uploadInvoicePhoto } from '../lib/firebase';
@@ -10,11 +11,6 @@ import {
   coordsTooClose,
   type LatLng,
 } from '../lib/geo';
-import {
-  findBlockedZoneAt,
-  isServiceBlockedAt,
-  SERVICE_BLOCKED_MESSAGE,
-} from '../lib/riskZones';
 import {
   computeShippingQuote,
   estimateTravelMinutes,
@@ -28,8 +24,22 @@ import {
   type ShippingQuote,
 } from '../lib/pricing';
 import type { IngestOrderResponse } from '../contracts/salesIngest';
+import {
+  EMPTY_ADDRESS_PARTS,
+  addressHasRoad,
+  composeFullAddress,
+  partsFromFullAddress,
+  type AddressParts,
+} from '../lib/addressParts';
 import { MapRouteSection } from './MapRouteSection';
 import type { MapPickMode } from './RouteMapPicker';
+
+const TIPO_DESC: Record<string, string> = {
+  comida: 'Comida / domicilio de restaurante',
+  paquetes: 'Paquete / encomienda',
+  compras: 'Compras / mandado',
+  otros: 'Otro envío',
+};
 
 export type OrderFormValues = {
   customerName: string;
@@ -65,29 +75,42 @@ const INITIAL: OrderFormValues = {
 
 interface OrderFormProps {
   onSuccess: (result: IngestOrderResponse) => void;
+  /** Flujo app: mapa primero → detalles → enviar */
+  wizard?: boolean;
 }
 
 function coordsKey(p: LatLng) {
   return `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
 }
 
-export function OrderForm({ onSuccess }: OrderFormProps) {
+export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
   const { profile, signIn, setPhone, loading: authLoading } = useAuth();
+  const [searchParams] = useSearchParams();
+  const [step, setStep] = useState<'map' | 'details'>('map');
   const [values, setValues] = useState<OrderFormValues>(() => {
     const { min } = scheduleWindow();
-    return { ...INITIAL, scheduledFor: toDatetimeLocalValue(min) };
+    const tipo = searchParams.get('tipo') || '';
+    return {
+      ...INITIAL,
+      scheduledFor: toDatetimeLocalValue(min),
+      description: TIPO_DESC[tipo] || '',
+    };
   });
   const [pickup, setPickup] = useState<LatLng | null>(null);
   const [delivery, setDelivery] = useState<LatLng | null>(null);
+  const [pickupParts, setPickupParts] = useState<AddressParts>({ ...EMPTY_ADDRESS_PARTS });
+  const [deliveryParts, setDeliveryParts] = useState<AddressParts>({ ...EMPTY_ADDRESS_PARTS });
+  const [pickupMapAnchored, setPickupMapAnchored] = useState(false);
+  const [deliveryMapAnchored, setDeliveryMapAnchored] = useState(false);
   const [path, setPath] = useState<LatLng[]>([]);
   const [routeKm, setRouteKm] = useState(0);
   const [, setRouteMin] = useState(0);
   const [pickMode, setPickMode] = useState<MapPickMode>('pickup');
   const [geoBusy, setGeoBusy] = useState(false);
+  const [pinDragging, setPinDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
-  const [coverageNotice, setCoverageNotice] = useState<string | null>(null);
 
   const routeGenRef = useRef(0);
   const googleRetryRef = useRef<number | null>(null);
@@ -135,12 +158,6 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   }, [pickup, delivery]);
 
   useEffect(() => {
-    const blockedPickup = pickup ? findBlockedZoneAt(pickup.lat, pickup.lng) : null;
-    const blockedDelivery = delivery ? findBlockedZoneAt(delivery.lat, delivery.lng) : null;
-    setCoverageNotice(blockedPickup || blockedDelivery ? SERVICE_BLOCKED_MESSAGE : null);
-  }, [pickup, delivery]);
-
-  useEffect(() => {
     if (!profile) return;
     setValues((prev) => ({
       ...prev,
@@ -158,7 +175,8 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
     }
 
     setGeoBusy(true);
-    setPath([]);
+    // Mientras calcula, muestra al menos A→B para que no se vea el mapa “sin ruta”
+    setPath([from, to]);
     setRouteKm(0);
     setRouteMin(0);
 
@@ -210,7 +228,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       return;
     }
     // Mientras se arrastra, solo mueve el pin; la ruta se calcula al soltar
-    if (draggingRef.current) return;
+    if (draggingRef.current || pinDragging) return;
     void refreshRoute(pickup, delivery);
     return () => {
       routeGenRef.current += 1;
@@ -219,59 +237,85 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         googleRetryRef.current = null;
       }
     };
-  }, [pickup, delivery, refreshRoute]);
+  }, [pickup, delivery, refreshRoute, pinDragging]);
 
   function update<K extends keyof OrderFormValues>(key: K, value: OrderFormValues[K]) {
     setValues((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function applyPickupParts(parts: AddressParts) {
+    setPickupParts(parts);
+    update('pickupAddress', composeFullAddress(parts));
+  }
+
+  function applyDeliveryParts(parts: AddressParts) {
+    setDeliveryParts(parts);
+    update('deliveryAddress', composeFullAddress(parts));
   }
 
   const onMapPick = useCallback(
     (point: LatLng) => {
       if (!pickMode) return;
       draggingRef.current = false;
-      setPath([]);
+      setPinDragging(false);
       if (pickMode === 'pickup') {
         setPickup(point);
+        setPickupMapAnchored(true);
         void reverseGeocode(point.lat, point.lng).then((label) => {
-          setValues((prev) => ({ ...prev, pickupAddress: label }));
+          setPickupParts((prev) => {
+            const next = partsFromFullAddress(label, prev.general);
+            setValues((v) => ({ ...v, pickupAddress: composeFullAddress(next) || label }));
+            return next;
+          });
         });
       } else if (pickMode === 'delivery') {
         setDelivery(point);
+        setDeliveryMapAnchored(true);
         void reverseGeocode(point.lat, point.lng).then((label) => {
-          setValues((prev) => ({ ...prev, deliveryAddress: label }));
+          setDeliveryParts((prev) => {
+            const next = partsFromFullAddress(label, prev.general);
+            setValues((v) => ({ ...v, deliveryAddress: composeFullAddress(next) || label }));
+            return next;
+          });
         });
       }
     },
     [pickMode],
   );
 
-  const onLiveDragPickup = useCallback((point: LatLng) => {
+  const onDragStart = useCallback((which: 'pickup' | 'delivery') => {
     draggingRef.current = true;
-    setPath([]);
-    setPickup(point);
+    setPinDragging(true);
+    setPickMode(which);
   }, []);
 
   const onDragPickup = useCallback((point: LatLng) => {
     draggingRef.current = false;
-    setPath([]);
+    setPinDragging(false);
+    setPickMode('pickup');
     setPickup(point);
+    setPickupMapAnchored(true);
     void reverseGeocode(point.lat, point.lng).then((label) => {
-      setValues((prev) => ({ ...prev, pickupAddress: label }));
+      setPickupParts((prev) => {
+        const next = partsFromFullAddress(label, prev.general);
+        setValues((v) => ({ ...v, pickupAddress: composeFullAddress(next) || label }));
+        return next;
+      });
     });
-  }, []);
-
-  const onLiveDragDelivery = useCallback((point: LatLng) => {
-    draggingRef.current = true;
-    setPath([]);
-    setDelivery(point);
   }, []);
 
   const onDragDelivery = useCallback((point: LatLng) => {
     draggingRef.current = false;
-    setPath([]);
+    setPinDragging(false);
+    setPickMode('delivery');
     setDelivery(point);
+    setDeliveryMapAnchored(true);
     void reverseGeocode(point.lat, point.lng).then((label) => {
-      setValues((prev) => ({ ...prev, deliveryAddress: label }));
+      setDeliveryParts((prev) => {
+        const next = partsFromFullAddress(label, prev.general);
+        setValues((v) => ({ ...v, deliveryAddress: composeFullAddress(next) || label }));
+        return next;
+      });
     });
   }, []);
 
@@ -288,8 +332,8 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       setError('Marca en el mapa la recolección (A) y la entrega (B).');
       return;
     }
-    if (isServiceBlockedAt(pickup.lat, pickup.lng) || isServiceBlockedAt(delivery.lat, delivery.lng)) {
-      setError(SERVICE_BLOCKED_MESSAGE);
+    if (!addressHasRoad(pickupParts) || !addressHasRoad(deliveryParts)) {
+      setError('Escribe o busca la dirección de recolección (A) y de entrega (B).');
       return;
     }
     if (
@@ -393,6 +437,10 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       setInvoiceFile(null);
       setPickup(null);
       setDelivery(null);
+      setPickupParts({ ...EMPTY_ADDRESS_PARTS });
+      setDeliveryParts({ ...EMPTY_ADDRESS_PARTS });
+      setPickupMapAnchored(false);
+      setDeliveryMapAnchored(false);
       setPath([]);
       setPickMode('pickup');
       onSuccess(result);
@@ -404,35 +452,48 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="glass-panel rounded-2xl p-6 sm:p-8" noValidate>
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(255,87,34,0.12)] text-[var(--domi-orange)]">
-            <Package className="h-5 w-5" aria-hidden />
-          </span>
-          <div>
-            <h2 className="font-display text-2xl font-bold text-white">Solicitar entrega</h2>
+    <form
+      onSubmit={handleSubmit}
+      className={wizard ? 'space-y-4' : 'glass-panel rounded-2xl p-6 sm:p-8'}
+      noValidate
+    >
+      {!wizard ? (
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(255,87,34,0.12)] text-[var(--domi-orange)]">
+              <Package className="h-5 w-5" aria-hidden />
+            </span>
+            <div>
+              <h2 className="font-display text-2xl font-bold text-white">Solicitar entrega</h2>
+            </div>
           </div>
-        </div>
 
-        {!profile && !authLoading ? (
-          <button
-            type="button"
-            onClick={() => void signIn()}
-            className="cta-primary shrink-0 self-start text-sm"
-          >
-            Iniciar sesión con Google
-          </button>
-        ) : null}
-      </div>
+          {!profile && !authLoading ? (
+            <button
+              type="button"
+              onClick={() => void signIn()}
+              className="cta-primary shrink-0 self-start text-sm"
+            >
+              Iniciar sesión con Google
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {wizard ? (
+        <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+          <span className={step === 'map' ? 'text-[var(--domi-orange)]' : ''}>1 · Mapa</span>
+          <span aria-hidden>→</span>
+          <span className={step === 'details' ? 'text-[var(--domi-orange)]' : ''}>2 · Detalles</span>
+        </div>
+      ) : null}
 
       {!profile && !authLoading ? (
         <div
-          className="mb-4 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100"
+          className="mb-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100"
           role="status"
         >
-          Debes iniciar sesión con Google para confirmar y recibir tu código de seguimiento (DMC-XXXX) y
-          el PIN de entrega.
+          Inicia sesión con Google para confirmar y recibir tu código y PIN.
           <button
             type="button"
             className="ml-2 font-bold text-[var(--domi-cyan)] underline"
@@ -443,219 +504,262 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         </div>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="block sm:col-span-1">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Nombre completo *
-          </span>
-          <input
-            className="field-input"
-            required
-            value={values.customerName}
-            onChange={(e) => update('customerName', e.target.value)}
-            placeholder="Nombre completo"
-          />
-        </label>
+      {(!wizard || step === 'details') && (
+        <div className={`grid gap-4 ${wizard ? '' : 'sm:grid-cols-2'}`}>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+              Nombre *
+            </span>
+            <input
+              className="field-input"
+              required={step === 'details' || !wizard}
+              value={values.customerName}
+              onChange={(e) => update('customerName', e.target.value)}
+              placeholder="Tu nombre"
+            />
+          </label>
 
-        <label className="block sm:col-span-1">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Teléfono *
-          </span>
-          <input
-            className="field-input"
-            type="tel"
-            required
-            value={values.customerPhone}
-            onChange={(e) => update('customerPhone', e.target.value)}
-            placeholder="Número de celular"
-          />
-        </label>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+              Teléfono *
+            </span>
+            <input
+              className="field-input"
+              type="tel"
+              required={step === 'details' || !wizard}
+              value={values.customerPhone}
+              onChange={(e) => update('customerPhone', e.target.value)}
+              placeholder="Celular"
+            />
+          </label>
 
-        <label className="block sm:col-span-2">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Email
-          </span>
-          <input
-            className="field-input"
-            type="email"
-            value={values.customerEmail}
-            onChange={(e) => update('customerEmail', e.target.value)}
-            placeholder="Correo electrónico"
-            readOnly={Boolean(profile?.email)}
-          />
-        </label>
+          {!wizard ? (
+            <label className="block sm:col-span-2">
+              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                Email
+              </span>
+              <input
+                className="field-input"
+                type="email"
+                value={values.customerEmail}
+                onChange={(e) => update('customerEmail', e.target.value)}
+                placeholder="Correo electrónico"
+                readOnly={Boolean(profile?.email)}
+              />
+            </label>
+          ) : null}
+        </div>
+      )}
 
-        <div className="sm:col-span-2">
+      {(!wizard || step === 'map') && (
+        <div className={wizard ? '' : 'mt-4'}>
           <MapRouteSection
+            mapFirst={wizard}
+            structured
             pickMode={pickMode}
             onPickModeChange={setPickMode}
+            pickupParts={pickupParts}
+            deliveryParts={deliveryParts}
+            onPickupPartsChange={applyPickupParts}
+            onDeliveryPartsChange={applyDeliveryParts}
             pickupAddress={values.pickupAddress}
             deliveryAddress={values.deliveryAddress}
             onPickupAddressChange={(v) => update('pickupAddress', v)}
             onDeliveryAddressChange={(v) => update('deliveryAddress', v)}
             onPickupPicked={(hit) => {
               draggingRef.current = false;
-              setPath([]);
+              setPinDragging(false);
+              setPickMode('pickup');
               setPickup({ lat: hit.lat, lng: hit.lng });
-              update('pickupAddress', hit.label);
               setError(null);
             }}
             onDeliveryPicked={(hit) => {
               draggingRef.current = false;
-              setPath([]);
+              setPinDragging(false);
+              setPickMode('delivery');
               setDelivery({ lat: hit.lat, lng: hit.lng });
-              update('deliveryAddress', hit.label);
               setError(null);
             }}
             pickup={pickup}
             delivery={delivery}
             path={path}
             geoBusy={geoBusy}
+            pinDragging={pinDragging}
             onMapPick={onMapPick}
             onDragPickup={onDragPickup}
             onDragDelivery={onDragDelivery}
-            onLiveDragPickup={onLiveDragPickup}
-            onLiveDragDelivery={onLiveDragDelivery}
+            onDragStart={onDragStart}
+            pickupMapAnchored={pickupMapAnchored}
+            deliveryMapAnchored={deliveryMapAnchored}
+            onUnlockPickupMapPin={() => setPickupMapAnchored(false)}
+            onUnlockDeliveryMapPin={() => setDeliveryMapAnchored(false)}
           />
-          {coverageNotice ? (
-            <p
-              className="mt-3 rounded-xl border border-slate-600/40 bg-slate-800/30 px-3.5 py-2.5 text-sm text-slate-300 leading-relaxed"
-              role="status"
-            >
-              {coverageNotice}
-            </p>
-          ) : null}
         </div>
+      )}
 
-        <label className="block sm:col-span-2">
-          <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            <CalendarClock className="h-3.5 w-3.5" aria-hidden />
-            Programar entrega (hasta 15 días) *
-          </span>
-          <input
-            className="field-input"
-            type="datetime-local"
-            required
-            value={values.scheduledFor}
-            min={toDatetimeLocalValue(scheduleBounds.min)}
-            max={toDatetimeLocalValue(scheduleBounds.max)}
-            onChange={(e) => update('scheduledFor', e.target.value)}
-          />
-        </label>
-
-        <label className="block sm:col-span-2">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Número de factura o orden de compra *
-          </span>
-          <input
-            className="field-input"
-            required
-            value={values.invoiceNumber}
-            onChange={(e) => update('invoiceNumber', e.target.value)}
-            placeholder="Ej. FAC-1024 / número de pedido del restaurante"
-          />
-          <span className="mt-1 block text-[11px] text-[var(--domi-muted)]">
-            El repartidor lo valida en el establecimiento.
-          </span>
-        </label>
-
-        <label className="block sm:col-span-2">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Foto de factura (opcional)
-          </span>
-          <input
-            className="field-input file:mr-3 file:rounded-md file:border-0 file:bg-[rgba(0,229,255,0.15)] file:px-3 file:py-1 file:text-xs file:text-white"
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={(e) => setInvoiceFile(e.target.files?.[0] || null)}
-          />
-          {invoiceFile ? (
-            <span className="mt-1 block text-[11px] text-[var(--domi-green)]">
-              Archivo: {invoiceFile.name}
-            </span>
-          ) : null}
-        </label>
-
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Forma de pago *
-          </span>
-          <select
-            className="field-input"
-            required
-            value={values.paymentMethod}
-            onChange={(e) =>
-              update(
-                'paymentMethod',
-                e.target.value as OrderFormValues['paymentMethod']
-              )
+      {wizard && step === 'map' ? (
+        <button
+          type="button"
+          className="cta-primary w-full"
+          disabled={!pickup || !delivery || geoBusy}
+          onClick={() => {
+            if (!pickup || !delivery) {
+              setError('Marca recolección (A) y entrega (B) en el mapa.');
+              return;
             }
-          >
-            <option value="efectivo">Efectivo al recibir</option>
-            <option value="transferencia">Transferencia</option>
-            <option value="ya_pagado">Ya pagado en el negocio</option>
-            <option value="otro">Otro</option>
-          </select>
-        </label>
+            setError(null);
+            setStep('details');
+          }}
+        >
+          Continuar →
+        </button>
+      ) : null}
 
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Cupón (opcional)
-          </span>
-          <input
-            className="field-input uppercase"
-            value={values.couponCode}
-            onChange={(e) => update('couponCode', e.target.value.toUpperCase())}
-            placeholder="Código promocional"
-            autoComplete="off"
-          />
-        </label>
+      {(!wizard || step === 'details') && (
+        <div className={`grid gap-4 ${wizard ? 'mt-1' : 'mt-4 sm:grid-cols-2'}`}>
+          {wizard && pickup && delivery ? (
+            <div className="rounded-xl border border-[var(--domi-border)] bg-[var(--domi-panel)] px-3 py-3 text-sm">
+              <p className="text-[var(--domi-cyan)]">
+                <span className="font-semibold">A</span>{' '}
+                {composeFullAddress(pickupParts) || 'Recolección'}
+              </p>
+              <p className="mt-1 text-[var(--domi-orange)]">
+                <span className="font-semibold">B</span>{' '}
+                {composeFullAddress(deliveryParts) || 'Entrega'}
+              </p>
+              <button
+                type="button"
+                className="mt-2 text-xs font-bold text-[var(--domi-muted)] underline"
+                onClick={() => setStep('map')}
+              >
+                Editar en el mapa
+              </button>
+            </div>
+          ) : null}
 
-        {values.paymentMethod === 'transferencia' || values.paymentMethod === 'otro' ? (
           <label className="block sm:col-span-2">
-            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-              Detalle de pago
+            <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+              <CalendarClock className="h-3.5 w-3.5" aria-hidden />
+              Fecha y hora *
             </span>
             <input
               className="field-input"
-              value={values.paymentNote}
-              onChange={(e) => update('paymentNote', e.target.value)}
-              placeholder="Banco, referencia o aclaración"
+              type="datetime-local"
+              required
+              value={values.scheduledFor}
+              min={toDatetimeLocalValue(scheduleBounds.min)}
+              max={toDatetimeLocalValue(scheduleBounds.max)}
+              onChange={(e) => update('scheduledFor', e.target.value)}
             />
           </label>
-        ) : null}
 
-        <label className="block sm:col-span-2">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Qué enviamos *
-          </span>
-          <textarea
-            className="field-input min-h-[96px] resize-y"
-            required
-            value={values.description}
-            onChange={(e) => update('description', e.target.value)}
-            placeholder="Documentos, paquete pequeño, compra de farmacia…"
-          />
-        </label>
+          <label className="block sm:col-span-2">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+              Factura / orden *
+            </span>
+            <input
+              className="field-input"
+              required
+              value={values.invoiceNumber}
+              onChange={(e) => update('invoiceNumber', e.target.value)}
+              placeholder="Número de factura o pedido"
+            />
+          </label>
 
-        <label className="block sm:col-span-2">
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-            Notas
-          </span>
-          <input
-            className="field-input"
-            value={values.notes}
-            onChange={(e) => update('notes', e.target.value)}
-            placeholder="Portería, referencia…"
-          />
-        </label>
-      </div>
+          <label className="block sm:col-span-2">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+              Foto (opcional)
+            </span>
+            <input
+              className="field-input file:mr-3 file:rounded-md file:border-0 file:bg-[rgba(0,229,255,0.15)] file:px-3 file:py-1 file:text-xs file:text-white"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => setInvoiceFile(e.target.files?.[0] || null)}
+            />
+          </label>
 
-      {quote ? (
-        <div className="mt-5 rounded-xl border border-[rgba(0,230,118,0.3)] bg-[rgba(0,230,118,0.08)] px-4 py-3">
+          <label className="block sm:col-span-2">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+              Forma de pago *
+            </span>
+            <select
+              className="field-input"
+              required
+              value={values.paymentMethod}
+              onChange={(e) =>
+                update('paymentMethod', e.target.value as OrderFormValues['paymentMethod'])
+              }
+            >
+              <option value="efectivo">Efectivo al recibir</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="ya_pagado">Ya pagado en el negocio</option>
+              <option value="otro">Otro</option>
+            </select>
+          </label>
+
+          {!wizard ? (
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                Cupón (opcional)
+              </span>
+              <input
+                className="field-input uppercase"
+                value={values.couponCode}
+                onChange={(e) => update('couponCode', e.target.value.toUpperCase())}
+                placeholder="Código promocional"
+                autoComplete="off"
+              />
+            </label>
+          ) : null}
+
+          {values.paymentMethod === 'transferencia' || values.paymentMethod === 'otro' ? (
+            <label className="block sm:col-span-2">
+              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                Detalle de pago
+              </span>
+              <input
+                className="field-input"
+                value={values.paymentNote}
+                onChange={(e) => update('paymentNote', e.target.value)}
+                placeholder="Banco, referencia…"
+              />
+            </label>
+          ) : null}
+
+          <label className="block sm:col-span-2">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+              Qué enviamos *
+            </span>
+            <textarea
+              className="field-input min-h-[72px] resize-y"
+              required
+              value={values.description}
+              onChange={(e) => update('description', e.target.value)}
+              placeholder="Comida, paquete, compras…"
+            />
+          </label>
+
+          {!wizard ? (
+            <label className="block sm:col-span-2">
+              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                Notas
+              </span>
+              <input
+                className="field-input"
+                value={values.notes}
+                onChange={(e) => update('notes', e.target.value)}
+                placeholder="Portería, referencia…"
+              />
+            </label>
+          ) : null}
+        </div>
+      )}
+
+      {(!wizard || step === 'details') && quote ? (
+        <div className="rounded-xl border border-[rgba(0,230,118,0.3)] bg-[rgba(0,230,118,0.08)] px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-green)]">
-            Cotización de envío
+            Cotización
           </p>
           <p className="mt-1 font-display text-2xl font-extrabold text-white">
             {formatCOP(quote.shippingFee)}
@@ -665,29 +769,33 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
 
       {error ? (
         <p
-          className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+          className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
           role="alert"
         >
           {error}
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        className="cta-primary mt-6 w-full sm:w-auto"
-        disabled={submitting || geoBusy || authLoading || Boolean(coverageNotice)}
-      >
-        {submitting ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            Enviando…
-          </>
-        ) : !profile ? (
-          'Inicia sesión para confirmar'
-        ) : (
-          'Confirmar solicitud'
-        )}
-      </button>
+      {(!wizard || step === 'details') && (
+        <button
+          type="submit"
+          className="cta-primary w-full"
+          disabled={submitting || geoBusy || authLoading}
+        >
+          {submitting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              Enviando…
+            </>
+          ) : !profile ? (
+            'Inicia sesión para confirmar'
+          ) : wizard ? (
+            'Finalizar pedido'
+          ) : (
+            'Confirmar solicitud'
+          )}
+        </button>
+      )}
     </form>
   );
 }

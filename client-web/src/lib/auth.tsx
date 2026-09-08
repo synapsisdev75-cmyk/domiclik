@@ -12,6 +12,7 @@ import {
   completeGoogleRedirect,
   isActiveOpsAdmin,
   saveCustomerPhone,
+  signInWithApple,
   signInWithGoogle,
   signOutCustomer,
   subscribeAuth,
@@ -26,7 +27,11 @@ type AuthContextValue = {
   profile: CustomerProfile | null;
   loading: boolean;
   error: string | null;
+  /** Admin activo en Firestore: puede abrir la torre, pero NO se fuerza redirect (evita pantalla en blanco). */
+  isOpsAdmin: boolean;
+  opsUrl: string;
   signIn: () => Promise<void>;
+  signInApple: () => Promise<void>;
   signOut: () => Promise<void>;
   setPhone: (phone: string) => Promise<void>;
   clearError: () => void;
@@ -39,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOpsAdmin, setIsOpsAdmin] = useState(false);
 
   useEffect(() => {
     void completeGoogleRedirect()
@@ -49,23 +55,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError(err instanceof Error ? err.message : 'Error al volver de Google');
       });
     const unsub = subscribeAuth(async (next) => {
-      setUser(next);
-      if (next) {
-        const p = userToProfile(next);
-        setProfile(p);
-        if (await isActiveOpsAdmin(next.email)) {
-          window.location.assign(opsTowerUrl());
-          return;
+      try {
+        setUser(next);
+        if (next) {
+          const p = userToProfile(next);
+          setProfile(p);
+          const admin = await isActiveOpsAdmin(next.email);
+          setIsOpsAdmin(admin);
+          try {
+            await upsertCustomerProfile(p);
+          } catch (err) {
+            console.warn('[auth] no se pudo guardar perfil cliente', err);
+          }
+        } else {
+          setProfile(null);
+          setIsOpsAdmin(false);
         }
-        try {
-          await upsertCustomerProfile(p);
-        } catch (err) {
-          console.warn('[auth] no se pudo guardar perfil cliente', err);
-        }
-      } else {
-        setProfile(null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
     return () => unsub();
   }, []);
@@ -76,6 +84,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithGoogle();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al iniciar sesión';
+      setError(message);
+    }
+  }, []);
+
+  const signInApple = useCallback(async () => {
+    setError(null);
+    try {
+      await signInWithApple();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error al iniciar sesión con Apple';
       setError(message);
     }
   }, []);
@@ -99,18 +117,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
+  const opsUrl = `${opsTowerUrl()}?role=admin`;
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
       profile,
       loading,
       error,
+      isOpsAdmin,
+      opsUrl,
       signIn,
+      signInApple,
       signOut,
       setPhone,
       clearError: () => setError(null),
     }),
-    [user, profile, loading, error, signIn, signOut, setPhone],
+    [user, profile, loading, error, isOpsAdmin, opsUrl, signIn, signInApple, signOut, setPhone],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

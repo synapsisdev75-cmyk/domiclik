@@ -186,7 +186,9 @@ function MainApp() {
 
   // Completa retorno de Google (compartido con LoginPage; no se pierde el resultado)
   useEffect(() => {
-    void completeGoogleSignInFromRedirect();
+    void completeGoogleSignInFromRedirect().catch((err) => {
+      console.warn('[DomiClick] Google redirect complete', err);
+    });
   }, []);
 
   // Config de despacho (radio, auto-asignar, tarifas)

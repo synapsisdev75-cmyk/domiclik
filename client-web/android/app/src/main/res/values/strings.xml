@@ -4,4 +4,6 @@
     <string name="title_activity_main">DomiClick</string>
     <string name="package_name">com.domiclick.app</string>
     <string name="custom_url_scheme">com.domiclick.app</string>
+    <!-- Mismo Web Client ID que google-services.json (login Google nativo) -->
+    <string name="default_web_client_id" translatable="false">712322107034-sf5vmu7ml9ct8g34uavef428ij16jln7.apps.googleusercontent.com</string>
 </resources>

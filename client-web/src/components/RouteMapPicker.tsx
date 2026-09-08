@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   APIProvider,
   Map,
@@ -6,7 +6,7 @@ import {
   useMap,
 } from '@vis.gl/react-google-maps';
 import type { LatLng } from '../lib/geo';
-import { VILLAVICENCIO_CENTER, VILLAVICENCIO_MAP_BOUNDS } from '../lib/geo';
+import { VILLAVICENCIO_CENTER } from '../lib/geo';
 import { GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_MAP_ID } from '../lib/config';
 
 export type MapPickMode = 'pickup' | 'delivery' | null;
@@ -17,11 +17,12 @@ type RouteMapPickerProps = {
   path: LatLng[];
   pickMode: MapPickMode;
   routing?: boolean;
+  /** True mientras el usuario arrastra un pin: no fitBounds ni pan automático. */
+  pinDragging?: boolean;
   onPick: (point: LatLng) => void;
   onDragPickup: (point: LatLng) => void;
   onDragDelivery: (point: LatLng) => void;
-  onLiveDragPickup?: (point: LatLng) => void;
-  onLiveDragDelivery?: (point: LatLng) => void;
+  onDragStart?: (which: 'pickup' | 'delivery') => void;
   heightClass?: string;
 };
 
@@ -92,41 +93,34 @@ function RoadPolyline({ path, fit }: { path: LatLng[]; fit: boolean }) {
       return;
     }
 
-    clear();
+    if (glowRef.current && lineRef.current) {
+      glowRef.current.setPath(path);
+      lineRef.current.setPath(path);
+    } else {
+      clear();
+      glowRef.current = new google.maps.Polyline({
+        path,
+        geodesic: false,
+        strokeColor: '#00E5FF',
+        strokeOpacity: 0.35,
+        strokeWeight: 10,
+        map,
+        zIndex: 1,
+        clickable: false,
+      });
+      lineRef.current = new google.maps.Polyline({
+        path,
+        geodesic: false,
+        strokeColor: '#00E5FF',
+        strokeOpacity: 1,
+        strokeWeight: 5,
+        map,
+        zIndex: 2,
+        clickable: false,
+      });
+    }
 
-    glowRef.current = new google.maps.Polyline({
-      path,
-      geodesic: false,
-      strokeColor: '#00E5FF',
-      strokeOpacity: 0.22,
-      strokeWeight: 12,
-      map,
-      zIndex: 1,
-    });
-
-    lineRef.current = new google.maps.Polyline({
-      path,
-      geodesic: false,
-      strokeColor: '#00E5FF',
-      strokeOpacity: 0.95,
-      strokeWeight: 4,
-      icons: [
-        {
-          icon: {
-            path: 'M 0,-1 0,1',
-            strokeOpacity: 1,
-            scale: 3,
-            strokeColor: '#00E5FF',
-          },
-          offset: '0',
-          repeat: '16px',
-        },
-      ],
-      map,
-      zIndex: 2,
-    });
-
-    const key = `${path[0].lat.toFixed(4)},${path[0].lng.toFixed(4)}>${path[path.length - 1].lat.toFixed(4)},${path[path.length - 1].lng.toFixed(4)}:${path.length}`;
+    const key = `${path[0].lat.toFixed(3)},${path[0].lng.toFixed(3)}>${path[path.length - 1].lat.toFixed(3)},${path[path.length - 1].lng.toFixed(3)}`;
     if (fit && key !== lastFitKey.current) {
       lastFitKey.current = key;
       const bounds = new google.maps.LatLngBounds();
@@ -134,8 +128,19 @@ function RoadPolyline({ path, fit }: { path: LatLng[]; fit: boolean }) {
       map.fitBounds(bounds, 80);
     }
 
-    return clear;
+    return () => {
+      /* keep polylines until unmount / empty path */
+    };
   }, [map, path, fit]);
+
+  useEffect(() => {
+    return () => {
+      glowRef.current?.setMap(null);
+      lineRef.current?.setMap(null);
+      glowRef.current = null;
+      lineRef.current = null;
+    };
+  }, [map]);
 
   return null;
 }
@@ -154,7 +159,8 @@ function FocusPins({
 
   useEffect(() => {
     if (!map || skipFit) return;
-    const key = `${pickup?.lat},${pickup?.lng}|${delivery?.lat},${delivery?.lng}`;
+    // Redondeo grueso: no recentrar por micro-movimientos
+    const key = `${pickup?.lat.toFixed(3)},${pickup?.lng.toFixed(3)}|${delivery?.lat.toFixed(3)},${delivery?.lng.toFixed(3)}`;
     if (key === last.current) return;
     last.current = key;
 
@@ -178,25 +184,30 @@ function FocusPins({
 function MapClickHandler({
   pickMode,
   onPick,
+  enabled,
 }: {
   pickMode: MapPickMode;
   onPick: (point: LatLng) => void;
+  enabled: boolean;
 }) {
   const map = useMap();
 
   useEffect(() => {
-    if (!map) return;
+    if (!map || !enabled) return;
     const listener = map.addListener('click', (e: google.maps.MapMouseEvent) => {
       if (!pickMode || !e.latLng) return;
       onPick({ lat: e.latLng.lat(), lng: e.latLng.lng() });
     });
     return () => listener.remove();
-  }, [map, pickMode, onPick]);
+  }, [map, pickMode, onPick, enabled]);
 
   useEffect(() => {
     if (!map) return;
-    map.setOptions({ draggableCursor: pickMode ? 'crosshair' : undefined });
-  }, [map, pickMode]);
+    map.setOptions({
+      draggableCursor: enabled && pickMode ? 'crosshair' : undefined,
+      gestureHandling: enabled ? 'greedy' : 'none',
+    });
+  }, [map, pickMode, enabled]);
 
   return null;
 }
@@ -208,12 +219,16 @@ function InnerMap(props: RouteMapPickerProps) {
     path,
     pickMode,
     routing,
+    pinDragging = false,
     onPick,
     onDragPickup,
     onDragDelivery,
-    onLiveDragPickup,
-    onLiveDragDelivery,
+    onDragStart,
   } = props;
+
+  const [localDragging, setLocalDragging] = useState(false);
+  const dragging = pinDragging || localDragging;
+  const lockCamera = dragging || Boolean(routing);
 
   const center = useMemo(() => {
     if (pickup) return pickup;
@@ -221,53 +236,56 @@ function InnerMap(props: RouteMapPickerProps) {
     return VILLAVICENCIO_CENTER;
   }, [pickup, delivery]);
 
-  // Solo dibuja ruta de calles calculada (evita línea recta fantasma al arrastrar)
-  const roadPath = path.length >= 2 ? path : [];
+  const roadPath = !dragging && path.length >= 2 ? path : [];
+
+  function beginDrag(which: 'pickup' | 'delivery') {
+    setLocalDragging(true);
+    onDragStart?.(which);
+  }
+
+  function endDragPickup(e: google.maps.MapMouseEvent) {
+    const ll = e.latLng;
+    setLocalDragging(false);
+    if (!ll) return;
+    onDragPickup({ lat: ll.lat(), lng: ll.lng() });
+  }
+
+  function endDragDelivery(e: google.maps.MapMouseEvent) {
+    const ll = e.latLng;
+    setLocalDragging(false);
+    if (!ll) return;
+    onDragDelivery({ lat: ll.lat(), lng: ll.lng() });
+  }
 
   return (
     <Map
       defaultCenter={{ lat: center.lat, lng: center.lng }}
       defaultZoom={12}
       minZoom={10}
-      restriction={{
-        latLngBounds: {
-          north: VILLAVICENCIO_MAP_BOUNDS.north,
-          south: VILLAVICENCIO_MAP_BOUNDS.south,
-          east: VILLAVICENCIO_MAP_BOUNDS.east,
-          west: VILLAVICENCIO_MAP_BOUNDS.west,
-        },
-        strictBounds: false,
-      }}
       mapId={GOOGLE_MAPS_MAP_ID}
       colorScheme="DARK"
-      gestureHandling="greedy"
+      gestureHandling={dragging ? 'none' : 'greedy'}
+      keyboardShortcuts={false}
       disableDefaultUI={false}
       zoomControl
       mapTypeControl={false}
-      streetViewControl={false}
+      streetViewControl
       fullscreenControl={false}
       style={{ width: '100%', height: '100%' }}
       className="h-full w-full"
+      reuseMaps
     >
-      <MapClickHandler pickMode={pickMode} onPick={onPick} />
-      <FocusPins pickup={pickup} delivery={delivery} skipFit={Boolean(routing)} />
-      <RoadPolyline path={roadPath} fit={!routing} />
+      <MapClickHandler pickMode={pickMode} onPick={onPick} enabled={!dragging} />
+      <FocusPins pickup={pickup} delivery={delivery} skipFit={lockCamera} />
+      <RoadPolyline path={roadPath} fit={!lockCamera} />
 
       {pickup ? (
         <AdvancedMarker
           position={{ lat: pickup.lat, lng: pickup.lng }}
           draggable
-          title="A · Recolección (punto de salida)"
-          onDrag={(e) => {
-            const ll = e.latLng;
-            if (!ll) return;
-            onLiveDragPickup?.({ lat: ll.lat(), lng: ll.lng() });
-          }}
-          onDragEnd={(e) => {
-            const ll = e.latLng;
-            if (!ll) return;
-            onDragPickup({ lat: ll.lat(), lng: ll.lng() });
-          }}
+          title="A · Recolección (arrastra para ajustar)"
+          onDragStart={() => beginDrag('pickup')}
+          onDragEnd={endDragPickup}
         >
           <PinBadge letter="A" color="#2B6CFF" caption="Recolección" />
         </AdvancedMarker>
@@ -277,17 +295,9 @@ function InnerMap(props: RouteMapPickerProps) {
         <AdvancedMarker
           position={{ lat: delivery.lat, lng: delivery.lng }}
           draggable
-          title="B · Entrega (punto de llegada)"
-          onDrag={(e) => {
-            const ll = e.latLng;
-            if (!ll) return;
-            onLiveDragDelivery?.({ lat: ll.lat(), lng: ll.lng() });
-          }}
-          onDragEnd={(e) => {
-            const ll = e.latLng;
-            if (!ll) return;
-            onDragDelivery({ lat: ll.lat(), lng: ll.lng() });
-          }}
+          title="B · Entrega (arrastra para ajustar)"
+          onDragStart={() => beginDrag('delivery')}
+          onDragEnd={endDragDelivery}
         >
           <PinBadge letter="B" color="#FF5722" caption="Entrega" />
         </AdvancedMarker>
@@ -297,35 +307,17 @@ function InnerMap(props: RouteMapPickerProps) {
 }
 
 export function RouteMapPickerInner(props: RouteMapPickerProps) {
-  const { heightClass = 'h-64 sm:h-80', routing } = props;
-
+  const { heightClass = 'h-64 sm:h-80', pinDragging } = props;
   return (
     <div
-      className={`relative z-0 ${heightClass} w-full overflow-hidden rounded-xl border border-[var(--domi-border)] bg-[#0a0e16]`}
-      role="application"
-      aria-label="Mapa Google DomiClick"
+      className={`relative overflow-hidden rounded-xl border border-[var(--domi-border)] ${heightClass}`}
     >
       <InnerMap {...props} />
-
-      <div className="pointer-events-none absolute left-2 top-2 z-10 space-y-1 rounded-lg border border-[var(--domi-border)] bg-[#0a101c]/92 px-2 py-1.5 text-[10px]">
-        <div className="font-bold text-[#2B6CFF]">A · Recolección (salida)</div>
-        <div className="font-bold text-[#FF5722]">B · Entrega (llegada)</div>
-      </div>
-
-      {routing ? (
-        <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 -translate-y-1/2 text-center">
-          <span className="rounded-full border border-[rgba(0,229,255,0.35)] bg-[#0a101c]/90 px-3 py-1.5 text-xs font-semibold text-[var(--domi-cyan)]">
-            Optimizando ruta…
-          </span>
-        </div>
-      ) : null}
-
-      <div className="pointer-events-none absolute bottom-2 right-2 z-10 rounded-xl border border-[#FF5722]/40 bg-[#0a101c]/90 px-2.5 py-1.5">
-        <div className="font-display text-[10px] font-black italic text-white">
-          Domi<span className="text-[#FF5722]">Click</span>
-        </div>
-        <div className="text-[8px] text-slate-400">Arrastra A / B · ruta se actualiza</div>
-      </div>
+      <p className="pointer-events-none absolute bottom-2 right-2 rounded-lg bg-black/70 px-2 py-1 text-[10px] text-white">
+        {pinDragging
+          ? 'Suelta el pin para actualizar la ruta'
+          : 'DomiClick: Arrastra A / B · ruta se actualiza'}
+      </p>
     </div>
   );
 }

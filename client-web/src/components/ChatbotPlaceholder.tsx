@@ -152,7 +152,7 @@ export function ChatbotPlaceholder() {
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-3">
+    <div className="fixed bottom-24 right-3 z-40 flex flex-col items-end gap-3 sm:bottom-5 sm:right-5 max-sm:scale-90 origin-bottom-right">
       {open ? (
         <div
           id={panelId}

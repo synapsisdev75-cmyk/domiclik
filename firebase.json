@@ -47,6 +47,14 @@
           "function": "googleOAuthToken"
         },
         {
+          "source": "/privacy.html",
+          "destination": "/privacy.html"
+        },
+        {
+          "source": "/delete-account.html",
+          "destination": "/delete-account.html"
+        },
+        {
           "source": "**",
           "destination": "/index.html"
         }

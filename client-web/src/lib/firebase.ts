@@ -1,12 +1,19 @@
+import { Capacitor } from '@capacitor/core';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
+  initializeAuth,
   getAuth,
   GoogleAuthProvider,
+  OAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  signInWithCredential,
   getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  browserPopupRedirectResolver,
   type User,
 } from 'firebase/auth';
 import {
@@ -24,7 +31,6 @@ import {
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import fallback from '../firebase-applet-config.json' with { type: 'json' };
-import { assertServiceAllowedAt } from './riskZones';
 
 function env(key: string): string {
   try {
@@ -36,9 +42,30 @@ function env(key: string): string {
   return '';
 }
 
+/** Mismo host que la app → evita "falta del estado inicial" en redirect Google. */
+function resolveAuthDomain(fallbackDomain: string): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    if (host === 'domiclick.com' || host === 'www.domiclick.com') return 'domiclick.com';
+    if (host === 'ops.domiclick.com') return 'ops.domiclick.com';
+    if (host === 'domiclick-ops.web.app') return 'domiclick-ops.web.app';
+    if (host === 'domiclick-ops.firebaseapp.com') return 'domiclick-ops.firebaseapp.com';
+    if (host === 'gen-lang-client-0954482957.web.app') {
+      return 'gen-lang-client-0954482957.web.app';
+    }
+    if (host === 'gen-lang-client-0954482957.firebaseapp.com') {
+      return 'gen-lang-client-0954482957.firebaseapp.com';
+    }
+  }
+  // Solo si el host no es conocido (SSR / localhost)
+  const fromEnv = env('VITE_FIREBASE_AUTH_DOMAIN');
+  if (fromEnv) return fromEnv;
+  return fallbackDomain || 'domiclick.com';
+}
+
 const firebaseConfig = {
   apiKey: env('VITE_FIREBASE_API_KEY') || fallback.apiKey,
-  authDomain: env('VITE_FIREBASE_AUTH_DOMAIN') || fallback.authDomain,
+  authDomain: resolveAuthDomain(fallback.authDomain || 'domiclick.com'),
   projectId: env('VITE_FIREBASE_PROJECT_ID') || fallback.projectId,
   storageBucket: env('VITE_FIREBASE_STORAGE_BUCKET') || fallback.storageBucket,
   messagingSenderId: env('VITE_FIREBASE_MESSAGING_SENDER_ID') || fallback.messagingSenderId,
@@ -66,7 +93,20 @@ function createClientFirestore() {
 }
 
 export const db = createClientFirestore();
-export const auth = getAuth(app);
+
+function createClientAuth() {
+  try {
+    // Safari/iPhone: localStorage + resolver de redirect (evita “falta del estado inicial”)
+    return initializeAuth(app, {
+      persistence: [browserLocalPersistence, indexedDBLocalPersistence],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } catch {
+    return getAuth(app);
+  }
+}
+
+export const auth = createClientAuth();
 export const storage = getStorage(app);
 
 export const googleProvider = new GoogleAuthProvider();
@@ -83,23 +123,115 @@ function isMobileBrowser(): boolean {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
 
+function isIOSBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isCapacitorNative(): boolean {
+  try {
+    return Capacitor.isNativePlatform();
+  } catch {
+    return false;
+  }
+}
+
+function isMissingRedirectStateError(err: unknown): boolean {
+  const code = (err as { code?: string })?.code || '';
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  return (
+    code === 'auth/no-auth-event' ||
+    /falta del estado inicial|missing initial state|sessionStorage|partitioned storage|storage unavailable/i.test(
+      raw,
+    )
+  );
+}
+
+function authErrBlob(err: unknown): string {
+  const e = err as { code?: string; message?: string; errorMessage?: string };
+  return `${e?.code || ''} ${e?.message || ''} ${e?.errorMessage || ''} ${err instanceof Error ? err.message : String(err ?? '')}`;
+}
+
+function isGoogleUserCancelled(err: unknown): boolean {
+  return /USER_CANCELLED|GetCredentialCancellation|canceled by the user|cancelled by user|Authorization canceled/i.test(
+    authErrBlob(err),
+  );
+}
+
 function describeGoogleAuthError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  if (/origin_mismatch|unauthorized|invalid_client/i.test(message)) {
+  const blob = authErrBlob(err);
+
+  if (isMissingRedirectStateError(err)) {
     return (
-      `Google bloqueó el login desde ${origin || 'este dominio'}. ` +
-      'En Google Cloud Console → Credenciales → Client ID OAuth web, agrega ese origen en ' +
-      '"Orígenes de JavaScript autorizados" y en Firebase Auth → Dominios autorizados.'
+      'Google no pudo completar el redirect. Cierra pestañas de Google, abre de nuevo ' +
+      'https://domiclick.com o la app e intenta iniciar sesión otra vez.'
     );
   }
-  if (/popup|blocked|closed|canceled|cancelled/i.test(message)) {
+  if (/28444|Developer console is not set up|not set up correctly/i.test(blob)) {
+    return (
+      'Google Cloud no reconoce esta app. En Firebase agrega el SHA-1 de Play App Signing ' +
+      '(Integridad de la app) para com.domiclick.app, espera 10 min y reinstala desde Play.'
+    );
+  }
+  if (/10:|DEVELOPER_ERROR|ApiException:\s*10/i.test(blob)) {
+    return (
+      'Google rechazó la firma (SHA-1). Confirma el SHA-1 de Play en Firebase y reinstala la app.'
+    );
+  }
+  if (/origin_mismatch|unauthorized|invalid_client|WILL_BE_OVERRIDDEN/i.test(blob)) {
+    return (
+      `Google bloqueó el login desde ${origin || 'este dominio'}. ` +
+      'Revisa OAuth Web Client ID / SHA-1 en Firebase (Android).'
+    );
+  }
+  if (isGoogleUserCancelled(err) || /NoCredentialsException|NoCredential/i.test(blob)) {
+    // Credential Manager: cancel tras elegir cuenta suele ser OAuth Testing / SHA / estado viejo.
+    return (
+      'Google cerró el acceso después de elegir la cuenta. ' +
+      '1) En Google Cloud → pantalla de consentimiento OAuth: si está en “Prueba”, agrega tu Gmail en Usuarios de prueba (o publícala). ' +
+      '2) Espera 1 minuto, cierra DomiClick por completo y vuelve a entrar. ' +
+      '3) Una sola pulsación en Entrar. ' +
+      'Si usas la app de Play, confirma SHA-1 de firma de la app en Firebase.'
+    );
+  }
+  if (/popup|blocked|closed|cancelled/i.test(message) && !isCapacitorNative()) {
     return 'Ventana de Google cerrada o bloqueada. Intenta de nuevo.';
   }
-  return message || 'No se pudo iniciar sesión con Google';
+  const short = message.replace(/\s+/g, ' ').trim();
+  return short.slice(0, 180) || 'No se pudo iniciar sesión con Google';
 }
 
 let completingRedirect = false;
+/** Evita dos getCredentialAsync a la vez (Android cancela el primero como USER_CANCELLED). */
+let googleNativeLoginInFlight: Promise<User> | null = null;
+let googleSocialInitialized = false;
+
+async function ensureGoogleSocialLogin(webClientId: string) {
+  const { SocialLogin } = await import('@capgo/capacitor-social-login');
+  if (!googleSocialInitialized) {
+    await SocialLogin.initialize({
+      google: {
+        webClientId,
+        mode: 'online',
+      },
+    });
+    googleSocialInitialized = true;
+  }
+  return SocialLogin;
+}
+
+async function clearGoogleCredentialState(
+  SocialLogin: Awaited<ReturnType<typeof ensureGoogleSocialLogin>>,
+) {
+  try {
+    await SocialLogin.logout({ provider: 'google' });
+  } catch {
+    /* sin sesión previa */
+  }
+}
 
 /** Completa el retorno de signInWithRedirect (Firebase Auth). */
 export async function completeGoogleRedirect(): Promise<User | null> {
@@ -109,6 +241,10 @@ export async function completeGoogleRedirect(): Promise<User | null> {
     const result = await getRedirectResult(auth);
     return result?.user ?? null;
   } catch (err) {
+    if (isMissingRedirectStateError(err)) {
+      console.warn('[DomiClick] Google redirect state lost', err);
+      return null;
+    }
     console.warn('[DomiClick] Google redirect', err);
     throw new Error(describeGoogleAuthError(err));
   } finally {
@@ -158,6 +294,58 @@ export function userToProfile(user: User): CustomerProfile {
 }
 
 export async function signInWithGoogle(): Promise<User> {
+  // App nativa Android/iOS: Google Credential Manager → Firebase credential
+  if (isCapacitorNative()) {
+    if (googleNativeLoginInFlight) return googleNativeLoginInFlight;
+
+    googleNativeLoginInFlight = (async () => {
+      try {
+        const webClientId = oauthClientId();
+        if (!webClientId) {
+          throw new Error('Falta el OAuth Web Client ID para Google en la app.');
+        }
+
+        const SocialLogin = await ensureGoogleSocialLogin(webClientId);
+        // Limpia estado viejo de Credential Manager (evita cancel tras elegir cuenta).
+        await clearGoogleCredentialState(SocialLogin);
+
+        const response = await SocialLogin.login({
+          provider: 'google',
+          options: {
+            style: 'standard',
+            filterByAuthorizedAccounts: false,
+            autoSelectEnabled: false,
+          },
+        });
+
+        if (response.provider !== 'google') {
+          throw new Error('Respuesta inesperada del login Google.');
+        }
+
+        const googleResult = response.result;
+        const idToken =
+          googleResult && 'idToken' in googleResult ? googleResult.idToken : null;
+        if (!idToken) {
+          throw new Error(
+            'Google no devolvió idToken. Verifica en Firebase/Google Cloud el SHA-1 de Play ' +
+              '(App signing) para com.domiclick.app y espera unos minutos.',
+          );
+        }
+
+        const credential = GoogleAuthProvider.credential(idToken);
+        const signed = await signInWithCredential(auth, credential);
+        return signed.user;
+      } catch (err) {
+        console.warn('[auth] Google native', err);
+        throw new Error(describeGoogleAuthError(err));
+      } finally {
+        googleNativeLoginInFlight = null;
+      }
+    })();
+
+    return googleNativeLoginInFlight;
+  }
+
   if (!oauthClientId()) {
     throw new Error('Falta el OAuth Client ID de Google (VITE_FIREBASE_OAUTH_CLIENT_ID).');
   }
@@ -166,10 +354,14 @@ export async function signInWithGoogle(): Promise<User> {
     const pending = await getRedirectResult(auth);
     if (pending?.user) return pending.user;
   } catch (err) {
-    throw new Error(describeGoogleAuthError(err));
+    if (!isMissingRedirectStateError(err)) {
+      throw new Error(describeGoogleAuthError(err));
+    }
   }
 
-  if (isMobileBrowser()) {
+  // iPhone/iPad web: popup. Android Chrome: redirect.
+  const useRedirect = isMobileBrowser() && !isIOSBrowser();
+  if (useRedirect) {
     await signInWithRedirect(auth, googleProvider);
     return new Promise(() => {
       /* La página redirige a Google y vuelve sola */
@@ -181,6 +373,9 @@ export async function signInWithGoogle(): Promise<User> {
     return result.user;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (isIOSBrowser()) {
+      throw new Error(describeGoogleAuthError(err));
+    }
     if (/popup|blocked|closed|canceled|cancelled/i.test(message)) {
       await signInWithRedirect(auth, googleProvider);
       return new Promise(() => {
@@ -188,6 +383,82 @@ export async function signInWithGoogle(): Promise<User> {
       });
     }
     throw new Error(describeGoogleAuthError(err));
+  }
+}
+
+function describeAppleAuthError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const code = (err as { code?: string })?.code || '';
+  const blob = `${code} ${message}`;
+  if (/cancel|canceled|cancelled/i.test(blob)) {
+    return 'Inicio con Apple cancelado. Intenta de nuevo.';
+  }
+  if (/auth\/operation-not-allowed|not enabled/i.test(blob)) {
+    return 'Apple no está habilitado en Firebase Authentication. Actívalo en la consola.';
+  }
+  if (/not.available|unsupported|configuration/i.test(blob)) {
+    return (
+      'Apple Sign-In no disponible aquí. En iPhone nativo hace falta la app iOS ' +
+      'y Sign in with Apple en Apple Developer.'
+    );
+  }
+  return message.replace(/\s+/g, ' ').trim().slice(0, 180) || 'No se pudo iniciar sesión con Apple';
+}
+
+/** Sign in with Apple (iOS Capgo; web/Safari con Firebase OAuth). */
+export async function signInWithApple(): Promise<User> {
+  if (isCapacitorNative() && Capacitor.getPlatform() === 'ios') {
+    try {
+      const { SocialLogin } = await import('@capgo/capacitor-social-login');
+      await SocialLogin.initialize({
+        apple: {},
+      });
+      const response = await SocialLogin.login({
+        provider: 'apple',
+        options: {
+          scopes: ['email', 'name'],
+        },
+      });
+      if (response.provider !== 'apple') {
+        throw new Error('Respuesta inesperada del login Apple.');
+      }
+      const appleResult = response.result as {
+        idToken?: string | null;
+        accessToken?: { token?: string } | string | null;
+      };
+      const idToken = appleResult?.idToken;
+      if (!idToken) {
+        throw new Error('Apple no devolvió idToken. Revisa Sign in with Apple en Apple Developer.');
+      }
+      const provider = new OAuthProvider('apple.com');
+      const access =
+        typeof appleResult.accessToken === 'string'
+          ? appleResult.accessToken
+          : appleResult.accessToken?.token;
+      const credential = provider.credential({
+        idToken,
+        accessToken: access || undefined,
+      });
+      const signed = await signInWithCredential(auth, credential);
+      return signed.user;
+    } catch (err) {
+      console.warn('[auth] Apple native', err);
+      throw new Error(describeAppleAuthError(err));
+    }
+  }
+
+  try {
+    const provider = new OAuthProvider('apple.com');
+    provider.addScope('email');
+    provider.addScope('name');
+    if (isMobileBrowser() && !isIOSBrowser()) {
+      await signInWithRedirect(auth, provider);
+      return new Promise(() => {});
+    }
+    const result = await signInWithPopup(auth, provider);
+    return result.user;
+  } catch (err) {
+    throw new Error(describeAppleAuthError(err));
   }
 }
 
@@ -455,9 +726,6 @@ export async function resolveCouponDiscount(
  * Usado como canal principal/respaldo para que Central vea la solicitud en vivo.
  */
 export async function createClientOrder(input: ClientOrderInput) {
-  assertServiceAllowedAt(input.pickupLat, input.pickupLng);
-  assertServiceAllowedAt(input.deliveryLat, input.deliveryLng);
-
   const orderId = 'ord_' + Date.now();
   const trackingCode = 'DMC-' + Math.floor(1000 + Math.random() * 9000);
   const deliveryConfirmCode = String(Math.floor(100000 + Math.random() * 900000));
@@ -536,5 +804,47 @@ export async function createClientOrder(input: ClientOrderInput) {
     scheduledFor: order.scheduledFor || null,
     pricingBand: order.pricingBand || null,
   };
+}
+
+export type CustomerOrderSummary = {
+  orderId: string;
+  trackingCode: string;
+  status: string;
+  pickupAddress?: string;
+  deliveryAddress?: string;
+  description?: string;
+  createdAt?: string;
+  scheduledFor?: string;
+};
+
+export async function listCustomerOrders(uid: string): Promise<CustomerOrderSummary[]> {
+  const customerUid = uid.trim();
+  if (!customerUid) return [];
+
+  const snap = await getDocs(
+    query(collection(db, 'orders'), where('customerUid', '==', customerUid), limit(40)),
+  );
+
+  const rows: CustomerOrderSummary[] = snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      orderId: d.id,
+      trackingCode: String(data.trackingCode || ''),
+      status: String(data.status || 'pending'),
+      pickupAddress: data.pickupAddress ? String(data.pickupAddress) : undefined,
+      deliveryAddress: data.deliveryAddress ? String(data.deliveryAddress) : undefined,
+      description: data.description ? String(data.description) : undefined,
+      createdAt: data.createdAt ? String(data.createdAt) : undefined,
+      scheduledFor: data.scheduledFor ? String(data.scheduledFor) : undefined,
+    };
+  });
+
+  rows.sort((a, b) => {
+    const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
+    const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
+    return tb - ta;
+  });
+
+  return rows.filter((r) => r.trackingCode);
 }
 

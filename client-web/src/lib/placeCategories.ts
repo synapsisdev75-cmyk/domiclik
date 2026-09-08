@@ -9,6 +9,92 @@ export type PlaceCategory = {
 
 const CATEGORIES: PlaceCategory[] = [
   {
+    id: 'hospital',
+    label: 'Hospital',
+    kindLabels: ['Hospital', 'Clínica'],
+    labelHints: ['hospital', 'clinica', 'clínica', 'urgencia', 'ips'],
+    terms: ['hospital', 'clinica', 'clínica', 'ips', 'urgencia', 'urgencias'],
+    googleIncludedType: 'hospital',
+  },
+  {
+    id: 'clinica',
+    label: 'Clínica',
+    kindLabels: ['Clínica', 'Hospital'],
+    labelHints: ['clinica', 'clínica', 'consultorio'],
+    terms: ['clinica', 'clínica', 'consultorio'],
+    googleIncludedType: 'hospital',
+  },
+  {
+    id: 'parque',
+    label: 'Parque',
+    kindLabels: ['Parque'],
+    labelHints: ['parque', 'parqueadero', 'fundadores', 'los fundadores'],
+    terms: ['parque', 'parques'],
+    googleIncludedType: 'park',
+  },
+  {
+    id: 'polideportivo',
+    label: 'Polideportivo',
+    kindLabels: ['Estadio', 'Parque', 'Lugar'],
+    labelHints: ['polideportivo', 'cancha', 'estadio', 'coliseo', 'deportivo'],
+    terms: ['polideportivo', 'cancha', 'estadio', 'coliseo', 'gimnasio', 'gym'],
+    googleIncludedType: 'stadium',
+  },
+  {
+    id: 'urbanizacion',
+    label: 'Urbanización',
+    kindLabels: ['Urbanización', 'Barrio', 'Zona'],
+    labelHints: ['urbanizacion', 'urbanización', 'conjunto', 'residencial'],
+    terms: ['urbanizacion', 'urbanización', 'urb', 'conjunto', 'conj', 'residencial'],
+  },
+  {
+    id: 'barrio',
+    label: 'Barrio',
+    kindLabels: ['Barrio', 'Zona', 'Urbanización'],
+    labelHints: ['barrio', 'sector', 'zona'],
+    terms: ['barrio', 'barrios', 'sector'],
+  },
+  {
+    id: 'colegio',
+    label: 'Colegio',
+    kindLabels: ['Colegio', 'Universidad'],
+    labelHints: ['colegio', 'escuela', 'instituto', 'jardin', 'jardín'],
+    terms: ['colegio', 'escuela', 'instituto', 'jardin', 'jardín'],
+    googleIncludedType: 'school',
+  },
+  {
+    id: 'universidad',
+    label: 'Universidad',
+    kindLabels: ['Universidad', 'Colegio'],
+    labelHints: ['universidad', 'universitario', 'unal', 'santo tomas'],
+    terms: ['universidad', 'universitario', 'campus'],
+    googleIncludedType: 'university',
+  },
+  {
+    id: 'iglesia',
+    label: 'Iglesia',
+    kindLabels: ['Iglesia', 'Lugar'],
+    labelHints: ['iglesia', 'capilla', 'catedral', 'parroquia'],
+    terms: ['iglesia', 'capilla', 'catedral', 'parroquia', 'templo'],
+    googleIncludedType: 'church',
+  },
+  {
+    id: 'banco',
+    label: 'Banco',
+    kindLabels: ['Banco', 'Negocio'],
+    labelHints: ['banco', 'bancolombia', 'davivienda', 'bbva', 'cajero'],
+    terms: ['banco', 'bancolombia', 'davivienda', 'bbva', 'cajero'],
+    googleIncludedType: 'bank',
+  },
+  {
+    id: 'gasolinera',
+    label: 'Gasolinera',
+    kindLabels: ['Gasolinera', 'Negocio'],
+    labelHints: ['gasolinera', 'eds', 'terpel', 'mobil', 'primax'],
+    terms: ['gasolinera', 'eds', 'combustible', 'terpel', 'primax'],
+    googleIncludedType: 'gas_station',
+  },
+  {
     id: 'carniceria',
     label: 'Carnicería',
     kindLabels: ['Carnicería'],
@@ -45,7 +131,7 @@ const CATEGORIES: PlaceCategory[] = [
     label: 'Supermercado',
     kindLabels: ['Supermercado'],
     labelHints: ['supermercado', 'exito', 'éxito', 'olimpica', 'olímpica', 'd1', 'ara'],
-    terms: ['supermercado', 'super', 'mercado', 'exito', 'éxito', 'olimpica'],
+    terms: ['supermercado', 'super', 'mercado', 'exito', 'éxito', 'olimpica', 'alkosto', 'makro'],
     googleIncludedType: 'supermarket',
   },
   {
@@ -92,9 +178,25 @@ const CATEGORIES: PlaceCategory[] = [
     id: 'centro_comercial',
     label: 'Centro comercial',
     kindLabels: ['Centro comercial'],
-    labelHints: ['centro comercial', 'unicentro', 'viva', 'mall'],
-    terms: ['centro comercial', 'cc', 'mall', 'unicentro', 'viva'],
+    labelHints: ['centro comercial', 'unicentro', 'viva', 'mall', 'villacentro'],
+    terms: ['centro comercial', 'cc', 'mall', 'unicentro', 'viva', 'villacentro'],
     googleIncludedType: 'shopping_mall',
+  },
+  {
+    id: 'terminal',
+    label: 'Terminal',
+    kindLabels: ['Terminal', 'Aeropuerto'],
+    labelHints: ['terminal', 'transporte'],
+    terms: ['terminal', 'terminal de transportes'],
+    googleIncludedType: 'bus_station',
+  },
+  {
+    id: 'aeropuerto',
+    label: 'Aeropuerto',
+    kindLabels: ['Aeropuerto'],
+    labelHints: ['aeropuerto', 'vanguardia'],
+    terms: ['aeropuerto', 'aeropuerto vanguardia'],
+    googleIncludedType: 'airport',
   },
 ];
 
@@ -107,14 +209,14 @@ function fold(s: string) {
 
 export function resolvePlaceCategory(query: string): PlaceCategory | null {
   const q = fold(query.trim());
-  if (q.length < 3) return null;
+  if (q.length < 2) return null;
   let best: { cat: PlaceCategory; score: number } | null = null;
   for (const cat of CATEGORIES) {
     for (const term of cat.terms) {
       const t = fold(term);
       if (q === t) return cat;
-      if (q.startsWith(t) || t.startsWith(q)) {
-        const score = Math.min(q.length, t.length);
+      if (q.includes(t) || t.startsWith(q) || q.startsWith(t)) {
+        const score = Math.min(q.length, t.length) + (q.includes(t) ? 5 : 0);
         if (!best || score > best.score) best = { cat, score };
       }
     }
@@ -124,6 +226,25 @@ export function resolvePlaceCategory(query: string): PlaceCategory | null {
 
 export function isCategoryQuery(query: string): boolean {
   return resolvePlaceCategory(query) !== null;
+}
+
+/** True si la query parece nombre de lugar / POI (no solo vía con placa). */
+export function looksLikePlaceQuery(query: string): boolean {
+  const q = fold(query.trim());
+  if (q.length < 2) return false;
+  if (resolvePlaceCategory(query)) return true;
+  if (/\b(urb|urbanizacion|urbanización|conjunto|conj|residencial|barrio|sector)\b/.test(q)) {
+    return true;
+  }
+  // Nombre propio / negocio: letras sin patrón claro de vía+placa
+  if (/#\s*[\da-z]/.test(q)) return false;
+  if (
+    /^(calle|carrera|avenida|diagonal|transversal|cl|cra|cr|av|dg|tv)\b/.test(q) &&
+    /\d/.test(q)
+  ) {
+    return false;
+  }
+  return /[a-z]{3,}/.test(q);
 }
 
 export function categoryMatchesPlace(

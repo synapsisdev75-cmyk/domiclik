@@ -15,12 +15,48 @@ function isMobileBrowser(): boolean {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
 
-/** En hosting real el popup de Google falla a menudo; redirect es más estable. */
+function isIOSBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  const iOS = /iPhone|iPad|iPod/i.test(ua);
+  const iPadOS = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  return iOS || iPadOS;
+}
+
+function isCapacitorNative(): boolean {
+  if (typeof window === 'undefined') return false;
+  const cap = (window as Window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+  try {
+    return Boolean(cap?.isNativePlatform?.());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * iPhone/iPad: NUNCA redirect (Safari pierde el estado y vuelve al login sin entrar).
+ * Usar popup (Firebase Option 2). Capacitor Android: popup.
+ * Android Chrome móvil: redirect OK si authDomain coincide con el host.
+ */
 function preferRedirectFlow(): boolean {
-  if (isMobileBrowser()) return true;
-  if (typeof window === 'undefined') return true;
+  if (isCapacitorNative()) return false;
+  if (isIOSBrowser()) return false;
+  if (typeof window === 'undefined') return false;
   const host = window.location.hostname;
-  return host !== 'localhost' && host !== '127.0.0.1';
+  if (host === 'localhost' || host === '127.0.0.1') return false;
+  return isMobileBrowser();
+}
+
+function isMissingRedirectStateError(err: unknown): boolean {
+  const code = (err as { code?: string })?.code || '';
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  return (
+    code === 'auth/no-auth-event' ||
+    code === 'auth/argument-error' ||
+    /falta del estado inicial|missing initial state|sessionStorage|partitioned storage|storage unavailable/i.test(
+      raw,
+    )
+  );
 }
 
 function clearOAuthUrl() {
@@ -105,8 +141,8 @@ export function describeAuthError(err: unknown): string {
   }
   if (code === 'auth/network-request-failed') {
     return (
-      'No se pudo conectar con Google (red o popup bloqueado). Recarga la página, permite ventanas ' +
-      'emergentes y vuelve a intentar. Si persiste, agrega este dominio en Firebase Auth → Authorized domains.'
+      'No se pudo conectar con Google. Revisa la red, recarga e intenta de nuevo. ' +
+      'En iPhone también puedes entrar con correo y contraseña.'
     );
   }
   if (
@@ -114,7 +150,10 @@ export function describeAuthError(err: unknown): string {
     code === 'auth/popup-closed-by-user' ||
     code === 'auth/cancelled-popup-request'
   ) {
-    return 'Ventana de Google cerrada o bloqueada. Permite ventanas emergentes e inténtalo de nuevo.';
+    return (
+      'Safari bloqueó o cerró la ventana de Google. Vuelve a pulsar «Continuar con Google» ' +
+      'y no cierres la pestaña hasta terminar. Si sigue fallando, entra con correo y contraseña.'
+    );
   }
   if (/origin_mismatch|redirect_uri|invalid_client|unauthorized_client/i.test(raw)) {
     return (
@@ -131,11 +170,18 @@ export function describeAuthError(err: unknown): string {
   if (code === 'auth/too-many-requests') {
     return 'Demasiados intentos. Espera un minuto o entra con Google.';
   }
+  if (isMissingRedirectStateError(err)) {
+    return (
+      'Google no completó el acceso en Safari. Pulsa otra vez «Continuar con Google» ' +
+      '(deja abierta la pestaña) o entra con correo y contraseña.'
+    );
+  }
   if (code) return `No se pudo entrar (${code}). Prueba correo/contraseña o recarga e intenta Google otra vez.`;
   return raw || 'No se pudo iniciar sesión.';
 }
 
 export async function startGoogleSignInRedirect() {
+  // iPhone: solo popup. Redirect en Safari regresa al login sin sesión.
   if (preferRedirectFlow()) {
     markRedirectPending();
     await signInWithRedirect(auth, googleProvider);
@@ -143,9 +189,16 @@ export async function startGoogleSignInRedirect() {
   }
 
   try {
+    markRedirectPending();
     const result = await signInWithPopup(auth, googleProvider);
+    clearRedirectPending();
     return result.user;
   } catch (err) {
+    clearRedirectPending();
+    // En iOS no caemos a redirect: falla en silencio y confunde.
+    if (isIOSBrowser()) {
+      throw err;
+    }
     const code = (err as { code?: string })?.code || '';
     if (
       code === 'auth/popup-blocked' ||
@@ -174,6 +227,7 @@ export function completeGoogleSignInFromRedirect(): Promise<User | null> {
   if (typeof window === 'undefined') return Promise.resolve(null);
   if (!completing) {
     completing = (async () => {
+      const wasPending = isGoogleOAuthReturn();
       try {
         if (isLegacyGoogleOAuthReturn()) {
           clearOAuthUrl();
@@ -181,11 +235,37 @@ export function completeGoogleSignInFromRedirect(): Promise<User | null> {
             'El login anterior falló al canjear el token. Pulsa otra vez Continuar con Google.'
           );
         }
-        const result = await getRedirectResult(auth);
-        clearRedirectPending();
-        return result?.user ?? null;
+        try {
+          await auth.authStateReady();
+          const result = await getRedirectResult(auth);
+          if (result?.user) {
+            clearRedirectPending();
+            return result.user;
+          }
+          // A veces el redirect deja la sesión en currentUser sin UserCredential
+          if (auth.currentUser) {
+            clearRedirectPending();
+            return auth.currentUser;
+          }
+          if (wasPending) {
+            clearRedirectPending();
+            throw new Error(
+              'Google abrió y volvió, pero Safari no guardó la sesión. ' +
+                'Pulsa otra vez «Continuar con Google» o entra con correo y contraseña.'
+            );
+          }
+          clearRedirectPending();
+          return null;
+        } catch (err) {
+          clearRedirectPending();
+          if (auth.currentUser) return auth.currentUser;
+          if (isMissingRedirectStateError(err)) {
+            console.warn('[DomiClick] Google redirect state lost', err);
+            throw new Error(describeAuthError(err));
+          }
+          throw err;
+        }
       } finally {
-        // Liberar tras un tick para callers concurrentes en el mismo montaje
         window.setTimeout(() => {
           completing = null;
         }, 0);

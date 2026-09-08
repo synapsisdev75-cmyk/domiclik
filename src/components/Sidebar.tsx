@@ -18,7 +18,6 @@ const ALL_ITEMS: { id: AdminSection; label: string; icon: BrandIconKey }[] = [
   { id: 'flota', label: 'Flota', icon: 'flota' },
   { id: 'envios', label: 'Envíos', icon: 'envios' },
   { id: 'incidentes', label: 'Incidentes', icon: 'incidentes' },
-  { id: 'sectores', label: 'Sectores', icon: 'cobertura' },
   { id: 'rutas', label: 'Rutas', icon: 'rutas' },
   { id: 'historial', label: 'Historial', icon: 'historial' },
   { id: 'reportes', label: 'Control', icon: 'control' },

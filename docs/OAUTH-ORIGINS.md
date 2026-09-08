@@ -28,20 +28,24 @@ http://127.0.0.1:3000
 
 ### URIs de redirección autorizados
 
-La torre ops usa el origen **sin** `/__/auth/handler` (flujo OAuth propio).
-Hay que copiarlas **tal cual**, sin barra al final.
+Copia **tal cual**, sin barra al final (salvo localhost con `/` si ya lo tenías).
+Para Firebase Auth Google hacen falta los `/__/auth/handler` de **cada** host.
 
 ```
-https://domiclick-ops.web.app
-https://domiclick-ops.firebaseapp.com
-https://ops.domiclick.com
-http://localhost:3000/
-http://127.0.0.1:3000/
+https://domiclick-ops.web.app/__/auth/handler
+https://domiclick-ops.firebaseapp.com/__/auth/handler
+https://ops.domiclick.com/__/auth/handler
 https://gen-lang-client-0954482957.firebaseapp.com/__/auth/handler
 https://gen-lang-client-0954482957.web.app/__/auth/handler
 https://domiclick.com/__/auth/handler
 https://www.domiclick.com/__/auth/handler
 http://localhost:5174/__/auth/handler
+http://localhost:3000/__/auth/handler
+https://domiclick-ops.web.app
+https://domiclick-ops.firebaseapp.com
+https://ops.domiclick.com
+http://localhost:3000/
+http://127.0.0.1:3000/
 ```
 
 Guarda y espera **2–5 minutos** antes de probar de nuevo.

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "npx tsc -b && npx vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "node scripts/patch-google-auth-client-id.mjs && node scripts/patch-capgo-google-idtoken-only.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",
@@ -18,8 +19,9 @@
     "@capacitor/geolocation": "^8.2.2",
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.3",
+    "@capgo/capacitor-social-login": "^8.5.5",
     "@vis.gl/react-google-maps": "^1.9.0",
-    "firebase": "^12.17.1",
+    "firebase": "^12.18.0",
     "lucide-react": "^1.31.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

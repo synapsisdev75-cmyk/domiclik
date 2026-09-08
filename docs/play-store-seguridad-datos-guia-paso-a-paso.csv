@@ -1,0 +1,33 @@
+Accion,Donde_en_Play_Console,Valor_DomiClick,Notas
+1,Descargar plantilla,Exportar a CSV en Seguridad de datos,NO subir play-store-seguridad-datos-domiclick.csv
+2,¿Recopila datos?,Pregunta inicial,Sí / TRUE
+3,¿Cifrado en tránsito?,Pregunta inicial,Sí / TRUE
+4,¿Eliminación solicitable?,Pregunta inicial,Sí / TRUE
+5,URL eliminación,URL eliminación cuenta,https://domiclick.com/delete-account.html
+6,Tipo cuenta,OAuth,TRUE
+7,Nombre - tipo dato,PSL_NAME,TRUE
+7,Nombre - recopila,Collected,TRUE
+7,Nombre - comparte,Shared,FALSE
+7,Nombre - obligatorio,Required,TRUE
+7,Nombre - propósito,App functionality,TRUE
+8,Email - tipo dato,PSL_EMAIL,TRUE
+8,Email - recopila,Collected,TRUE
+8,Email - comparte,Shared,FALSE
+8,Email - obligatorio,Required,TRUE
+8,Email - propósito,App functionality + Account management,TRUE
+9,Teléfono - tipo dato,PSL_PHONE,TRUE
+9,Teléfono - recopila,Collected,TRUE
+9,Teléfono - comparte,Shared,TRUE
+9,Teléfono - obligatorio,Required,TRUE
+9,Teléfono - propósito,App functionality,TRUE
+10,Ubicación precisa,PSL_PRECISE_LOCATION,TRUE
+10,Ubicación - recopila,Collected,TRUE
+10,Ubicación - comparte,Shared,TRUE
+10,Ubicación - obligatorio,Required,TRUE
+10,Ubicación - propósito,App functionality,TRUE
+11,Fotos,PSL_PHOTOS,TRUE
+11,Fotos - recopila,Collected,TRUE
+11,Fotos - comparte,Shared,FALSE
+11,Fotos - obligatorio,Optional,TRUE
+11,Fotos - propósito,App functionality,TRUE
+12,No marcar,Tarjeta/Salud/Contactos/SMS/Micrófono,FALSE o vacío

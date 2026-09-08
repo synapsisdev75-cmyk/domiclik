@@ -26,11 +26,39 @@ function readEnv(key: string): string {
   return '';
 }
 
+/**
+ * authDomain debe coincidir con el host actual. Si apunta a firebaseapp.com
+ * y la app está en domiclick.com / WebView, el redirect de Google pierde el
+ * estado de sesión ("falta del estado inicial" / partitioned storage).
+ */
+export function resolveAuthDomain(fallbackDomain: string): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    // Debe coincidir EXACTO con el host (Safari bloquea storage entre web.app ↔ firebaseapp.com)
+    if (host === 'domiclick.com' || host === 'www.domiclick.com') return 'domiclick.com';
+    if (host === 'ops.domiclick.com') return 'ops.domiclick.com';
+    if (host === 'domiclick-ops.web.app') return 'domiclick-ops.web.app';
+    if (host === 'domiclick-ops.firebaseapp.com') return 'domiclick-ops.firebaseapp.com';
+    if (host === 'gen-lang-client-0954482957.web.app') {
+      return 'gen-lang-client-0954482957.web.app';
+    }
+    if (host === 'gen-lang-client-0954482957.firebaseapp.com') {
+      return 'gen-lang-client-0954482957.firebaseapp.com';
+    }
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return fallbackDomain || 'domiclick.com';
+    }
+  }
+  const fromEnv = readEnv('VITE_FIREBASE_AUTH_DOMAIN');
+  if (fromEnv) return fromEnv;
+  return fallbackDomain || 'domiclick.com';
+}
+
 /** Config Firebase DomiClik: prioriza .env / VITE_* y cae al JSON del proyecto. */
 export function getFirebaseConfig(): DomiFirebaseConfig {
   return {
     apiKey: readEnv('VITE_FIREBASE_API_KEY') || fallback.apiKey,
-    authDomain: readEnv('VITE_FIREBASE_AUTH_DOMAIN') || fallback.authDomain,
+    authDomain: resolveAuthDomain(fallback.authDomain || 'domiclick.com'),
     projectId: readEnv('VITE_FIREBASE_PROJECT_ID') || fallback.projectId,
     storageBucket: readEnv('VITE_FIREBASE_STORAGE_BUCKET') || fallback.storageBucket,
     messagingSenderId:

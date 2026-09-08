@@ -1,5 +1,6 @@
 /**
- * Descarga el directorio OSM de Villavicencio y alrededores (barrios, vías, POIs).
+ * Descarga directorio OSM Villavicencio: barrios, urbanizaciones, hospitales,
+ * parques, vías, comercios y POIs.
  * Uso: node scripts/download-villavicencio-map.mjs
  */
 import { writeFileSync, mkdirSync } from 'fs';
@@ -20,46 +21,97 @@ const KIND = {
   neighbourhood: 'Barrio',
   quarter: 'Barrio',
   hamlet: 'Vereda',
+  isolated_dwelling: 'Vereda',
+  residential: 'Urbanización',
+  apartments: 'Urbanización',
   hospital: 'Hospital',
   clinic: 'Salud',
   doctors: 'Salud',
+  dentist: 'Salud',
+  nursing_home: 'Salud',
+  social_facility: 'Salud',
   university: 'Universidad',
   college: 'Universidad',
   school: 'Colegio',
   kindergarten: 'Colegio',
+  library: 'Biblioteca',
   pharmacy: 'Farmacia',
   police: 'Policía',
   fire_station: 'Sitio',
   fuel: 'Estación',
   bus_station: 'Terminal',
   bank: 'Banco',
+  atm: 'Banco',
   place_of_worship: 'Iglesia',
-  marketplace: 'Sitio',
+  marketplace: 'Plaza / mercado',
   community_centre: 'Sitio',
+  townhall: 'Sitio',
+  post_office: 'Sitio',
+  cinema: 'Cine',
+  theatre: 'Sitio',
   mall: 'Centro comercial',
   supermarket: 'Supermercado',
   department_store: 'Local',
+  convenience: 'Tienda',
+  bakery: 'Panadería',
+  butcher: 'Carnicería',
+  clothes: 'Comercio',
+  electronics: 'Comercio',
+  hardware: 'Ferretería',
+  furniture: 'Comercio',
+  car: 'Comercio',
+  car_repair: 'Taller',
+  beauty: 'Comercio',
+  hairdresser: 'Comercio',
+  laundry: 'Comercio',
+  mobile_phone: 'Comercio',
+  florist: 'Comercio',
+  books: 'Comercio',
+  sports: 'Comercio',
   park: 'Parque',
+  playground: 'Parque',
+  garden: 'Parque',
+  recreation_ground: 'Parque',
+  pitch: 'Cancha',
+  sports_centre: 'Deportes',
+  fitness_centre: 'Gimnasio',
   stadium: 'Estadio',
-  sports_centre: 'Sitio',
-  hotel: 'Sitio',
+  hotel: 'Hotel',
+  guest_house: 'Hotel',
   attraction: 'Sitio',
-  museum: 'Sitio',
+  museum: 'Museo',
+  viewpoint: 'Sitio',
   aerodrome: 'Aeropuerto',
+  restaurant: 'Restaurante',
+  fast_food: 'Comida rápida',
+  cafe: 'Café',
+  bar: 'Bar',
+  ice_cream: 'Heladería',
   motorway: 'Calle / avenida',
   trunk: 'Calle / avenida',
   primary: 'Calle / avenida',
   secondary: 'Calle / avenida',
   tertiary: 'Calle / avenida',
   unclassified: 'Calle / avenida',
-  residential: 'Calle / avenida',
   living_street: 'Calle / avenida',
 };
 
 const QUERIES = [
-  `[out:json][timeout:90];(nwr["place"~"^(city|town|village|suburb|neighbourhood|hamlet|quarter)$"](${BBOX}););out center tags;`,
-  `[out:json][timeout:90];(nwr["amenity"~"^(hospital|clinic|doctors|university|college|school|kindergarten|pharmacy|police|fire_station|fuel|bus_station|bank|place_of_worship|marketplace)$"](${BBOX});nwr["shop"~"^(mall|supermarket|department_store)$"](${BBOX});nwr["leisure"~"^(park|stadium|sports_centre)$"](${BBOX});nwr["tourism"~"^(hotel|attraction|museum)$"](${BBOX});nwr["aeroway"="aerodrome"](${BBOX}););out center tags;`,
+  // Barrios / lugares
+  `[out:json][timeout:90];(nwr["place"~"^(city|town|village|suburb|neighbourhood|hamlet|quarter|isolated_dwelling)$"](${BBOX}););out center tags;`,
+  // Urbanizaciones / conjuntos (landuse + building con nombre)
+  `[out:json][timeout:90];(nwr["landuse"="residential"]["name"](${BBOX});nwr["residential"]["name"](${BBOX});nwr["building"~"^(apartments|residential)$"]["name"](${BBOX});nwr["place"="neighbourhood"]["name"](${BBOX}););out center tags;`,
+  // Salud / educación / seguridad / civico
+  `[out:json][timeout:90];(nwr["amenity"~"^(hospital|clinic|doctors|dentist|nursing_home|social_facility|university|college|school|kindergarten|library|pharmacy|police|fire_station|fuel|bus_station|bank|atm|place_of_worship|marketplace|community_centre|townhall|post_office|cinema|theatre)$"](${BBOX});nwr["healthcare"]["name"](${BBOX});nwr["aeroway"="aerodrome"](${BBOX}););out center tags;`,
+  // Parques y deporte
+  `[out:json][timeout:90];(nwr["leisure"~"^(park|playground|garden|recreation_ground|pitch|sports_centre|fitness_centre|stadium)$"](${BBOX});nwr["tourism"~"^(hotel|guest_house|attraction|museum|viewpoint)$"](${BBOX}););out center tags;`,
+  // Comercios (shop) — lote 1
+  `[out:json][timeout:120];(nwr["shop"~"^(mall|supermarket|department_store|convenience|bakery|butcher|greengrocer|seafood|deli|clothes|electronics|hardware|furniture|car|car_repair|beauty|hairdresser|laundry|mobile_phone|florist|books|sports|chemist|optician|shoes|jewelry)$"](${BBOX}););out center tags;`,
+  // Comida / cafés
+  `[out:json][timeout:90];(nwr["amenity"~"^(restaurant|fast_food|cafe|bar|food_court|ice_cream|pub)$"](${BBOX}););out center tags;`,
+  // Vías principales
   `[out:json][timeout:120];(way["highway"~"^(motorway|trunk|primary|secondary|tertiary)$"]["name"](${BBOX}););out center tags;`,
+  // Vías residenciales
   `[out:json][timeout:120];(way["highway"~"^(unclassified|residential|living_street)$"]["name"](${BBOX}););out center tags;`,
 ];
 
@@ -101,6 +153,11 @@ function coords(el) {
 }
 
 function kindOf(tags = {}) {
+  if (tags.landuse === 'residential' || tags.residential || tags.building === 'apartments') {
+    return 'Urbanización';
+  }
+  if (tags.healthcare) return 'Salud';
+  if (tags.shop && !KIND[tags.shop]) return 'Comercio';
   return (
     KIND[tags.place] ||
     KIND[tags.amenity] ||
@@ -109,13 +166,18 @@ function kindOf(tags = {}) {
     KIND[tags.tourism] ||
     KIND[tags.aeroway] ||
     KIND[tags.highway] ||
+    KIND[tags.building] ||
     'Lugar'
   );
 }
 
 function secondary(tags = {}) {
   return (
-    [tags['addr:street'], tags['addr:suburb'] || tags.suburb, tags['addr:city'] || 'Villavicencio, Meta']
+    [
+      tags['addr:street'],
+      tags['addr:suburb'] || tags.suburb || tags['addr:neighbourhood'],
+      tags['addr:city'] || 'Villavicencio, Meta',
+    ]
       .filter(Boolean)
       .join(', ') || 'Villavicencio y alrededores'
   );
@@ -134,18 +196,22 @@ async function main() {
   const elements = [];
   for (let i = 0; i < QUERIES.length; i++) {
     console.log(`Overpass lote ${i + 1}/${QUERIES.length}…`);
-    const data = await overpass(QUERIES[i]);
-    const batch = data.elements || [];
-    console.log(`  ${batch.length} elementos`);
-    elements.push(...batch);
-    await new Promise((r) => setTimeout(r, 4000));
+    try {
+      const data = await overpass(QUERIES[i]);
+      const batch = data.elements || [];
+      console.log(`  ${batch.length} elementos`);
+      elements.push(...batch);
+    } catch (err) {
+      console.warn(`  Falló lote ${i + 1}:`, err?.message || err);
+    }
+    await new Promise((r) => setTimeout(r, 3500));
   }
 
   const seen = new Set();
   const places = [];
   for (const el of elements) {
     const tags = el.tags || {};
-    const name = tags.name || tags['name:es'] || tags['addr:street'];
+    const name = tags.name || tags['name:es'] || tags.brand || tags['addr:street'];
     const xy = coords(el);
     if (!name || !xy) continue;
     const key = `${fold(name)}|${xy.lat.toFixed(3)}|${xy.lng.toFixed(3)}|${kindOf(tags)}`;

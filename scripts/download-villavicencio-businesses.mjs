@@ -1,5 +1,5 @@
 /**
- * Descarga negocios OSM (restaurantes, carnicerías, etc.) para Villavicencio.
+ * Descarga comercios OSM registrados en Villavicencio y alrededores.
  * Uso: node scripts/download-villavicencio-businesses.mjs
  */
 import { writeFileSync, mkdirSync } from 'fs';
@@ -15,6 +15,7 @@ const KIND = {
   fast_food: 'Comida rápida',
   cafe: 'Café',
   bar: 'Bar',
+  pub: 'Bar',
   food_court: 'Restaurante',
   ice_cream: 'Heladería',
   butcher: 'Carnicería',
@@ -26,6 +27,23 @@ const KIND = {
   greengrocer: 'Frutería',
   seafood: 'Pescadería',
   deli: 'Deli',
+  clothes: 'Comercio',
+  electronics: 'Comercio',
+  hardware: 'Ferretería',
+  furniture: 'Comercio',
+  car: 'Comercio',
+  car_repair: 'Taller',
+  beauty: 'Comercio',
+  hairdresser: 'Comercio',
+  laundry: 'Comercio',
+  mobile_phone: 'Comercio',
+  florist: 'Comercio',
+  books: 'Comercio',
+  sports: 'Comercio',
+  chemist: 'Farmacia',
+  optician: 'Comercio',
+  shoes: 'Comercio',
+  jewelry: 'Comercio',
   hotel: 'Hotel',
   guest_house: 'Hotel',
   hostel: 'Hotel',
@@ -37,9 +55,13 @@ const ENDPOINTS = [
   'https://overpass.openstreetmap.fr/api/interpreter',
 ];
 
-const QL = `[out:json][timeout:120];(nwr["amenity"~"^(restaurant|fast_food|cafe|bar|food_court|ice_cream)$"](${BBOX});nwr["shop"~"^(butcher|bakery|convenience|supermarket|mall|department_store|greengrocer|seafood|deli)$"](${BBOX});nwr["tourism"~"^(hotel|guest_house|hostel|motel)$"](${BBOX}););out center tags;`;
+const QUERIES = [
+  `[out:json][timeout:120];(nwr["amenity"~"^(restaurant|fast_food|cafe|bar|pub|food_court|ice_cream)$"](${BBOX}););out center tags;`,
+  `[out:json][timeout:120];(nwr["shop"~"^(butcher|bakery|convenience|supermarket|mall|department_store|greengrocer|seafood|deli|clothes|electronics|hardware|furniture|car|car_repair|beauty|hairdresser|laundry|mobile_phone|florist|books|sports|chemist|optician|shoes|jewelry)$"](${BBOX}););out center tags;`,
+  `[out:json][timeout:90];(nwr["tourism"~"^(hotel|guest_house|hostel|motel)$"](${BBOX});nwr["craft"]["name"](${BBOX});nwr["office"]["name"](${BBOX}););out center tags;`,
+];
 
-async function overpass() {
+async function overpass(ql) {
   let last;
   for (const url of ENDPOINTS) {
     try {
@@ -49,7 +71,7 @@ async function overpass() {
           'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
           'User-Agent': 'DomiClick/1.0 (business gazetteer)',
         },
-        body: new URLSearchParams({ data: QL }),
+        body: new URLSearchParams({ data: ql }),
       });
       if (!res.ok) {
         last = new Error(`${url} ${res.status}`);
@@ -70,6 +92,8 @@ function coords(el) {
 }
 
 function kindOf(tags = {}) {
+  if (tags.craft) return 'Taller';
+  if (tags.office) return 'Oficina';
   return KIND[tags.amenity] || KIND[tags.shop] || KIND[tags.tourism] || 'Negocio';
 }
 
@@ -91,16 +115,28 @@ function fold(s) {
 }
 
 async function main() {
-  console.log('Descargando negocios OSM…');
-  const data = await overpass();
+  const elements = [];
+  for (let i = 0; i < QUERIES.length; i++) {
+    console.log(`Negocios lote ${i + 1}/${QUERIES.length}…`);
+    try {
+      const data = await overpass(QUERIES[i]);
+      const batch = data.elements || [];
+      console.log(`  ${batch.length} elementos`);
+      elements.push(...batch);
+    } catch (err) {
+      console.warn(`  Falló lote ${i + 1}:`, err?.message || err);
+    }
+    await new Promise((r) => setTimeout(r, 3500));
+  }
+
   const seen = new Set();
   const places = [];
-  for (const el of data.elements || []) {
+  for (const el of elements) {
     const tags = el.tags || {};
     const name = tags.name || tags['name:es'] || tags.brand;
     const xy = coords(el);
     if (!name || !xy) continue;
-    const key = `${fold(name)}|${xy.lat.toFixed(4)}|${xy.lng.toFixed(4)}`;
+    const key = `${fold(name)}|${xy.lat.toFixed(3)}|${xy.lng.toFixed(3)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     places.push({
@@ -111,13 +147,14 @@ async function main() {
       lng: Math.round(xy.lng * 1e6) / 1e6,
     });
   }
+
   places.sort((a, b) => a.label.localeCompare(b.label, 'es'));
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(
     OUT,
     JSON.stringify({
       generatedAt: new Date().toISOString(),
-      source: 'OpenStreetMap / Overpass (businesses)',
+      source: 'OpenStreetMap / Overpass',
       bbox: BBOX,
       count: places.length,
       places,

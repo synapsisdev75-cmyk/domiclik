@@ -151,6 +151,268 @@
   box-shadow: 0 0 0 3px rgba(255, 87, 34, 0.15);
 }
 
+/* Solo web/PC: campos de dirección más compactos (no afecta app nativa). */
+@media (min-width: 768px) {
+  .domi-web .field-input {
+    border-radius: 0.55rem;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.8125rem;
+    line-height: 1.25;
+  }
+
+  .domi-web .address-fields {
+    gap: 0.5rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 0.85rem;
+  }
+
+  .domi-web .address-fields > p:first-child {
+    font-size: 0.7rem;
+    margin-bottom: 0.15rem;
+  }
+
+  .domi-web .address-fields label > span,
+  .domi-web .address-fields .address-label {
+    margin-bottom: 0.3rem !important;
+    font-size: 0.65rem !important;
+    letter-spacing: 0.04em;
+  }
+
+  .domi-web .address-fields .address-grid-top,
+  .domi-web .address-fields .address-grid-bottom {
+    gap: 0.5rem;
+  }
+
+  .domi-web .address-fields [data-domi-place-search] > span:first-child {
+    margin-bottom: 0.3rem !important;
+    font-size: 0.65rem !important;
+  }
+
+  .domi-web .address-fields [data-domi-place-search] .field-input {
+    padding-top: 0.35rem !important;
+    padding-bottom: 0.35rem !important;
+    font-size: 0.8125rem !important;
+  }
+
+  .domi-web .address-fields [data-domi-place-search] button {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.65rem;
+    border-radius: 0.5rem;
+  }
+
+  .domi-web .address-fields .address-hint {
+    font-size: 0.65rem;
+    margin-top: 0.15rem;
+  }
+}
+
+/* Web PC: mapa protagonista + campos al lado */
+.domi-web .map-route-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+@media (min-width: 1024px) {
+  .domi-web .map-route-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.9fr);
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .domi-web .map-route-map {
+    min-height: min(68vh, 580px);
+  }
+
+  .domi-web .map-route-map .map-route-map-frame,
+  .domi-web .map-route-map > div {
+    height: min(68vh, 580px) !important;
+    min-height: 420px !important;
+  }
+
+  .domi-web .map-route-fields {
+    max-height: min(68vh, 580px);
+    overflow-y: auto;
+    padding-right: 0.15rem;
+  }
+
+  .domi-web .map-route-fields .address-fields {
+    margin-bottom: 0;
+  }
+}
+
+/* App nativa / móvil: mapa arriba, campos abajo (orden visual) */
+.domi-native .map-route-body,
+body:not(.domi-web) .map-route-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+@media (max-width: 1023px) {
+  .domi-web .map-route-body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .domi-web .map-route-map {
+    order: -1;
+  }
+}
+
+/* —— Landing story (web): tipografía + revelado —— */
+.landing-kicker {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--domi-cyan);
+}
+
+.landing-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: clamp(1.85rem, 4.2vw, 3.15rem);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: #fff;
+  max-width: 18ch;
+}
+
+.landing-title-accent {
+  display: inline;
+  background: linear-gradient(105deg, #ff5722 0%, #ff8a65 45%, #00e5ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.landing-lead {
+  font-size: clamp(1.02rem, 1.6vw, 1.2rem);
+  line-height: 1.65;
+  color: var(--domi-muted);
+}
+
+.landing-reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.landing-quote {
+  border-left: 2px solid rgba(0, 229, 255, 0.45);
+  padding: 1rem 0 1rem 1.25rem;
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.06), transparent 70%);
+}
+
+.landing-service {
+  padding: 1.25rem 0 1.35rem;
+  border-bottom: 1px solid rgba(26, 39, 68, 0.9);
+  transition: transform 0.35s ease, border-color 0.35s ease;
+}
+
+.landing-service:hover {
+  transform: translateX(4px);
+  border-color: rgba(255, 87, 34, 0.35);
+}
+
+.landing-service-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  margin-bottom: 0.85rem;
+  border-radius: 0.75rem;
+}
+
+.landing-service-icon--brand {
+  width: 3rem;
+  height: 3rem;
+  background: rgba(255, 87, 34, 0.12);
+  border: 1px solid rgba(255, 87, 34, 0.28);
+}
+
+.landing-coverage {
+  position: relative;
+  padding: 1.75rem 0 0.5rem;
+}
+
+.landing-coverage::before {
+  content: '';
+  position: absolute;
+  inset: 0 -0.5rem auto auto;
+  width: min(42%, 280px);
+  height: 100%;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 80% 20%, rgba(255, 87, 34, 0.12), transparent 65%);
+}
+
+.landing-coverage-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.85rem 0;
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #fff;
+  border-bottom: 1px solid rgba(26, 39, 68, 0.75);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Header fijo: vidrio difuminado (glass) siempre visible */
+.site-header--top {
+  background: rgba(5, 8, 15, 0.28);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+  backdrop-filter: blur(22px) saturate(1.35);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+}
+
+.site-header--scrolled {
+  background: rgba(5, 8, 15, 0.42);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 48px -20px rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(32px) saturate(1.45);
+  -webkit-backdrop-filter: blur(32px) saturate(1.45);
+}
+
+.domi-web .site-header--top {
+  background: linear-gradient(
+    180deg,
+    rgba(5, 8, 15, 0.45) 0%,
+    rgba(5, 8, 15, 0.22) 75%,
+    rgba(5, 8, 15, 0.08) 100%
+  );
+}
+
+.domi-web .site-header--scrolled {
+  background: linear-gradient(
+    180deg,
+    rgba(5, 8, 15, 0.55) 0%,
+    rgba(5, 8, 15, 0.35) 70%,
+    rgba(5, 8, 15, 0.18) 100%
+  );
+}
+
 .cta-primary {
   display: inline-flex;
   align-items: center;
@@ -260,7 +522,52 @@
   animation: domi-bot-blink 0.85s step-end infinite;
 }
 
-/* Safe area para barra de navegación inferior en móvil (notch / gesture bar) */
+/* Safe area + margen generoso: iconos por encima de la barra de gestos Android */
 .safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 22px));
+}
+
+/* Bajo la barra de estado / notch en Android e iOS */
+.safe-top {
+  padding-top: max(20px, calc(env(safe-area-inset-top, 0px) + 14px));
+}
+
+.app-screen {
+  padding-top: max(1.35rem, calc(env(safe-area-inset-top, 0px) + 1.1rem));
+}
+
+@keyframes welcome-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes welcome-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 10px rgba(255, 87, 34, 0.35));
+  }
+  50% {
+    filter: drop-shadow(0 0 22px rgba(0, 229, 255, 0.45))
+      drop-shadow(0 0 28px rgba(255, 87, 34, 0.55));
+  }
+}
+
+.welcome-logo-float {
+  animation: welcome-float 3.2s ease-in-out infinite;
+}
+
+.welcome-logo-pulse {
+  animation: welcome-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-logo-float,
+  .welcome-logo-pulse {
+    animation: none !important;
+  }
 }

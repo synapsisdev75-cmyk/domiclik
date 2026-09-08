@@ -1,0 +1,70 @@
+{
+  "project_info": {
+    "project_number": "712322107034",
+    "project_id": "gen-lang-client-0954482957",
+    "storage_bucket": "gen-lang-client-0954482957.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:712322107034:android:a0fdcdb70243ab421ac123",
+        "android_client_info": {
+          "package_name": "com.domiclick.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "712322107034-dhdbl2nd7blruk1hnev6ihn6rptal6if.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.domiclick.app",
+            "certificate_hash": "4f39e77edb4370d02e0cc820b7cb42958de545fc"
+          }
+        },
+        {
+          "client_id": "712322107034-e9bqdsmqc3r54ujuh3ld6rs75ots7eog.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.domiclick.app",
+            "certificate_hash": "ef836ff1683a10df00ae4c868ead06a8bc8ff749"
+          }
+        },
+        {
+          "client_id": "712322107034-lv9b9dp3g3v44gac29mpsufvj705avmi.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.domiclick.app",
+            "certificate_hash": "5478ddf54ed9a955253cfd017c4a042a4160b8d8"
+          }
+        },
+        {
+          "client_id": "712322107034-sf5vmu7ml9ct8g34uavef428ij16jln7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMqYR1D0kf-OOK648HBFEB52oUxwsvqX4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "712322107034-sf5vmu7ml9ct8g34uavef428ij16jln7.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "712322107034-fum7t5pep7nde8qc9fbs1588q404o33c.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.domiclick.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

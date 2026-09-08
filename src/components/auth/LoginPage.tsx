@@ -29,6 +29,7 @@ import {
   Clock,
   FileText,
 } from 'lucide-react';
+import { isUnreliableCustomDomain, opsAdminLoginUrl } from '../../lib/publicUrls';
 
 interface LoginPageProps {
   onLoginSuccess: (
@@ -68,7 +69,7 @@ function landingTransportistaUrl() {
     const host = window.location.hostname;
     if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:5174/transportista';
   }
-  return 'https://gen-lang-client-0954482957.web.app/transportista';
+  return 'https://domiclick.com/transportista';
 }
 
 function clearAuthQueryParams() {
@@ -214,6 +215,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [infoMsg, setInfoMsg] = useState('');
 
   const isRegisterMode = authMode === 'register';
+
+  // iPhone: ops.domiclick.com suele fallar (DNS/IPv6). Mandar a hosting estable.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!isUnreliableCustomDomain()) return;
+    const iOS =
+      /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!iOS) return;
+    const next = new URL(opsAdminLoginUrl());
+    const currentRole = new URLSearchParams(window.location.search).get('role');
+    if (currentRole) next.searchParams.set('role', currentRole);
+    window.location.replace(next.toString());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -580,6 +595,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               </svg>
               {isRegisterMode ? 'Registrarse con Google' : 'Continuar con Google'}
             </button>
+            {role === 'admin' ? (
+              <p className="-mt-3 mb-5 text-[10px] text-slate-500 leading-relaxed text-center">
+                iPhone: deja abierta la pestaña de Google hasta terminar. Si vuelve aquí sin
+                entrar, usa correo y contraseña o pulsa Google otra vez (Safari sin modo
+                privado).
+              </p>
+            ) : null}
 
             <div className="relative mb-5">
               <div className="absolute inset-0 flex items-center">

@@ -2,7 +2,7 @@ import { LogIn, LogOut, Loader2 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 
 export function AuthButton({ compact = false }: { compact?: boolean }) {
-  const { profile, loading, error, signIn, signOut, clearError } = useAuth();
+  const { profile, loading, error, isOpsAdmin, opsUrl, signIn, signOut, clearError } = useAuth();
 
   if (loading) {
     return (
@@ -15,32 +15,52 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
 
   if (profile) {
     return (
-      <div className="flex items-center gap-2 sm:gap-3">
-        {profile.photoURL ? (
-          <img
-            src={profile.photoURL}
-            alt=""
-            className="h-8 w-8 rounded-full border border-[var(--domi-border)] object-cover"
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(255,87,34,0.2)] text-xs font-bold text-[var(--domi-orange)]">
-            {(profile.displayName || profile.email || '?').slice(0, 1).toUpperCase()}
-          </span>
-        )}
-        {!compact ? (
-          <span className="hidden max-w-[9rem] truncate text-sm font-semibold text-white sm:inline">
-            {profile.displayName || profile.email}
-          </span>
+      <div className="flex flex-col items-end gap-1.5">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {profile.photoURL ? (
+            <img
+              src={profile.photoURL}
+              alt=""
+              className="h-8 w-8 rounded-full border border-[var(--domi-border)] object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(255,87,34,0.2)] text-xs font-bold text-[var(--domi-orange)]">
+              {(profile.displayName || profile.email || '?').slice(0, 1).toUpperCase()}
+            </span>
+          )}
+          {!compact ? (
+            <span className="hidden max-w-[9rem] truncate text-sm font-semibold text-white sm:inline">
+              {profile.displayName || profile.email}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--domi-border)] bg-white/5 px-3 py-1.5 text-xs font-semibold text-[var(--domi-muted)] transition hover:border-[rgba(255,87,34,0.45)] hover:text-white"
+          >
+            <LogOut className="h-3.5 w-3.5" aria-hidden />
+            Salir
+          </button>
+        </div>
+        {isOpsAdmin && !compact ? (
+          <a
+            href={opsUrl}
+            className="text-[10px] font-semibold text-[var(--domi-cyan)] underline-offset-2 hover:underline"
+            onClick={(e) => {
+              // iPhone: misma pestaña (mejor para Google Auth en la torre)
+              const iOS =
+                /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+              if (iOS) {
+                e.preventDefault();
+                window.location.assign(opsUrl);
+              }
+            }}
+          >
+            Abrir torre de control (admins)
+          </a>
         ) : null}
-        <button
-          type="button"
-          onClick={() => void signOut()}
-          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--domi-border)] bg-white/5 px-3 py-1.5 text-xs font-semibold text-[var(--domi-muted)] transition hover:border-[rgba(255,87,34,0.45)] hover:text-white"
-        >
-          <LogOut className="h-3.5 w-3.5" aria-hidden />
-          Salir
-        </button>
       </div>
     );
   }

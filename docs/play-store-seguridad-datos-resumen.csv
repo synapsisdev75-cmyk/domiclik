@@ -1,0 +1,32 @@
+Paso,Accion,Valor_a_ingresar
+1,¿Recopilas o compartes datos?,Sí
+2,¿Datos cifrados en tránsito?,Sí
+3,¿Usuario puede solicitar eliminación?,Sí
+4,URL eliminación de cuenta,https://domiclick.com/delete-account.html
+5,Tipo de cuenta,OAuth (Google)
+6,Nombre - Recopila,Sí
+6,Nombre - Comparte,No
+6,Nombre - Obligatorio,Sí
+6,Nombre - Uso,Funcionalidad de la app
+7,Email - Recopila,Sí
+7,Email - Comparte,No
+7,Email - Obligatorio,Sí
+7,Email - Uso,Cuenta / Funcionalidad
+8,Teléfono - Recopila,Sí
+8,Teléfono - Comparte,Sí (con repartidor del pedido)
+8,Teléfono - Obligatorio,Sí
+8,Teléfono - Uso,Funcionalidad de la app
+9,Ubicación precisa - Recopila,Sí
+9,Ubicación precisa - Comparte,Sí (con repartidor en envío activo)
+9,Ubicación precisa - Obligatorio,Sí
+9,Ubicación precisa - Uso,Funcionalidad de la app
+10,Fotos - Recopila,Sí
+10,Fotos - Comparte,No
+10,Fotos - Obligatorio,No (opcional)
+10,Fotos - Uso,Funcionalidad de la app
+11,Interacciones app - Recopila,Sí
+11,Interacciones app - Comparte,No
+11,Interacciones app - Uso,Funcionalidad de la app
+12,¿Publicidad?,No
+13,¿Venta de datos?,No
+14,Política privacidad,https://domiclick.com/privacy.html

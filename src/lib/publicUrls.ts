@@ -1,9 +1,9 @@
 /**
- * URLs públicas que SÍ funcionan en iPhone/Safari y WhatsApp.
- * NO compartir domiclick.com hasta arreglar DNS en Hostinger (ver docs/DNS-DOMICLICK-IPHONE.md).
+ * Landing en dominio propio (Firebase Hosting).
+ * La torre usa domiclick-ops.web.app hasta que ops.domiclick.com esté estable.
  */
 export const OPS_PUBLIC_ORIGIN = 'https://domiclick-ops.web.app';
-export const LANDING_PUBLIC_ORIGIN = 'https://gen-lang-client-0954482957.web.app';
+export const LANDING_PUBLIC_ORIGIN = 'https://domiclick.com';
 
 export function opsPublicUrl(path = '/', params?: Record<string, string>): string {
   const url = new URL(path, OPS_PUBLIC_ORIGIN);
@@ -25,5 +25,10 @@ export function landingPublicUrl(path = '/'): string {
 export function isUnreliableCustomDomain(): boolean {
   if (typeof window === 'undefined') return false;
   const host = window.location.hostname.toLowerCase();
-  return host === 'domiclick.com' || host === 'ops.domiclick.com';
+  return host === 'ops.domiclick.com';
+}
+
+/** URL estable para admins en iPhone (evita ops.domiclick.com si el DNS falla). */
+export function opsAdminLoginUrl(): string {
+  return 'https://domiclick-ops.web.app/?role=admin';
 }

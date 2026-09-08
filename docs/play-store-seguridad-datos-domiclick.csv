@@ -1,0 +1,28 @@
+Seccion,Categoria,Tipo_de_dato,Se_recopila,Se_comparte,Compartido_con,Obligatorio,Opcional,Finalidad_uso,Encriptado_transito,Usuario_puede_eliminar,Respuesta_Play_Console,Notas
+General,,¿Recopila datos?,Si,,,,,,Si, Si,,Marcar Sí en la primera pregunta
+General,,¿Cifrado en tránsito?,Si,,,,,,Si (HTTPS/TLS),,,Marcar Sí
+General,,¿Usuario puede solicitar eliminación?,Si,,,,,,,Si,,Marcar Sí
+General,,URL eliminación cuenta,,,,,,,,,https://domiclick.com/delete-account.html,Pegar en URL de eliminación de cuenta
+General,,Método de cuenta,,,,,,,,,OAuth,Marcar OAuth (login con Google)
+Identidad,Nombre,Nombre, Si, No,, Si, No, Funcionalidad de la app, Si, Si, Recopilado - Funcionalidad - Obligatorio,Desde Google Sign-In y formulario pedido
+Identidad,Correo electrónico,Email, Si, No,, Si, No, Cuenta / Funcionalidad de la app, Si, Si, Recopilado - Cuenta - Obligatorio,Login Google Firebase Auth
+Identidad,ID de usuario,User ID (Firebase UID), Si, No,, Si, No, Cuenta, Si, Si, Recopilado - Cuenta - Obligatorio,Identificador interno Firebase
+Contacto,Teléfono,Número de teléfono, Si, Si, Transportista asignado al pedido, Si, No, Funcionalidad de la app, Si, Si, Recopilado - Compartido con otros usuarios (repartidor) - Obligatorio,Solo para coordinar entrega
+Ubicación,Ubicación precisa,GPS / coordenadas, Si, Si, Transportista durante envío activo, Si, No, Funcionalidad de la app, Si, Si, Recopilado - Ubicación precisa - Obligatorio,Mapa A/B recolección y entrega + seguimiento
+Ubicación,Ubicación aproximada,, No, No,, No, No,,,,,No marcar
+Fotos,Fotos,Foto de factura (opcional), Si, No,, No, Si, Funcionalidad de la app, Si, Si, Recopilado - Opcional - Funcionalidad,Usuario elige adjuntar; Firebase Storage
+Actividad,Interacciones,Pedidos / estado / historial, Si, No,, Si, No, Funcionalidad de la app, Si, Si, Recopilado - Funcionalidad,Firestore orders collection
+Actividad,Direcciones,Dirección recolección y entrega, Si, Si, Transportista asignado, Si, No, Funcionalidad de la app, Si, Si, Recopilado - Funcionalidad,Texto + coordenadas del pedido
+Financiero,Pagos,Método de pago (efectivo/transferencia), Si, No,, Si, No, Funcionalidad de la app, Si, Si, Recopilado - Funcionalidad,No procesa tarjetas; solo indica forma de pago
+Financiero,Tarjeta de crédito,, No, No,, No, No,,,,,NO marcar - no hay pagos in-app
+Salud,,,, No, No,,,,,,,NO marcar
+Contactos agenda,,,, No, No,,,,,,,NO marcar
+SMS / llamadas,,,, No, No,,,,,,,NO marcar
+Micrófono,,,, No, No,,,,,,,NO marcar
+Archivos audio,,,, No, No,,,,,,,NO marcar
+Anuncios,Publicidad,, No, No,,,,,,,NO marcar - sin ads
+Ventas de datos,,,, No, No,,,,,,,NO marcar - no vendemos datos
+Terceros proveedor,Firebase Auth,Google Firebase, Si (procesador), No (no venta),,,,, Si,,,Backend: autenticación y base de datos
+Terceros proveedor,Google Maps,Google Maps Platform, Si (procesador), No,,,,, Si,,,Rutas y geocodificación; solo coordenadas
+Retención,,Datos de pedido,,,,,,,,,12 meses después de entrega,Luego eliminación automática
+Retención,,Datos de cuenta,,,,,,,,,Mientras cuenta activa,Eliminar vía delete-account URL
