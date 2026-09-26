@@ -32,7 +32,7 @@ export function QuickTrackingForm() {
       onSubmit={handleSubmit}
       className="glass-panel rounded-2xl p-6 sm:p-7"
     >
-      <h2 className="font-display text-xl font-bold text-white">Seguir un pedido</h2>
+      <h2 className="font-display text-xl font-bold text-[var(--domi-text)]">Seguir un pedido</h2>
       <p className="mt-1 text-sm text-[var(--domi-muted)]">
         Ingresa tu código (ej. DMC-4521). Requiere sesión Google.
       </p>

@@ -5,9 +5,14 @@ import {
   AdvancedMarker,
   useMap,
 } from '@vis.gl/react-google-maps';
+import { Crosshair, Loader2 } from 'lucide-react';
 import type { LatLng } from '../lib/geo';
 import { VILLAVICENCIO_CENTER } from '../lib/geo';
 import { GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_MAP_ID } from '../lib/config';
+import {
+  getPreciseLocation,
+  preciseLocationErrorMessage,
+} from '../lib/preciseLocation';
 
 export type MapPickMode = 'pickup' | 'delivery' | null;
 
@@ -63,7 +68,7 @@ function PinBadge({
         </span>
       </div>
       <span
-        className="mt-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white"
+        className="on-dark mt-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white"
         style={{ background: 'rgba(5,8,15,0.85)', border: `1px solid ${color}` }}
       >
         {caption}
@@ -307,16 +312,70 @@ function InnerMap(props: RouteMapPickerProps) {
 }
 
 export function RouteMapPickerInner(props: RouteMapPickerProps) {
-  const { heightClass = 'h-64 sm:h-80', pinDragging } = props;
+  const { heightClass = 'h-64 sm:h-80', pinDragging, pickMode, onPick } = props;
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const [gpsHint, setGpsHint] = useState<string | null>(null);
+
+  async function usePreciseGps() {
+    if (gpsBusy) return;
+    setGpsBusy(true);
+    setGpsHint(null);
+    try {
+      const loc = await getPreciseLocation();
+      onPick({ lat: loc.lat, lng: loc.lng });
+      const meters = Math.round(loc.accuracyM);
+      const which = pickMode === 'delivery' ? 'B · Entrega' : 'A · Recolección';
+      setGpsHint(
+        meters <= 25
+          ? `GPS preciso (~${meters} m) → ${which}`
+          : `Ubicación puesta (~${meters} m). Si puedes, sal al exterior para más precisión.`,
+      );
+      window.setTimeout(() => setGpsHint(null), 4200);
+    } catch (err) {
+      setGpsHint(preciseLocationErrorMessage(err));
+      window.setTimeout(() => setGpsHint(null), 5200);
+    } finally {
+      setGpsBusy(false);
+    }
+  }
+
   return (
     <div
       className={`relative overflow-hidden rounded-xl border border-[var(--domi-border)] ${heightClass}`}
     >
       <InnerMap {...props} />
+      <button
+        type="button"
+        onClick={() => void usePreciseGps()}
+        disabled={gpsBusy}
+        title={
+          pickMode === 'delivery'
+            ? 'Usar GPS preciso para B · Entrega'
+            : 'Usar GPS preciso para A · Recolección'
+        }
+        aria-label="Tomar ubicación precisa con GPS"
+        className="absolute bottom-3 left-3 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-[#0b1220]/92 text-[var(--domi-cyan)] shadow-lg backdrop-blur-sm transition hover:border-[var(--domi-cyan)] hover:bg-[#101a2c] disabled:opacity-60"
+      >
+        {gpsBusy ? (
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+        ) : (
+          <Crosshair className="h-5 w-5" aria-hidden />
+        )}
+      </button>
+      {gpsHint ? (
+        <p
+          className="pointer-events-none absolute bottom-14 left-3 z-10 max-w-[14rem] rounded-lg border border-white/15 bg-black/80 px-2.5 py-1.5 text-[10px] font-medium leading-snug text-white sm:max-w-[18rem]"
+          role="status"
+        >
+          {gpsHint}
+        </p>
+      ) : null}
       <p className="pointer-events-none absolute bottom-2 right-2 rounded-lg bg-black/70 px-2 py-1 text-[10px] text-white">
         {pinDragging
           ? 'Suelta el pin para actualizar la ruta'
-          : 'DomiClick: Arrastra A / B · ruta se actualiza'}
+          : gpsBusy
+            ? 'Obteniendo GPS preciso…'
+            : 'DomiClick: Arrastra A / B · ruta se actualiza'}
       </p>
     </div>
   );

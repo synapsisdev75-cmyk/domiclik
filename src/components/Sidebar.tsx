@@ -38,7 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const menuItems = ALL_ITEMS.filter((item) => allowed.has(item.id));
 
   return (
-    <aside className="w-20 sm:w-24 bg-[#05080f]/95 border-r border-[#1a2744] flex flex-col items-center py-4 justify-between shrink-0 select-none min-h-screen backdrop-blur-md">
+    <aside className="w-20 sm:w-24 ops-chrome border-r flex flex-col items-center py-4 justify-between shrink-0 select-none min-h-screen backdrop-blur-md">
       <div className="w-full flex flex-col items-center gap-2 px-1.5">
         {menuItems.map((item) => {
           const isActive = activeTab === item.id;

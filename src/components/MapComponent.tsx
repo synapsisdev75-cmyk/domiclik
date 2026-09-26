@@ -38,6 +38,11 @@ import {
   mapBasemapAttribution,
   type CartoRasterStyle,
 } from '../lib/cartoBasemaps';
+import {
+  buildGoogleMapsAbRouteUrl,
+  buildGoogleMapsNavigateToUrl,
+  openGoogleMapsNav,
+} from '../lib/googleMapsNav';
 
 // Google Maps React SDK
 import { APIProvider, Map as GoogleMap, AdvancedMarker as GoogleAdvancedMarker, Pin } from '@vis.gl/react-google-maps';
@@ -66,6 +71,8 @@ interface MapComponentProps {
   onPreciseLocation?: (lat: number, lng: number, accuracyM: number) => void;
   /** Última ubicación conocida (fallback si getCurrentPosition falla). */
   fallbackLocation?: { lat: number; lng: number } | null;
+  /** Cabina transportista: prioriza ruta A→B y CTAs de Google Maps. */
+  driverNavigationMode?: boolean;
 }
 
 const TILE_LAYERS: Record<MapStyleType, { url: string; attribution: string; name: string; icon: string; subdomains?: string }> = {
@@ -147,6 +154,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   showMyLocationButton = false,
   onPreciseLocation,
   fallbackLocation = null,
+  driverNavigationMode = false,
 }) => {
   // Map Container & Instance Refs
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -245,7 +253,17 @@ export const MapComponent: React.FC<MapComponentProps> = ({
 
     mapInstanceRef.current = map;
 
+    // Leaflet necesita invalidateSize si el contenedor pasa a pantalla completa
+    const onResize = () => {
+      map.invalidateSize({ animate: false });
+    };
+    window.addEventListener('resize', onResize);
+    requestAnimationFrame(onResize);
+    const t = window.setTimeout(onResize, 250);
+
     return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('resize', onResize);
       myLocationMarkerRef.current = null;
       myAccuracyCircleRef.current = null;
       if (mapInstanceRef.current) {
@@ -254,6 +272,15 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       }
     };
   }, []);
+
+  // Recalcular tamaño al entrar en modo navegación (pantalla completa móvil)
+  useEffect(() => {
+    if (!driverNavigationMode) return;
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const t = window.setTimeout(() => map.invalidateSize({ animate: false }), 80);
+    return () => window.clearTimeout(t);
+  }, [driverNavigationMode, height]);
 
   // 2. Change Tile Style dynamically
   useEffect(() => {
@@ -455,9 +482,10 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     }
   }, [selectedOrderId, orders]);
 
-  // Auto-draw neon route on compact radar (design reference look)
+  // Auto-draw neon route on compact radar / cabina transportista
   useEffect(() => {
-    if (!compactChrome || !mapInstanceRef.current) return;
+    if ((!compactChrome && !driverNavigationMode) || !mapInstanceRef.current) return;
+    if (selectedOrderId) return; // selectedOrderId effect already draws
     const routeOrder =
       orders.find((o) => isLiveOrderStatus(o.status) && o.pickupCoords && o.deliveryCoords) ||
       orders.find((o) => o.pickupCoords && o.deliveryCoords);
@@ -469,10 +497,10 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         routeOrder.deliveryCoords.lat,
         routeOrder.deliveryCoords.lng
       );
-    }, 600);
+    }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compactChrome, orders.length]);
+  }, [compactChrome, driverNavigationMode, orders.length, selectedOrderId]);
 
   // 7. Route Generation & Rendering Function
   const handleGenerateRoute = async (
@@ -555,26 +583,34 @@ export const MapComponent: React.FC<MapComponentProps> = ({
 
     routeGlowRef.current = glow;
 
-    // Origin Pin
+    // Origin Pin A · Recolección
     const originIcon = L.divIcon({
       className: 'route-origin-pin',
       html: `
-        <div style="width:28px;height:28px;border-radius:50%;background:#00E676;box-shadow:0 0 14px #00E676;border:2px solid #fff"></div>
+        <div style="display:flex;flex-direction:column;align-items:center;transform:translateY(-6px)">
+          <div style="width:32px;height:32px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#2B6CFF;border:2px solid #fff;box-shadow:0 0 12px rgba(43,108,255,.7);display:flex;align-items:center;justify-content:center">
+            <span style="transform:rotate(45deg);color:#fff;font-weight:800;font-size:13px;font-family:Outfit,sans-serif">A</span>
+          </div>
+          <span style="margin-top:4px;padding:2px 6px;border-radius:6px;background:rgba(5,8,15,.88);border:1px solid #2B6CFF;color:#fff;font-size:9px;font-weight:700;letter-spacing:.04em">RECOLECCIÓN</span>
+        </div>
       `,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
+      iconSize: [88, 52],
+      iconAnchor: [16, 32],
     });
 
-    // Destination Pin
+    // Destination Pin B · Entrega
     const destIcon = L.divIcon({
       className: 'route-dest-pin',
       html: `
-        <div style="width:28px;height:28px;border-radius:50%;background:#FF5722;box-shadow:0 0 14px #FF5722;border:2px solid #fff;display:flex;align-items:center;justify-content:center">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        <div style="display:flex;flex-direction:column;align-items:center;transform:translateY(-6px)">
+          <div style="width:32px;height:32px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#FF5722;border:2px solid #fff;box-shadow:0 0 12px rgba(255,87,34,.7);display:flex;align-items:center;justify-content:center">
+            <span style="transform:rotate(45deg);color:#fff;font-weight:800;font-size:13px;font-family:Outfit,sans-serif">B</span>
+          </div>
+          <span style="margin-top:4px;padding:2px 6px;border-radius:6px;background:rgba(5,8,15,.88);border:1px solid #FF5722;color:#fff;font-size:9px;font-weight:700;letter-spacing:.04em">ENTREGA</span>
         </div>
       `,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
+      iconSize: [72, 52],
+      iconAnchor: [16, 32],
     });
 
     if (routeData.coordinates.length > 0) {
@@ -889,6 +925,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       {!compactChrome && (
       <div className="absolute top-3 right-3 z-10 flex flex-wrap items-center gap-2">
         {/* Route Generator Button */}
+        {!driverNavigationMode ? (
         <button
           onClick={() => setIsRoutePanelOpen(!isRoutePanelOpen)}
           className={`px-3 py-2 rounded-xl text-xs font-bold transition shadow-xl flex items-center gap-1.5 backdrop-blur-md border ${
@@ -900,6 +937,11 @@ export const MapComponent: React.FC<MapComponentProps> = ({
           <Zap className="w-3.5 h-3.5" />
           <span>Optimizador de Ruta</span>
         </button>
+        ) : (
+        <div className="rounded-xl border border-[#2B6CFF]/40 bg-[#0a101c]/90 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[#7aa2ff] backdrop-blur-md">
+          Navegación A → B
+        </div>
+        )}
 
         {/* Real-Time Traffic Toggle */}
         <button
@@ -1189,6 +1231,41 @@ export const MapComponent: React.FC<MapComponentProps> = ({
                 </button>
               </div>
 
+              {activeRoute.coordinates.length >= 2 ? (
+                <div className="grid grid-cols-1 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const start = activeRoute.coordinates[0];
+                      const end = activeRoute.coordinates[activeRoute.coordinates.length - 1];
+                      openGoogleMapsNav(
+                        buildGoogleMapsAbRouteUrl(
+                          { lat: start[0], lng: start[1] },
+                          { lat: end[0], lng: end[1] },
+                          true,
+                        ),
+                      );
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-[#2B6CFF] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-lg"
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    Iniciar navegación Google (A → B)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const end = activeRoute.coordinates[activeRoute.coordinates.length - 1];
+                      openGoogleMapsNav(
+                        buildGoogleMapsNavigateToUrl({ lat: end[0], lng: end[1] }),
+                      );
+                    }}
+                    className="w-full py-2 rounded-xl border border-[#2B6CFF]/50 bg-[#2B6CFF]/10 text-[#7aa2ff] font-bold text-[11px] flex items-center justify-center gap-1.5"
+                  >
+                    Navegar desde mi GPS hasta B
+                  </button>
+                </div>
+              ) : null}
+
               {/* Turn-by-Turn Navigation Guide */}
               <div className="space-y-1">
                 <span className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">
@@ -1309,6 +1386,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       )}
 
       {/* Logo badge — replaces DomiClick Night Ops text attribution */}
+      {!driverNavigationMode ? (
       <a
         href="/"
         className="absolute bottom-2 right-14 z-20 map-brand-badge flex items-center gap-2 bg-[#0a101c]/92 border border-[#FF5722]/40 rounded-xl px-2.5 py-1.5 shadow-[0_0_16px_rgba(255,87,34,0.25)] pointer-events-auto"
@@ -1322,6 +1400,67 @@ export const MapComponent: React.FC<MapComponentProps> = ({
           <div className="text-[8px] text-slate-400 font-tech">Night Ops</div>
         </div>
       </a>
+      ) : null}
+
+      {driverNavigationMode ? (
+        <div className="absolute bottom-3 left-3 right-3 z-30 pointer-events-auto sm:left-auto sm:right-16 sm:w-80">
+          {(() => {
+            const navOrder =
+              orders.find((o) => o.id === selectedOrderId) ||
+              orders.find((o) => isLiveOrderStatus(o.status) && o.pickupCoords && o.deliveryCoords);
+            const a = navOrder?.pickupCoords;
+            const b = navOrder?.deliveryCoords;
+            if (!a || !b) {
+              return (
+                <div className="rounded-2xl border border-[#1a2744] bg-[#0a101c]/95 px-3 py-2.5 text-[11px] text-slate-300 backdrop-blur-md">
+                  Sin coordenadas A/B en el pedido. Pide a Central que marque recolección y entrega en el mapa.
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-2 rounded-2xl border border-[#2B6CFF]/35 bg-[#0a101c]/95 p-3 shadow-2xl backdrop-blur-md">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-[#7aa2ff]">
+                  Navegación · {navOrder?.trackingCode || 'pedido'}
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-[10px]">
+                  <div className="rounded-xl border border-[#2B6CFF]/40 bg-[#2B6CFF]/10 px-2 py-1.5">
+                    <span className="font-black text-[#2B6CFF]">A</span>
+                    <span className="ml-1 text-slate-300 line-clamp-2">{navOrder?.pickupAddress}</span>
+                  </div>
+                  <div className="rounded-xl border border-[#FF5722]/40 bg-[#FF5722]/10 px-2 py-1.5">
+                    <span className="font-black text-[#FF5722]">B</span>
+                    <span className="ml-1 text-slate-300 line-clamp-2">{navOrder?.deliveryAddress}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openGoogleMapsNav(buildGoogleMapsAbRouteUrl(a, b, true))}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#2B6CFF] py-3 text-xs font-extrabold text-white"
+                >
+                  <Navigation className="h-4 w-4" />
+                  Iniciar navegación Google Maps
+                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openGoogleMapsNav(buildGoogleMapsNavigateToUrl(a))}
+                    className="rounded-xl border border-[#2B6CFF]/45 py-2 text-[10px] font-bold text-[#7aa2ff]"
+                  >
+                    GPS → A
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openGoogleMapsNav(buildGoogleMapsNavigateToUrl(b))}
+                    className="rounded-xl border border-[#FF5722]/45 py-2 text-[10px] font-bold text-[#ff8a65]"
+                  >
+                    GPS → B
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      ) : null}
 
     </div>
   );

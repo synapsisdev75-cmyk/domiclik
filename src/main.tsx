@@ -5,8 +5,10 @@ import './index.css';
 import { unlockAlertAudio } from './lib/alerts';
 import { BootErrorBoundary } from './components/BootErrorBoundary';
 import { setupBootRecovery, registerServiceWorkerSafely } from './lib/bootRecovery';
+import { initTheme } from './lib/theme';
 
 setupBootRecovery();
+initTheme();
 
 const rootEl = document.getElementById('root');
 if (!rootEl) {

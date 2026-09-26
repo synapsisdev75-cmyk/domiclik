@@ -188,15 +188,23 @@ export function PlaceSearchField({
   const [resolving, setResolving] = useState(false);
   const [items, setItems] = useState<PlaceSuggestion[]>([]);
   const [active, setActive] = useState(0);
-  const [dropBox, setDropBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [dropBox, setDropBox] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [historyItems, setHistoryItems] = useState<SearchHistoryEntry[]>([]);
   // Borrador local: mientras escribes, los espacios no dependen del padre (trim/re-render).
   const [draft, setDraft] = useState(value);
+  /** iOS Safari ignora autocomplete=off; readOnly hasta el primer toque evita “Autorrellenar contacto”. */
+  const [autofillLocked, setAutofillLocked] = useState(true);
   const focusedRef = useRef(false);
   const skipSearch = useRef(false);
   /** Solo true si el usuario movió ↑/↓ en la lista (Enter elige esa fila). */
   const listNavigated = useRef(false);
+  const lastTypedRef = useRef('');
   const typing = draft.trim().length >= 2;
   const showHistory = open && focused && !forceClose && !typing && historyItems.length > 0;
   // Como Google Maps: lista abierta al escribir o historial al enfocar
@@ -213,11 +221,43 @@ export function PlaceSearchField({
       ? 'focus-within:border-[#2B6CFF] focus-within:shadow-[0_0_0_3px_rgba(43,108,255,0.18)]'
       : 'focus-within:border-[#FF5722] focus-within:shadow-[0_0_0_3px_rgba(255,87,34,0.18)]';
 
+  function unlockAutofill() {
+    if (autofillLocked) setAutofillLocked(false);
+  }
+
   function syncDropPosition() {
     const el = boxRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setDropBox({ top: r.bottom + 8, left: r.left, width: r.width });
+    const vv = window.visualViewport;
+    const viewTop = vv?.offsetTop ?? 0;
+    const viewHeight = vv?.height ?? window.innerHeight;
+    const viewBottom = viewTop + viewHeight;
+    const gap = 8;
+    // En iPhone nunca abrir hacia arriba: tapa el mapa y el campo.
+    // Dejamos el input visible y la lista debajo, con altura acotada al teclado.
+    const spaceBelow = Math.max(96, viewBottom - (r.bottom + gap) - 10);
+    const maxHeight = Math.min(220, spaceBelow);
+    const top = Math.min(r.bottom + gap, viewBottom - maxHeight - 4);
+    setDropBox({
+      top: Math.max(viewTop + 4, top),
+      left: r.left,
+      width: r.width,
+      maxHeight,
+    });
+  }
+
+  function scrollFieldIntoViewForKeyboard() {
+    const el = wrapRef.current;
+    if (!el) return;
+    // Sube el campo cerca del borde superior visible para que el drop quepa abajo.
+    try {
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    } catch {
+      el.scrollIntoView(true);
+    }
+    window.setTimeout(() => syncDropPosition(), 280);
+    window.setTimeout(() => syncDropPosition(), 520);
   }
 
   useLayoutEffect(() => {
@@ -229,11 +269,16 @@ export function PlaceSearchField({
     const onMove = () => syncDropPosition();
     window.addEventListener('resize', onMove);
     window.addEventListener('scroll', onMove, true);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', onMove);
+    vv?.addEventListener('scroll', onMove);
     return () => {
       window.removeEventListener('resize', onMove);
       window.removeEventListener('scroll', onMove, true);
+      vv?.removeEventListener('resize', onMove);
+      vv?.removeEventListener('scroll', onMove);
     };
-  }, [showDrop, items.length, loading]);
+  }, [showDrop, items.length, loading, historyItems.length]);
 
   useEffect(() => {
     if (forceClose) {
@@ -394,17 +439,20 @@ export function PlaceSearchField({
             data-domi-place-drop
             id={listId}
             role="listbox"
-            className="overflow-hidden rounded-2xl border border-[#2a3b5c] bg-[#0b1220] shadow-[0_28px_70px_-16px_rgba(0,0,0,0.85)]"
+            className="place-suggest-drop overflow-hidden rounded-2xl border shadow-[0_28px_70px_-16px_rgba(0,0,0,0.55)]"
             style={{
               position: 'fixed',
               top: dropBox.top,
               left: dropBox.left,
               width: dropBox.width,
+              maxHeight: dropBox.maxHeight,
               zIndex: 40000,
+              background: 'var(--domi-drop)',
+              borderColor: 'var(--domi-drop-border)',
             }}
           >
             {showHistory ? (
-              <ul className="max-h-80 overflow-auto py-1">
+              <ul className="overflow-auto py-1" style={{ maxHeight: dropBox.maxHeight }}>
                 <li className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--domi-muted)]">
                   Recientes
                 </li>
@@ -439,7 +487,7 @@ export function PlaceSearchField({
                         <MapPin className="h-4 w-4" aria-hidden />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-white">{h.label}</span>
+                        <span className="block truncate text-sm font-semibold text-[var(--domi-text)]">{h.label}</span>
                         <span className="mt-0.5 block truncate text-[11px] text-[var(--domi-muted)]">
                           {h.secondary || h.query || 'Reciente'}
                         </span>
@@ -457,7 +505,7 @@ export function PlaceSearchField({
               </div>
             ) : null}
             {!showHistory && items.length > 0 ? (
-              <ul className="max-h-80 overflow-auto py-1">
+              <ul className="overflow-auto py-1" style={{ maxHeight: dropBox.maxHeight }}>
                 {items.map((item, i) => {
                   const photo = suggestionPhoto(item);
                   return (
@@ -496,7 +544,7 @@ export function PlaceSearchField({
                         </span>
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-white">
+                        <span className="block truncate text-sm font-semibold text-[var(--domi-text)]">
                           {highlightMatch(item.label, draft)}
                         </span>
                         <span className="mt-0.5 block truncate text-[11px] text-[var(--domi-muted)]">
@@ -534,21 +582,38 @@ export function PlaceSearchField({
       </span>
       <div
         ref={boxRef}
-        className={`flex items-center gap-2 rounded-2xl border border-[var(--domi-border)] bg-[#0a101c] px-3 py-1 ${ring}`}
+        className={`flex items-center gap-2 rounded-2xl border border-[var(--domi-border)] bg-[var(--domi-surface)] px-3 py-1 ${ring}`}
+        onTouchStart={unlockAutofill}
+        onMouseDown={unlockAutofill}
       >
+        {/* Señuelo: iOS a veces pinta “Autorrellenar contacto” en el primer input del form */}
+        <input
+          type="text"
+          tabIndex={-1}
+          aria-hidden
+          autoComplete="username"
+          value=""
+          readOnly
+          className="pointer-events-none absolute h-0 w-0 opacity-0"
+        />
         <input
           ref={inputRef}
           className="field-input min-w-0 flex-1 !border-0 !bg-transparent !px-1 !py-2 !shadow-none"
           required={required}
-          name={inputName}
+          name={`domi_q_${inputName}`}
           value={draft}
-          autoComplete="off"
+          type="search"
+          readOnly={autofillLocked}
+          autoComplete="one-time-code"
           autoCorrect="off"
+          autoCapitalize="off"
           spellCheck={false}
           inputMode="search"
           enterKeyHint="search"
           data-lpignore="true"
+          data-1p-ignore="true"
           data-form-type="other"
+          data-testid="place-search-input"
           role="combobox"
           aria-expanded={showDrop}
           aria-controls={listId}
@@ -556,6 +621,16 @@ export function PlaceSearchField({
           placeholder={placeholder}
           onChange={(e) => {
             const next = e.target.value;
+            // iOS a veces pega de golpe una dirección foránea del autorrelleno.
+            const prev = lastTypedRef.current;
+            const suddenPaste =
+              next.length - prev.length >= 18 &&
+              /alum rock|san jose|california|united states|,?\s*usa\b/i.test(next);
+            if (suddenPaste) {
+              setFieldError('Ignoramos el autorrelleno del teléfono. Escribe la dirección de Meta.');
+              return;
+            }
+            lastTypedRef.current = next;
             setFieldError(null);
             setDraft(next);
             onQueryChange(next);
@@ -563,12 +638,14 @@ export function PlaceSearchField({
             setOpen(true);
           }}
           onFocus={() => {
+            unlockAutofill();
             focusedRef.current = true;
             setFocused(true);
             onActivate?.();
             const hist = filterSearchHistory(draft, 8);
             setHistoryItems(hist.length ? hist : loadSearchHistory().slice(0, 8));
             setOpen(true);
+            scrollFieldIntoViewForKeyboard();
           }}
           onBlur={() => {
             // Delay para permitir click en sugerencia del portal
@@ -618,7 +695,7 @@ export function PlaceSearchField({
         </button>
       </div>
       {fieldError ? (
-        <p className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+        <p className="mt-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-[var(--domi-text)]">
           {fieldError}
         </p>
       ) : typing && !resolving ? (

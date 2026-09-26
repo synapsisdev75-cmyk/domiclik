@@ -9,6 +9,7 @@
       content="Plataforma digital para recoger compras prepagadas y encargos locales en Villavicencio."
     />
     <meta name="theme-color" content="#FF5722" />
+    <meta name="google-site-verification" content="_4spEHN87G0-nfE6GnfyOScKq3u-YD_H7FT49AvYwD8" />
     <link rel="icon" type="image/png" href="/brand/logo-optimized-transparent.png" />
     <link rel="apple-touch-icon" href="/brand/logo-optimized-transparent.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -17,6 +18,18 @@
       href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('domiclick_theme');
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

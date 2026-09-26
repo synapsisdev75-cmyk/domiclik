@@ -495,16 +495,13 @@ export async function updateDriverApprovalStatus(
 }
 
 export async function toggleDriverActiveState(
-  driverId: string,
-  isActive: boolean,
-  location?: MotorizadoDriver['location']
+  _driverId: string,
+  _isActive: boolean,
+  _location?: MotorizadoDriver['location']
 ) {
-  const updateData: Partial<MotorizadoDriver> = {
-    isActive,
-    updatedAt: new Date().toISOString(),
-  };
-  if (location) updateData.location = location;
-  await updateDoc(doc(db, 'drivers', driverId), updateData);
+  throw new Error(
+    'La cabina solo se activa o desactiva al marcar asistencia (entrada / salida).',
+  );
 }
 
 export async function updateDriverLocation(
@@ -1597,6 +1594,8 @@ export async function recordAttendancePunch(params: {
     lastPunchType: params.type,
     lastPunchAt: at,
     lastOdometerKm: params.odometerKm,
+    // Entrada → disponible para asignación; salida → cabina OFF
+    isActive: params.type === 'in',
     updatedAt: at,
   });
   await updateDoc(doc(db, 'drivers', params.driverId), driverPatch);

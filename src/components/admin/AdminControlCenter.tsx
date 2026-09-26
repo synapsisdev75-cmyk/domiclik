@@ -14,7 +14,6 @@ import {
   subscribePayrollRuns,
   savePayrollRun,
   setDriverSuspended,
-  toggleDriverActiveState,
 } from '../../lib/firebase';
 import { isLiveOrderStatus } from '../../lib/orderFlow';
 import {
@@ -874,16 +873,17 @@ export const AdminControlCenter: React.FC<Props> = ({
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      toggleDriverActiveState(selected.driver.id, !selected.driver.isActive)
-                    }
-                    className="text-[11px] font-bold px-3 py-2 rounded-xl border border-[#1a2744] text-slate-200 hover:border-[#00E5FF]/50 flex items-center gap-1"
+                  <div
+                    className={`text-[11px] font-bold px-3 py-2 rounded-xl border flex items-center gap-1 ${
+                      selected.driver.isActive
+                        ? 'border-[#00E676]/40 text-[#00E676] bg-[#00E676]/10'
+                        : 'border-[#1a2744] text-slate-400'
+                    }`}
+                    title="Estado controlado solo por asistencia (entrada/salida)"
                   >
                     <Power className="w-3.5 h-3.5" />
-                    {selected.driver.isActive ? 'Desactivar' : 'Activar'}
-                  </button>
+                    {selected.driver.isActive ? 'En línea (asistencia)' : 'Fuera de servicio'}
+                  </div>
                   <button
                     type="button"
                     onClick={() => setDriverSuspended(selected.driver.id, !selected.driver.suspended)}

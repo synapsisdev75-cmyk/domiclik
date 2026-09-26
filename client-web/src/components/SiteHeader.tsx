@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BrandLogo } from './BrandLogo';
 import { AuthButton } from './AuthButton';
+import { ThemeToggle } from './ThemeToggle';
 
 export function SiteHeader() {
   const [scrolled, setScrolled] = useState(false);
@@ -15,7 +16,7 @@ export function SiteHeader() {
 
   return (
     <header
-      className={`site-header fixed inset-x-0 top-0 z-50 pt-[env(safe-area-inset-top,0px)] transition-[background-color,backdrop-filter,border-color,box-shadow] duration-300 ${
+      className={`site-header fixed inset-x-0 top-0 z-[200] isolate pt-[env(safe-area-inset-top,0px)] transition-[background-color,backdrop-filter,border-color,box-shadow] duration-300 ${
         scrolled ? 'site-header--scrolled' : 'site-header--top'
       }`}
     >
@@ -31,7 +32,7 @@ export function SiteHeader() {
             <span className="text-[#FF5722]">Click</span>
           </span>
         </Link>
-        <div className="flex shrink-0 items-center gap-2 sm:gap-4 lg:gap-5">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3 lg:gap-5">
           <nav className="hidden items-center gap-4 lg:flex">
             <a
               href="#quienes-somos"
@@ -70,6 +71,7 @@ export function SiteHeader() {
           >
             Transportistas
           </Link>
+          <ThemeToggle />
           <div className="hidden sm:block">
             <AuthButton />
           </div>

@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "712322107034-0dh6qqtom3c0nd1le6t3s5acrudkhigl.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.domiclick.app",
+            "certificate_hash": "21442e250c2dcca0a13b85596d811f2971693a8f"
+          }
+        },
+        {
           "client_id": "712322107034-dhdbl2nd7blruk1hnev6ihn6rptal6if.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
@@ -35,6 +43,14 @@
           "android_info": {
             "package_name": "com.domiclick.app",
             "certificate_hash": "5478ddf54ed9a955253cfd017c4a042a4160b8d8"
+          }
+        },
+        {
+          "client_id": "712322107034-uvddu15208mcnsa7mkrdpdefbtfca6ct.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.domiclick.app",
+            "certificate_hash": "f9326eb091222b16083f9aefb97f219cd15a3cf0"
           }
         },
         {

@@ -1,7 +1,9 @@
 @import "tailwindcss";
 
 @layer base {
-  :root {
+  :root,
+  [data-theme='dark'] {
+    color-scheme: dark;
     --domi-bg: #05080f;
     --domi-surface: #0a101c;
     --domi-panel: #0d1424;
@@ -12,6 +14,34 @@
     --domi-green: #00e676;
     --domi-text: #e8eef9;
     --domi-muted: #8b9bb8;
+    --domi-chrome: rgba(5, 8, 15, 0.95);
+    --domi-chrome-soft: rgba(10, 16, 28, 0.9);
+    --domi-body-grad-a: rgba(255, 87, 34, 0.12);
+    --domi-body-grad-b: rgba(0, 229, 255, 0.08);
+    --domi-body-base: linear-gradient(180deg, #05080f 0%, #070b14 100%);
+    --domi-glass-a: rgba(13, 20, 36, 0.92);
+    --domi-glass-b: rgba(8, 12, 24, 0.88);
+  }
+
+  [data-theme='light'] {
+    color-scheme: light;
+    --domi-bg: #f3f6fb;
+    --domi-surface: #ffffff;
+    --domi-panel: #ffffff;
+    --domi-border: #d7e0ec;
+    --domi-orange: #e64a19;
+    --domi-cyan: #0088a3;
+    --domi-blue: #1e5aef;
+    --domi-green: #00a85a;
+    --domi-text: #0f1a2b;
+    --domi-muted: #5a6b84;
+    --domi-chrome: rgba(255, 255, 255, 0.92);
+    --domi-chrome-soft: rgba(255, 255, 255, 0.88);
+    --domi-body-grad-a: rgba(255, 87, 34, 0.08);
+    --domi-body-grad-b: rgba(0, 136, 163, 0.07);
+    --domi-body-base: linear-gradient(180deg, #f7f9fc 0%, #eef2f8 100%);
+    --domi-glass-a: rgba(255, 255, 255, 0.94);
+    --domi-glass-b: rgba(245, 248, 252, 0.92);
   }
 
   body {
@@ -19,10 +49,9 @@
     color: var(--domi-text);
     font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
     background-image:
-      radial-gradient(ellipse 80% 50% at 10% -10%, rgba(255, 87, 34, 0.12), transparent 50%),
-      radial-gradient(ellipse 60% 40% at 90% 0%, rgba(0, 229, 255, 0.08), transparent 45%),
-      linear-gradient(180deg, #05080f 0%, #070b14 100%);
-    /* fixed rompe el pintado en Safari iOS / algunos Mac */
+      radial-gradient(ellipse 80% 50% at 10% -10%, var(--domi-body-grad-a), transparent 50%),
+      radial-gradient(ellipse 60% 40% at 90% 0%, var(--domi-body-grad-b), transparent 45%),
+      var(--domi-body-base);
     background-attachment: scroll;
     min-height: 100vh;
     min-height: 100svh;
@@ -83,10 +112,50 @@
 }
 
 .glass-panel {
-  background: linear-gradient(160deg, rgba(13, 20, 36, 0.92), rgba(8, 12, 24, 0.88));
+  background: linear-gradient(160deg, var(--domi-glass-a), var(--domi-glass-b));
   border: 1px solid var(--domi-border);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--domi-border);
+  background: var(--domi-chrome-soft);
+  color: var(--domi-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.theme-toggle:hover {
+  border-color: color-mix(in srgb, var(--domi-cyan) 40%, var(--domi-border));
+}
+
+.theme-toggle--compact {
+  padding: 0.45rem;
+}
+
+[data-theme='light'] .ops-chrome .hover\:text-white:hover,
+[data-theme='light'] .ops-chrome .group:hover .group-hover\:text-slate-300 {
+  color: var(--domi-text);
+}
+
+.ops-chrome {
+  background: var(--domi-chrome);
+  border-color: var(--domi-border);
+  color: var(--domi-text);
+}
+
+.ops-chrome-soft {
+  background: var(--domi-chrome-soft);
+  border-color: var(--domi-border);
 }
 
 .neon-border-orange {

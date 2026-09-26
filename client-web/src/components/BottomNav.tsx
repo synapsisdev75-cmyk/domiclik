@@ -36,7 +36,7 @@ export function BottomNav() {
   }
 
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-50 border-t border-[#1a2744] bg-[#080d18]/95 backdrop-blur-xl safe-bottom sm:hidden">
+    <nav className="fixed bottom-0 inset-x-0 z-50 border-t border-[var(--domi-border)] bg-[var(--domi-surface)]/95 backdrop-blur-xl safe-bottom sm:hidden">
       <div className="flex items-stretch justify-around">
         {NAV_ITEMS.map(({ path, label, icon: Icon }) => {
           const active = isActive(path);
@@ -45,9 +45,7 @@ export function BottomNav() {
               key={path}
               onClick={() => handleNav(path)}
               className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold transition-colors ${
-                active
-                  ? 'text-[#FF5722]'
-                  : 'text-slate-500 active:text-slate-300'
+                active ? 'text-[var(--domi-orange)]' : 'text-[var(--domi-muted)]'
               }`}
             >
               <Icon className="h-5 w-5" strokeWidth={active ? 2.5 : 1.8} />
@@ -59,7 +57,7 @@ export function BottomNav() {
         {/* Cuenta */}
         <button
           onClick={() => (user ? signOut() : signIn())}
-          className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold text-slate-500 active:text-slate-300 transition-colors"
+          className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold text-[var(--domi-muted)] transition-colors"
         >
           {user?.photoURL ? (
             <img

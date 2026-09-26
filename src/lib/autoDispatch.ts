@@ -8,6 +8,7 @@ import { DEFAULT_DISPATCH_SETTINGS } from './adminMetrics';
 import { isLiveOrderStatus } from './orderFlow';
 import { calculateOptimalRoute } from '../utils/routing';
 import { updateOrderFields, updateOrderStatus } from './firebase';
+import { isDriverAssignable } from './workShift';
 
 /** Distancia geodésica en km (Haversine). */
 export function haversineKm(
@@ -48,7 +49,7 @@ export function getBusyDriverIds(orders: DeliveryOrder[]): Set<string> {
 }
 
 /**
- * Motorizado: aprobado + activo (cabina ON) + no suspendido + con GPS + libre + dentro del radio.
+ * Motorizado: aprobado + activo + asistencia de entrada hoy + no suspendido + GPS + libre + radio.
  */
 export function findNearestEligibleDriver(
   drivers: MotorizadoDriver[],
@@ -58,9 +59,7 @@ export function findNearestEligibleDriver(
 ): NearestDriverResult | null {
   let best: NearestDriverResult | null = null;
   for (const driver of drivers) {
-    if (driver.status !== 'approved') continue;
-    if (!driver.isActive) continue;
-    if (driver.suspended) continue;
+    if (!isDriverAssignable(driver)) continue;
     if (busyDriverIds.has(driver.id)) continue;
     if (!driver.location?.lat || !driver.location?.lng) continue;
     const distanceKm = haversineKm(driver.location, pickup);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, MapPin } from 'lucide-react';
 import { BRAND } from './BrandLogo';
+import { StoreBadges } from './StoreBadges';
 import { BRAND_SUBLINE, BRAND_TAGLINE, BRAND_WELCOME } from '../lib/brandCopy';
 
 function HeroRouteOverlay() {
@@ -84,7 +85,7 @@ export function Hero({ onCtaClick }: HeroProps) {
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_20%,rgba(5,8,15,0.7)_75%)]" />
       <HeroRouteOverlay />
 
-      <div className="relative z-10 mx-auto flex min-h-[100vh] min-h-[100svh] max-w-6xl flex-col justify-end px-5 pb-16 pt-28 sm:px-8 sm:pb-24">
+      <div className="on-dark relative z-10 mx-auto flex min-h-[100vh] min-h-[100svh] max-w-6xl flex-col justify-end px-5 pb-16 pt-28 sm:px-8 sm:pb-24">
         <div className="max-w-2xl">
           <p className="animate-fade-up mb-3 inline-flex items-center gap-2 text-sm font-semibold tracking-wide text-[var(--domi-cyan)]">
             <MapPin className="h-4 w-4" aria-hidden />
@@ -96,14 +97,17 @@ export function Hero({ onCtaClick }: HeroProps) {
           <p className="animate-fade-up-delay-2 mt-4 max-w-xl text-base leading-relaxed text-[var(--domi-muted)] sm:text-lg">
             {BRAND_WELCOME} {BRAND_SUBLINE}
           </p>
-          <div className="animate-fade-up-delay-2 mt-8 flex flex-wrap gap-3">
-            <button type="button" className="cta-primary" onClick={onCtaClick}>
-              Solicitar entrega
-              <ArrowRight className="h-4 w-4" aria-hidden />
-            </button>
-            <a href="#seguimiento-rapido" className="cta-ghost">
-              Ya tengo código
-            </a>
+          <div className="animate-fade-up-delay-2 mt-8 flex flex-col items-start gap-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" className="cta-primary" onClick={onCtaClick}>
+                Solicitar entrega
+                <ArrowRight className="h-4 w-4" aria-hidden />
+              </button>
+              <a href="#seguimiento-rapido" className="cta-ghost">
+                Ya tengo código
+              </a>
+            </div>
+            <StoreBadges />
           </div>
         </div>
       </div>

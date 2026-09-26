@@ -29,6 +29,7 @@ import { AttendancePanel } from './AttendancePanel';
 import { FleetControlPanel } from './FleetControlPanel';
 import { FleetMotoPanel } from './FleetMotoPanel';
 import { DEFAULT_DISPATCH_SETTINGS, formatCOP } from '../../lib/adminMetrics';
+import { driverAssignBlockReason, isDriverAssignable } from '../../lib/workShift';
 import {
   MapPin,
   MessageSquare,
@@ -220,6 +221,13 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
   const handleAssign = async (orderId: string, driverId: string) => {
     const drv = approvedDrivers.find((d) => d.id === driverId);
     if (!drv) return;
+    const block = driverAssignBlockReason(drv);
+    if (block) {
+      window.alert(
+        `No se puede asignar a ${drv.fullName}: ${block}. Debe marcar asistencia de entrada y tener la cabina activa.`,
+      );
+      return;
+    }
     setAssigningId(orderId);
     try {
       await updateOrderStatus(orderId, 'assigned', drv.id, drv.fullName);
@@ -351,11 +359,15 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             }}
           >
             <option value="">Asignar…</option>
-            {approvedDrivers.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.fullName} {d.isActive ? '●' : '○'}
-              </option>
-            ))}
+            {approvedDrivers.map((d) => {
+              const ok = isDriverAssignable(d);
+              const reason = driverAssignBlockReason(d);
+              return (
+                <option key={d.id} value={d.id} disabled={!ok}>
+                  {d.fullName} {ok ? '●' : `○ ${reason || ''}`}
+                </option>
+              );
+            })}
           </select>
         )}
         {staffCan(staffRole, 'orders.cancel') &&

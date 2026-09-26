@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, ChevronDown, Sparkles, LogOut } from 'lucide-react';
 import { BrandLogo } from './brand/BrandAssets';
 import { InstallAppButton } from './InstallAppButton';
+import { ThemeToggle } from './ThemeToggle';
 
 interface HeaderBarProps {
   currentUserEmail?: string;
@@ -56,7 +57,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   const flatDriverBar = compact || hideRoleMenu;
 
   return (
-    <header className="bg-[#05080f]/95 border-b border-[#1a2744] px-4 sm:px-6 py-3 flex items-center justify-between gap-4 select-none relative z-30 backdrop-blur-md">
+    <header className="ops-chrome border-b px-4 sm:px-6 py-3 flex items-center justify-between gap-4 select-none relative z-30 backdrop-blur-md">
       <div
         className={`flex items-center gap-3 ${onOpenBrandModal ? 'cursor-pointer group' : ''}`}
         onClick={onOpenBrandModal}
@@ -71,17 +72,17 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           </span>
         </div>
         <div>
-          <h1 className="font-black text-2xl sm:text-3xl tracking-tight text-white italic font-display flex items-center gap-0.5 leading-none">
+          <h1 className="font-black text-2xl sm:text-3xl tracking-tight text-[var(--domi-text)] italic font-display flex items-center gap-0.5 leading-none">
             <span className="text-[#0052FF] drop-shadow-[0_0_10px_rgba(0,82,255,0.5)]">Domi</span>
             <span className="text-[#FF5722] drop-shadow-[0_0_12px_rgba(255,87,34,0.6)]">Click</span>
           </h1>
-          <p className="text-[11px] font-medium text-slate-400 tracking-tight mt-0.5">
+          <p className="text-[11px] font-medium text-[var(--domi-muted)] tracking-tight mt-0.5">
             {flatDriverBar ? 'Cabina del transportista' : 'Excelencia a un click de ti.'}
           </p>
         </div>
       </div>
 
-      <div className="hidden md:flex items-center gap-4 bg-[#0a101c]/90 border border-[#1a2744] px-4 py-2 rounded-2xl shadow-inner">
+      <div className="hidden md:flex items-center gap-4 ops-chrome-soft border px-4 py-2 rounded-2xl shadow-inner">
         <div className="flex items-center gap-2">
           <span className="relative flex h-3 w-3">
             <span
@@ -103,22 +104,27 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             {realtimeLabel || (realtimeLive ? 'EN VIVO · Firebase' : 'SISTEMA ACTIVO')}
           </span>
         </div>
-        <div className="h-4 w-px bg-[#1a2744]" />
+        <div className="h-4 w-px bg-[var(--domi-border)]" />
         <div className="text-center font-tech">
-          <div className="text-xs font-bold text-white tracking-widest">{timeString}</div>
-          <div className="text-[10px] text-slate-400 font-medium">{dateString}</div>
+          <div className="text-xs font-bold text-[var(--domi-text)] tracking-widest">{timeString}</div>
+          <div className="text-[10px] text-[var(--domi-muted)] font-medium">{dateString}</div>
         </div>
         {!flatDriverBar && (
           <>
-            <div className="h-4 w-px bg-[#1a2744] hidden lg:block" />
+            <div className="h-4 w-px bg-[var(--domi-border)] hidden lg:block" />
             <div className="hidden lg:block">
               <InstallAppButton />
             </div>
+            <ThemeToggle compact />
           </>
         )}
+        {flatDriverBar ? <ThemeToggle compact /> : null}
       </div>
 
       <div className="flex items-center gap-2">
+        <div className="md:hidden">
+          <ThemeToggle compact />
+        </div>
         {!flatDriverBar && (
           <div className="lg:hidden">
             <InstallAppButton compact />

@@ -32,7 +32,7 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
       <div className="mb-5 flex items-start gap-3">
         <CheckCircle2 className="mt-0.5 h-8 w-8 shrink-0 text-[var(--domi-green)]" aria-hidden />
         <div>
-          <h2 className="font-display text-2xl font-bold text-white">Solicitud recibida</h2>
+          <h2 className="font-display text-2xl font-bold text-[var(--domi-text)]">Solicitud recibida</h2>
           <p className="mt-1 text-sm text-[var(--domi-muted)]">
             Guarda el seguimiento y el PIN. El repartidor te pedirá el PIN al entregar.
           </p>
@@ -43,13 +43,13 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--domi-cyan)]">
           Código de seguimiento
         </p>
-        <p className="font-mono mt-2 text-3xl font-bold tracking-wider text-white sm:text-4xl">
+        <p className="font-mono mt-2 text-3xl font-bold tracking-wider text-[var(--domi-text)] sm:text-4xl">
           {result.trackingCode}
         </p>
         <button
           type="button"
           onClick={() => void copyText(result.trackingCode, 'track')}
-          className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--domi-muted)] transition-colors hover:text-white"
+          className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--domi-muted)] transition-colors hover:text-[var(--domi-text)]"
         >
           <Copy className="h-3.5 w-3.5" aria-hidden />
           {copiedTrack ? 'Copiado' : 'Copiar código'}
@@ -62,7 +62,7 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
             <KeyRound className="h-3.5 w-3.5" aria-hidden />
             PIN de entrega
           </p>
-          <p className="font-mono mt-2 text-3xl font-bold tracking-[0.35em] text-white sm:text-4xl">
+          <p className="font-mono mt-2 text-3xl font-bold tracking-[0.35em] text-[var(--domi-text)] sm:text-4xl">
             {result.deliveryConfirmCode}
           </p>
           <p className="mt-2 text-xs text-[var(--domi-muted)]">
@@ -71,7 +71,7 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
           <button
             type="button"
             onClick={() => void copyText(result.deliveryConfirmCode, 'pin')}
-            className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--domi-muted)] transition-colors hover:text-white"
+            className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--domi-muted)] transition-colors hover:text-[var(--domi-text)]"
           >
             <Copy className="h-3.5 w-3.5" aria-hidden />
             {copiedPin ? 'Copiado' : 'Copiar PIN'}
@@ -86,7 +86,7 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-green)]">
                 Tarifa estimada
               </p>
-              <p className="mt-1 text-xl font-bold text-white">
+              <p className="mt-1 text-xl font-bold text-[var(--domi-text)]">
                 {new Intl.NumberFormat('es-CO', {
                   style: 'currency',
                   currency: 'COP',
@@ -102,11 +102,11 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
             </div>
           ) : null}
           {result.scheduledFor ? (
-            <div className="rounded-xl border border-[var(--domi-border)] bg-[rgba(5,8,15,0.45)] px-4 py-3">
+            <div className="rounded-xl border border-[var(--domi-border)] bg-[var(--domi-panel)] px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
                 Entrega programada
               </p>
-              <p className="mt-1 text-sm font-semibold text-white">
+              <p className="mt-1 text-sm font-semibold text-[var(--domi-text)]">
                 {new Date(result.scheduledFor).toLocaleString('es-CO', {
                   dateStyle: 'medium',
                   timeStyle: 'short',

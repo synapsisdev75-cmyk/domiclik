@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { MotorizadoDriver, DeliveryOrder, AttendancePunch } from '../../types';
 import {
-  toggleDriverActiveState,
   updateDriverLocation,
   updateOrderStatus,
   confirmDeliveryWithCode,
@@ -31,10 +30,16 @@ import {
   AlertTriangle,
   Camera,
   Gauge,
+  X,
 } from 'lucide-react';
 import { INCIDENT_REASONS } from '../../lib/brandCopy';
 import { DRIVER_NEXT_ACTION, ORDER_STATUS_LABEL } from '../../lib/orderFlow';
 import { parseOdometerKm, summarizeDriverShift } from '../../lib/workShift';
+import {
+  buildGoogleMapsAbRouteUrl,
+  buildGoogleMapsNavigateToUrl,
+  openGoogleMapsNav,
+} from '../../lib/googleMapsNav';
 
 interface DriverDashboardProps {
   driver: MotorizadoDriver;
@@ -355,10 +360,10 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
       setOdometerPreview(null);
       setAttendanceMsg(
         type === 'in'
-          ? `Entrada + km ${km.toLocaleString('es-CO')} · ${new Date().toLocaleTimeString('es-CO')}`
+          ? `Entrada registrada · cabina EN LÍNEA · km ${km.toLocaleString('es-CO')}`
           : punch.shiftKmDriven != null
-            ? `Salida · ${punch.shiftKmDriven.toLocaleString('es-CO')} km recorridos · ${(punch.shiftGallons || 0).toFixed(2)} gal · gasolina est. ${formatCOP(punch.shiftFuelCostCop || 0)}`
-            : `Salida + km ${km.toLocaleString('es-CO')} · ${new Date().toLocaleTimeString('es-CO')}`
+            ? `Salida · cabina FUERA DE SERVICIO · ${punch.shiftKmDriven.toLocaleString('es-CO')} km · ${(punch.shiftGallons || 0).toFixed(2)} gal · gasolina est. ${formatCOP(punch.shiftFuelCostCop || 0)}`
+            : `Salida registrada · cabina FUERA DE SERVICIO · km ${km.toLocaleString('es-CO')}`
       );
     } catch (err: any) {
       setAttendanceMsg(err?.message || 'No se pudo marcar asistencia.');
@@ -526,20 +531,23 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
               {gpsLive ? 'ACTUALIZAR GPS' : 'ACTIVAR UBICACIÓN'}
             </button>
             <button
-              onClick={() => {
-                if (driver.suspended) return;
-                toggleDriverActiveState(driver.id, !driver.isActive, driver.location);
-              }}
-              disabled={Boolean(driver.suspended)}
-              className={`px-6 py-3.5 rounded-xl font-black text-xs font-mono border ${
+              type="button"
+              onClick={() => setActiveTab('asistencia')}
+              title="La cabina solo cambia al marcar asistencia"
+              className={`px-6 py-3.5 rounded-xl font-black text-xs font-mono border cursor-pointer ${
                 driver.isActive
-                  ? 'bg-[#FF5722] text-white border-[#FF3D00]'
+                  ? 'bg-[#00E676]/15 text-[#00E676] border-[#00E676]/50'
                   : 'bg-[#1E293B] text-slate-300 border-[#334155]'
               }`}
             >
-              <span className="inline-flex items-center gap-2">
-                <Power className="w-4 h-4" />
-                {driver.isActive ? 'CABINA EN LÍNEA' : 'FUERA DE SERVICIO'}
+              <span className="inline-flex flex-col items-start gap-0.5">
+                <span className="inline-flex items-center gap-2">
+                  <Power className="w-4 h-4" />
+                  {driver.isActive ? 'CABINA EN LÍNEA' : 'FUERA DE SERVICIO'}
+                </span>
+                <span className="text-[9px] font-bold opacity-80 normal-case tracking-normal">
+                  Solo con Asistencia →
+                </span>
               </span>
             </button>
           </div>
@@ -603,7 +611,7 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-4 rounded-xl bg-[#11141a] border border-[#2d3139] space-y-2">
                   <div className="flex items-center gap-2 text-xs font-bold text-blue-400">
-                    <MapPin className="w-4 h-4" /> Recogida
+                    <MapPin className="w-4 h-4" /> A · Recolección
                   </div>
                   <p className="text-sm font-semibold text-white">{currentActiveOrder.pickupAddress}</p>
                   <p className="text-xs text-slate-400">
@@ -612,20 +620,72 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                 </div>
                 <div className="p-4 rounded-xl bg-[#11141a] border border-[#2d3139] space-y-2">
                   <div className="flex items-center gap-2 text-xs font-bold text-emerald-400">
-                    <MapPin className="w-4 h-4" /> Entrega
+                    <MapPin className="w-4 h-4" /> B · Entrega
                   </div>
                   <p className="text-sm font-semibold text-white">{currentActiveOrder.deliveryAddress}</p>
                 </div>
               </div>
+              {currentActiveOrder.pickupCoords && currentActiveOrder.deliveryCoords ? (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedOrderIdForMap(currentActiveOrder.id);
+                      setActiveTab('map');
+                    }}
+                    className="bg-[#0052FF] text-white font-extrabold px-3 py-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                  >
+                    <Navigation className="w-3.5 h-3.5" /> Ver ruta A→B en mapa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openGoogleMapsNav(
+                        buildGoogleMapsAbRouteUrl(
+                          currentActiveOrder.pickupCoords,
+                          currentActiveOrder.deliveryCoords,
+                          true,
+                        ),
+                      )
+                    }
+                    className="bg-[#2B6CFF] text-white font-extrabold px-3 py-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                  >
+                    <Navigation className="w-3.5 h-3.5" /> Navegar Google Maps
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const goingToPickup = [
+                        'assigned',
+                        'accepted',
+                        'en_route_origin',
+                        'at_origin',
+                      ].includes(currentActiveOrder.status);
+                      const dest = goingToPickup
+                        ? currentActiveOrder.pickupCoords
+                        : currentActiveOrder.deliveryCoords;
+                      openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest));
+                    }}
+                    className="border border-[#00E5FF]/40 bg-[#00E5FF]/10 text-[#00E5FF] font-extrabold px-3 py-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
+                  >
+                    GPS → punto activo
+                  </button>
+                </div>
+              ) : (
+                <p className="text-[11px] text-amber-300">
+                  Este pedido no tiene coordenadas A/B. Pide a Central marcar recolección y entrega
+                  en el mapa para poder navegar.
+                </p>
+              )}
               <div className="flex flex-wrap justify-between gap-3 pt-2 border-t border-[#2d3139]">
                 <button
                   onClick={() => {
                     setSelectedOrderIdForMap(currentActiveOrder.id);
                     setActiveTab('map');
                   }}
-                  className="bg-[#0052FF] text-white font-extrabold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1"
+                  className="bg-[#11141a] border border-[#2d3139] text-slate-200 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1"
                 >
-                  <Navigation className="w-3.5 h-3.5" /> Ver ruta
+                  <MapPin className="w-3.5 h-3.5" /> Abrir mapa
                 </button>
                 <button
                   type="button"
@@ -745,49 +805,72 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
       )}
 
       {activeTab === 'map' && (
-        <div className="space-y-2">
-          <p className="text-[11px] text-slate-400 font-mono">
-            Tu punto en el mapa se actualiza con GPS real
-            {liveCoords
-              ? ` · ${liveCoords.lat.toFixed(5)}, ${liveCoords.lng.toFixed(5)}`
-              : gpsLive
-                ? ' · esperando fix…'
-                : ' · activa permisos de ubicación'}
-          </p>
-          <MapComponent
-            drivers={allDrivers}
-            orders={orders}
-            selectedDriverId={driver.id}
-            selectedOrderId={selectedOrderIdForMap || currentActiveOrder?.id}
-            height="h-[600px]"
-            followSelectedDriver
-            showMyLocationButton
-            fallbackLocation={
-              liveCoords ||
-              (driver.location?.lat && driver.location?.lng
-                ? { lat: driver.location.lat, lng: driver.location.lng }
-                : null)
-            }
-            onPreciseLocation={(lat, lng) => {
-              setLiveCoords({ lat, lng });
-              setGpsLive(true);
-              setGpsError('');
-              setGpsPermission('granted');
-              lastSentRef.current = 0;
-              updateDriverLocation(
-                driver.id,
-                {
-                  lat,
-                  lng,
-                  heading: 0,
-                  addressName: 'GPS preciso · pin en mapa',
-                  neighborhood: 'Ubicación actual',
-                  updatedAt: new Date().toISOString(),
-                },
-                { fullName: driver.fullName, plateNumber: driver.plateNumber }
-              );
-            }}
-          />
+        <div className="fixed inset-0 z-40 flex flex-col bg-[#05080f] md:relative md:inset-auto md:z-auto md:rounded-2xl md:overflow-hidden md:border md:border-[#162748]">
+          <div className="flex items-center justify-between gap-2 border-b border-[#162748] px-3 py-2.5 md:px-4">
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-[#00E5FF]">
+                Navegación en mapa
+              </p>
+              <p className="truncate text-xs text-slate-300">
+                {currentActiveOrder
+                  ? `${currentActiveOrder.trackingCode} · A recolección → B entrega`
+                  : 'Tu GPS en tiempo real'}
+                {liveCoords
+                  ? ` · ${liveCoords.lat.toFixed(5)}, ${liveCoords.lng.toFixed(5)}`
+                  : gpsLive
+                    ? ' · esperando fix…'
+                    : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('orders')}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#1E293B] text-slate-300 md:hidden"
+              aria-label="Cerrar mapa"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 md:min-h-[600px]">
+            <MapComponent
+              drivers={allDrivers}
+              orders={orders}
+              selectedDriverId={driver.id}
+              selectedOrderId={selectedOrderIdForMap || currentActiveOrder?.id}
+              height="h-full"
+              followSelectedDriver
+              showMyLocationButton
+              showFilters={false}
+              driverNavigationMode
+              compactChrome={false}
+              mapStyle="google_traffic"
+              fallbackLocation={
+                liveCoords ||
+                (driver.location?.lat && driver.location?.lng
+                  ? { lat: driver.location.lat, lng: driver.location.lng }
+                  : null)
+              }
+              onPreciseLocation={(lat, lng) => {
+                setLiveCoords({ lat, lng });
+                setGpsLive(true);
+                setGpsError('');
+                setGpsPermission('granted');
+                lastSentRef.current = 0;
+                updateDriverLocation(
+                  driver.id,
+                  {
+                    lat,
+                    lng,
+                    heading: 0,
+                    addressName: 'GPS preciso · pin en mapa',
+                    neighborhood: 'Ubicación actual',
+                    updatedAt: new Date().toISOString(),
+                  },
+                  { fullName: driver.fullName, plateNumber: driver.plateNumber }
+                );
+              }}
+            />
+          </div>
         </div>
       )}
 

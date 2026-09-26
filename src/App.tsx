@@ -3,7 +3,6 @@ import { UserRole, MotorizadoDriver, DeliveryOrder, AdminAccount } from './types
 import {
   subscribeDrivers,
   subscribeOrders,
-  toggleDriverActiveState,
   auth,
   uploadBrandAssetsToStorage,
   clearDemoLocalCache,
@@ -16,8 +15,9 @@ import {
   subscribeIncidents,
   RealtimeSyncMeta,
 } from './lib/firebase';
-import { alertDeliveryComplete, alertOrderAssigned, alertPanic } from './lib/alerts';
 import { dispatchAllPendingOrders } from './lib/autoDispatch';
+import { isDriverAssignable } from './lib/workShift';
+import { alertDeliveryComplete, alertOrderAssigned, alertPanic } from './lib/alerts';
 import { isLiveOrderStatus } from './lib/orderFlow';
 import { DEFAULT_DISPATCH_SETTINGS } from './lib/adminMetrics';
 import type { DispatchSettings } from './types';
@@ -223,9 +223,7 @@ function MainApp() {
 
     const hasFreeActive = drivers.some(
       (d) =>
-        d.status === 'approved' &&
-        d.isActive &&
-        !d.suspended &&
+        isDriverAssignable(d) &&
         d.location?.lat &&
         d.location?.lng &&
         !orders.some(
@@ -581,12 +579,6 @@ function MainApp() {
 
   const isDriverCabin =
     currentRole === 'driver' || currentRole === 'pending_driver';
-
-  const handleToggleDriverStatus = (isActive: boolean) => {
-    if (activeApprovedDriver) {
-      toggleDriverActiveState(activeApprovedDriver.id, isActive, activeApprovedDriver.location);
-    }
-  };
 
   const handleLogout = async () => {
     try {

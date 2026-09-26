@@ -51,6 +51,14 @@
           "destination": "/privacy.html"
         },
         {
+          "source": "/cookies.html",
+          "destination": "/cookies.html"
+        },
+        {
+          "source": "/terms.html",
+          "destination": "/terms.html"
+        },
+        {
           "source": "/delete-account.html",
           "destination": "/delete-account.html"
         },

@@ -171,9 +171,17 @@ function describeGoogleAuthError(err: unknown): string {
     );
   }
   if (/28444|Developer console is not set up|not set up correctly/i.test(blob)) {
+    const shaMatch = blob.match(/signingSha1=([0-9A-Fa-f:]+)/i);
+    const shaHint = shaMatch
+      ? ` SHA-1 de ESTA instalación: ${shaMatch[1]}.`
+      : '';
     return (
-      'Google Cloud no reconoce esta app. En Firebase agrega el SHA-1 de Play App Signing ' +
-      '(Integridad de la app) para com.domiclick.app, espera 10 min y reinstala desde Play.'
+      'Google no reconoce la firma de esta app.' +
+      shaHint +
+      ' Debe coincidir con un cliente Android OAuth (paquete com.domiclick.app). ' +
+      'Si instalaste desde Play: usa el SHA-1 de “Firma de la app” (EF:83:6F:…). ' +
+      'Si instalaste APK suelto: usa el de subida (4F:39:E7:…). ' +
+      'Espera 10 min tras agregarlo, desinstala y reinstala la misma app.'
     );
   }
   if (/10:|DEVELOPER_ERROR|ApiException:\s*10/i.test(blob)) {
@@ -187,15 +195,67 @@ function describeGoogleAuthError(err: unknown): string {
       'Revisa OAuth Web Client ID / SHA-1 en Firebase (Android).'
     );
   }
-  if (isGoogleUserCancelled(err) || /NoCredentialsException|NoCredential/i.test(blob)) {
-    // Credential Manager: cancel tras elegir cuenta suele ser OAuth Testing / SHA / estado viejo.
-    return (
-      'Google cerró el acceso después de elegir la cuenta. ' +
-      '1) En Google Cloud → pantalla de consentimiento OAuth: si está en “Prueba”, agrega tu Gmail en Usuarios de prueba (o publícala). ' +
-      '2) Espera 1 minuto, cierra DomiClick por completo y vuelve a entrar. ' +
-      '3) Una sola pulsación en Entrar. ' +
-      'Si usas la app de Play, confirma SHA-1 de firma de la app en Firebase.'
-    );
+  if (isGoogleUserCancelled(err)) {
+    const shaMatch = blob.match(/signingSha1=([0-9A-Fa-f:]+)/i);
+    const sha = shaMatch?.[1]?.toUpperCase() || '';
+    const shaCompact = sha.replace(/:/g, '');
+    const known = {
+      play: 'EF836FF1683A10DF00AE4C868EAD06A8BC8FF749',
+      playNew: '21442E250C2DCCA0A13B85596D811F2971693A8F',
+      playDer: 'F9326EB091222B16083F9AEFB97F219CD15A3CF0',
+      upload: '4F39E77EDB4370D02E0CC820B7CB42958DE545FC',
+      debug: '5478DDF54ED9A955253CFD017C4A042A4160B8D8',
+    };
+    if (
+      sha &&
+      (shaCompact === known.play ||
+        shaCompact === known.playNew ||
+        shaCompact === known.playDer)
+    ) {
+      return (
+        `Google cerró el login (firma Play: ${sha}). ` +
+        'Desinstala DomiClick, espera 10 min y reinstala SOLO desde Play. ' +
+        'Abre la app y pulsa Entrar con Google una sola vez.'
+      );
+    }
+    if (
+      sha &&
+      shaCompact !== known.play &&
+      shaCompact !== known.playNew &&
+      shaCompact !== known.playDer &&
+      shaCompact !== known.upload &&
+      shaCompact !== known.debug &&
+      shaCompact !== 'UNKNOWN'
+    ) {
+      return (
+        `Google cerró el login. SHA-1 de ESTA instalación: ${sha}. ` +
+        'Ese valor debe estar en Firebase → App Android com.domiclick.app. ' +
+        'Copia el SHA-1 de Play Console → Integridad de la app → Firma de la app, ' +
+        'agréalo en Firebase, espera 10 min y reinstala desde Play.'
+      );
+    }
+    if (sha && shaCompact !== 'UNKNOWN') {
+      return (
+        `Google cerró el login. Firma: ${sha}. ` +
+        'Cierra DomiClick por completo, ábrela y pulsa Google una sola vez.'
+      );
+    }
+    // Cancel sin SHA (build viejo / UI cerrada): guía Play explícita
+    if (isCapacitorNative() && Capacitor.getPlatform() === 'android') {
+      return (
+        'Google cerró el acceso antes de terminarlo. ' +
+        '1) En Play Console confirma SHA-1 de “Firma de la app” = 21:44:2E:25:… ' +
+        '2) Ese SHA debe estar en Firebase. ' +
+        '3) Desinstala DomiClick e instala de nuevo SOLO desde Play (versión ≥ 1.0.27). ' +
+        '4) Pulsa Entrar con Google una sola vez.'
+      );
+    }
+    return isIOSBrowser()
+      ? 'En iPhone prueba “Entrar con Apple”, o vuelve a intentar con Google.'
+      : 'Intenta de nuevo. Si el navegador bloqueó Google, permite pop-ups para este sitio.';
+  }
+  if (/NoCredentialsException|NoCredential/i.test(blob)) {
+    return 'No hay cuentas Google disponibles en este teléfono. Agrega una cuenta Google en Ajustes e intenta de nuevo.';
   }
   if (/popup|blocked|closed|cancelled/i.test(message) && !isCapacitorNative()) {
     return 'Ventana de Google cerrada o bloqueada. Intenta de nuevo.';
@@ -221,16 +281,6 @@ async function ensureGoogleSocialLogin(webClientId: string) {
     googleSocialInitialized = true;
   }
   return SocialLogin;
-}
-
-async function clearGoogleCredentialState(
-  SocialLogin: Awaited<ReturnType<typeof ensureGoogleSocialLogin>>,
-) {
-  try {
-    await SocialLogin.logout({ provider: 'google' });
-  } catch {
-    /* sin sesión previa */
-  }
 }
 
 /** Completa el retorno de signInWithRedirect (Firebase Auth). */
@@ -306,17 +356,32 @@ export async function signInWithGoogle(): Promise<User> {
         }
 
         const SocialLogin = await ensureGoogleSocialLogin(webClientId);
-        // Limpia estado viejo de Credential Manager (evita cancel tras elegir cuenta).
-        await clearGoogleCredentialState(SocialLogin);
 
-        const response = await SocialLogin.login({
-          provider: 'google',
-          options: {
-            style: 'standard',
-            filterByAuthorizedAccounts: false,
-            autoSelectEnabled: false,
-          },
-        });
+        // Primero sin forcePrompt (menos cancelaciones). Si no hay credencial, reintenta con prompt.
+        const loginOptsBase = {
+          style: 'standard' as const,
+          scopes: ['email', 'profile'],
+          filterByAuthorizedAccounts: false,
+          autoSelectEnabled: false,
+        };
+
+        let response;
+        try {
+          response = await SocialLogin.login({
+            provider: 'google',
+            options: { ...loginOptsBase, forcePrompt: false },
+          });
+        } catch (firstErr) {
+          const firstBlob = authErrBlob(firstErr);
+          if (/NoCredential|NoCredentialsException/i.test(firstBlob)) {
+            response = await SocialLogin.login({
+              provider: 'google',
+              options: { ...loginOptsBase, forcePrompt: true },
+            });
+          } else {
+            throw firstErr;
+          }
+        }
 
         if (response.provider !== 'google') {
           throw new Error('Respuesta inesperada del login Google.');
@@ -327,8 +392,8 @@ export async function signInWithGoogle(): Promise<User> {
           googleResult && 'idToken' in googleResult ? googleResult.idToken : null;
         if (!idToken) {
           throw new Error(
-            'Google no devolvió idToken. Verifica en Firebase/Google Cloud el SHA-1 de Play ' +
-              '(App signing) para com.domiclick.app y espera unos minutos.',
+            'Google no devolvió idToken. Verifica en Firebase el SHA-1 de Play ' +
+              '(Firma de la app: 21:44:2E:25:…) para com.domiclick.app, espera 10 min y reinstala desde Play.',
           );
         }
 
@@ -359,8 +424,8 @@ export async function signInWithGoogle(): Promise<User> {
     }
   }
 
-  // iPhone/iPad web: popup. Android Chrome: redirect.
-  const useRedirect = isMobileBrowser() && !isIOSBrowser();
+  // Móvil (Android e iPhone): redirect — popup en iOS Safari falla o se corta.
+  const useRedirect = isMobileBrowser();
   if (useRedirect) {
     await signInWithRedirect(auth, googleProvider);
     return new Promise(() => {
@@ -373,9 +438,6 @@ export async function signInWithGoogle(): Promise<User> {
     return result.user;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (isIOSBrowser()) {
-      throw new Error(describeGoogleAuthError(err));
-    }
     if (/popup|blocked|closed|canceled|cancelled/i.test(message)) {
       await signInWithRedirect(auth, googleProvider);
       return new Promise(() => {

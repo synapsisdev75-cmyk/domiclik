@@ -105,7 +105,7 @@ export function AppHomePage() {
               >
                 <Icon className="h-6 w-6" strokeWidth={1.9} />
               </span>
-              <span className="text-[11px] font-semibold text-slate-300">{label}</span>
+              <span className="text-[11px] font-semibold text-[var(--domi-text)]">{label}</span>
             </button>
           ))}
         </div>

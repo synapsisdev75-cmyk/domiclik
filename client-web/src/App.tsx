@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { CookieBanner } from './components/CookieBanner';
 import { ChatbotPlaceholder } from './components/ChatbotPlaceholder';
 import { BottomNav } from './components/BottomNav';
 import { AppBottomNav } from './components/AppBottomNav';
@@ -42,6 +43,7 @@ function WebShell() {
       </div>
       <BottomNav />
       <ChatbotPlaceholder />
+      <CookieBanner />
     </div>
   );
 }

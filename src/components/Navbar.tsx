@@ -9,7 +9,6 @@ interface NavbarProps {
   onSelectRole: (role: UserRole) => void;
   currentUserEmail?: string;
   activeDriverProfile?: MotorizadoDriver | null;
-  onToggleDriverStatus?: (isActive: boolean) => void;
   onOpenAuthModal: () => void;
   onLogout: () => void;
   pendingApprovalsCount: number;
@@ -21,7 +20,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectRole,
   currentUserEmail,
   activeDriverProfile,
-  onToggleDriverStatus,
   onOpenAuthModal,
   onLogout,
   pendingApprovalsCount,
@@ -137,29 +135,35 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right Section: Motorizado Availability Toggle OR Auth Controls */}
         <div className="flex items-center gap-3">
-          {/* Driver Active/Inactive Button if in Driver Role */}
-          {currentRole === 'driver' && activeDriverProfile && onToggleDriverStatus && (
+          {/* Estado cabina (solo lectura — cambia con asistencia) */}
+          {currentRole === 'driver' && activeDriverProfile && (
             <div className="flex items-center gap-2 bg-[#0B101D] p-1.5 pl-3 rounded-2xl border border-[#1E293B]">
               <div className="text-right hidden sm:block">
                 <span className="text-xs font-black text-white block">
                   {activeDriverProfile.fullName.split(' ')[0]} ({activeDriverProfile.plateNumber})
                 </span>
-                <span className={`text-[10px] font-bold block ${activeDriverProfile.isActive ? 'text-[#00E676]' : 'text-slate-400'}`}>
-                  {activeDriverProfile.isActive ? '🟢 EN LÍNEA // ACTIVO' : '⚫ FUERA DE SERVICIO'}
+                <span
+                  className={`text-[10px] font-bold block ${
+                    activeDriverProfile.isActive ? 'text-[#00E676]' : 'text-slate-400'
+                  }`}
+                >
+                  {activeDriverProfile.isActive
+                    ? '🟢 EN LÍNEA // ACTIVO'
+                    : '⚫ FUERA DE SERVICIO'}
                 </span>
               </div>
 
-              <button
-                onClick={() => onToggleDriverStatus(!activeDriverProfile.isActive)}
-                className={`px-3 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-lg border ${
+              <div
+                className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 border ${
                   activeDriverProfile.isActive
-                    ? 'bg-[#FF5722] text-white border-[#FF3D00] hover:bg-[#e04818] shadow-[0_0_15px_rgba(255,87,34,0.4)]'
-                    : 'bg-[#1E293B] text-slate-300 border-[#334155] hover:bg-[#334155]'
+                    ? 'bg-[#00E676]/15 text-[#00E676] border-[#00E676]/40'
+                    : 'bg-[#1E293B] text-slate-300 border-[#334155]'
                 }`}
+                title="Se activa y desactiva solo al marcar asistencia"
               >
                 {activeDriverProfile.isActive ? (
                   <>
-                    <CheckCircle2 className="w-4 h-4 text-white" />
+                    <CheckCircle2 className="w-4 h-4" />
                     <span>ACTIVO</span>
                   </>
                 ) : (
@@ -168,7 +172,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span>INACTIVO</span>
                   </>
                 )}
-              </button>
+              </div>
             </div>
           )}
 

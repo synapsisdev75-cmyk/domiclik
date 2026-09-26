@@ -193,7 +193,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
 
   const summary =
     pickup && delivery && !compactSummary ? (
-      <div className="space-y-1 rounded-xl border border-[rgba(0,229,255,0.25)] bg-[rgba(0,229,255,0.06)] px-3 py-2 text-sm text-white">
+      <div className="space-y-1 rounded-xl border border-[rgba(0,229,255,0.25)] bg-[rgba(0,229,255,0.06)] px-3 py-2 text-sm text-[var(--domi-text)]">
         <p>
           <span className="font-semibold text-[var(--domi-cyan)]">A · Recolección:</span>{' '}
           {pickupLabel || 'Punto de salida'}

@@ -1,7 +1,8 @@
-import type { AttendancePunch, WorkShiftDay, FleetSettings } from '../types';
+import type { AttendancePunch, WorkShiftDay, FleetSettings, MotorizadoDriver } from '../types';
 import {
   DEFAULT_FUEL_COP_PER_KM,
   EXPECTED_SHIFT_HOURS,
+  toDateKey,
 } from './adminMetrics';
 import { calcShiftFuel, DEFAULT_FLEET_SETTINGS } from './motoFuel';
 
@@ -89,6 +90,34 @@ export function summarizeDriverShift(
     photoOutUrl: lastOut?.odometerPhotoUrl,
     open: Boolean(inAt) && !outAt,
   };
+}
+
+/** Asistencia de entrada hoy (sin salida posterior según lastPunch*). */
+export function isDriverOnShiftToday(
+  driver: Pick<MotorizadoDriver, 'lastPunchType' | 'lastPunchAt'>,
+  dayKey: string = toDateKey(new Date()),
+): boolean {
+  if (driver.lastPunchType !== 'in' || !driver.lastPunchAt) return false;
+  return toDateKey(driver.lastPunchAt) === dayKey;
+}
+
+/**
+ * Se puede asignar pedido solo si: aprobado, no suspendido, cabina activa
+ * y asistencia de entrada marcada hoy.
+ */
+export function isDriverAssignable(driver: MotorizadoDriver): boolean {
+  if (driver.status !== 'approved') return false;
+  if (driver.suspended) return false;
+  if (!driver.isActive) return false;
+  return isDriverOnShiftToday(driver);
+}
+
+export function driverAssignBlockReason(driver: MotorizadoDriver): string | null {
+  if (driver.status !== 'approved') return 'No está aprobado';
+  if (driver.suspended) return 'Suspendido';
+  if (!isDriverOnShiftToday(driver)) return 'Sin asistencia de entrada hoy';
+  if (!driver.isActive) return 'Cabina inactiva';
+  return null;
 }
 
 export function parseOdometerKm(raw: string): number | null {

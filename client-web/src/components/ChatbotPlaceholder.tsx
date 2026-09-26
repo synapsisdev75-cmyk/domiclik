@@ -189,8 +189,8 @@ export function ChatbotPlaceholder() {
                 <div
                   className={
                     m.role === 'user'
-                      ? 'max-w-[85%] rounded-2xl rounded-br-md bg-[var(--domi-blue)] px-3 py-2 text-sm leading-relaxed text-white'
-                      : 'max-w-[90%] rounded-2xl rounded-bl-md border border-[var(--domi-border)] bg-[rgba(5,8,15,0.55)] px-3 py-2 text-sm leading-relaxed text-[var(--domi-text)]'
+                      ? 'max-w-[85%] rounded-2xl rounded-br-md bg-[var(--domi-blue)] px-3 py-2 text-sm leading-relaxed text-white whitespace-pre-wrap'
+                      : 'max-w-[90%] rounded-2xl rounded-bl-md border border-[var(--domi-border)] bg-[rgba(5,8,15,0.55)] px-3 py-2 text-sm leading-relaxed text-[var(--domi-text)] whitespace-pre-wrap'
                   }
                 >
                   {m.text}

@@ -110,7 +110,11 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
   const [pinDragging, setPinDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedMarketing, setAcceptedMarketing] = useState(false);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  /** now = entrega inmediata (ETA por ruta). later = fecha/hora elegida por el usuario. */
+  const [scheduleMode, setScheduleMode] = useState<'now' | 'later'>('now');
 
   const routeGenRef = useRef(0);
   const googleRetryRef = useRef<number | null>(null);
@@ -127,25 +131,31 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
     return computeShippingQuote(routeKm, whenForPrice);
   }, [pickup, delivery, routeKm, whenForPrice]);
 
-  /** Minutos mínimos para programar = viaje (km÷60|75) + buffer. */
+  /** Minutos ETA (viaje + buffer) según distancia actual. */
   const scheduleLeadMin = useMemo(() => {
-    if (routeKm <= 0) return estimateTravelMinutes(0).totalMin || 5;
+    if (routeKm <= 0) return estimateTravelMinutes(0).totalMin || MIN_SCHEDULE_LEAD_MIN;
     return estimateTravelMinutes(routeKm, new Date()).totalMin;
   }, [routeKm]);
 
-  const scheduleBounds = useMemo(
-    () => scheduleWindow(new Date(), scheduleLeadMin),
-    [scheduleLeadMin],
-  );
+  /** Para ya: mínimo = ahora + ETA. Programar: mínimo = ahora + 5 min, máximo 15 días. */
+  const scheduleBounds = useMemo(() => {
+    const lead =
+      scheduleMode === 'now' ? scheduleLeadMin : MIN_SCHEDULE_LEAD_MIN;
+    return scheduleWindow(new Date(), lead);
+  }, [scheduleLeadMin, scheduleMode]);
 
-  // Mantener la hora programada al menos en el lead (ETA) calculado
   useEffect(() => {
+    // Solo en «Para ya»: la hora se recalcula con la ruta (ETA).
+    if (scheduleMode !== 'now') return;
     const { min } = scheduleBounds;
-    const current = parseDatetimeLocal(values.scheduledFor);
-    if (!current || current.getTime() < min.getTime()) {
-      setValues((prev) => ({ ...prev, scheduledFor: toDatetimeLocalValue(min) }));
-    }
-  }, [scheduleBounds.min.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
+    setValues((prev) => {
+      const current = parseDatetimeLocal(prev.scheduledFor);
+      if (current && Math.abs(current.getTime() - min.getTime()) < 45_000) {
+        return prev;
+      }
+      return { ...prev, scheduledFor: toDatetimeLocalValue(min) };
+    });
+  }, [scheduleMode, scheduleBounds.min.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mostrar ETA operativo (no el de Google/OSRM)
   useEffect(() => {
@@ -327,6 +337,12 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       setError('Debes iniciar sesión con Google para confirmar la solicitud.');
       return;
     }
+    if (!acceptedTerms) {
+      setError(
+        'Debes aceptar los Términos y autorizar el tratamiento de datos personales para confirmar el pedido.',
+      );
+      return;
+    }
 
     if (!pickup || !delivery) {
       setError('Marca en el mapa la recolección (A) y la entrega (B).');
@@ -353,13 +369,24 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       return;
     }
 
-    const scheduleErr = validateScheduledFor(values.scheduledFor, new Date(), scheduleLeadMin);
+    const leadForSubmit =
+      scheduleMode === 'now' ? scheduleLeadMin : MIN_SCHEDULE_LEAD_MIN;
+    const scheduleErr = validateScheduledFor(
+      scheduleMode === 'now'
+        ? toDatetimeLocalValue(scheduleWindow(new Date(), leadForSubmit).min)
+        : values.scheduledFor,
+      new Date(),
+      leadForSubmit,
+    );
     if (scheduleErr) {
       setError(scheduleErr);
       return;
     }
 
-    const scheduled = resolveScheduledFor(values.scheduledFor, new Date(), scheduleLeadMin);
+    const scheduled =
+      scheduleMode === 'now'
+        ? scheduleWindow(new Date(), leadForSubmit).min
+        : resolveScheduledFor(values.scheduledFor, new Date(), leadForSubmit);
     if (!scheduled) {
       setError('Elige una fecha/hora de entrega válida (hasta 15 días).');
       return;
@@ -383,8 +410,8 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
 
       let invoicePhotoUrl: string | undefined;
       if (invoiceFile) {
-        if (invoiceFile.size > 5 * 1024 * 1024) {
-          throw new Error('La foto de factura no puede superar 5 MB');
+        if (invoiceFile.size > 25 * 1024 * 1024) {
+          throw new Error('La foto de factura no puede superar 25 MB');
         }
         invoicePhotoUrl = await uploadInvoicePhoto(invoiceFile);
       }
@@ -464,7 +491,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
               <Package className="h-5 w-5" aria-hidden />
             </span>
             <div>
-              <h2 className="font-display text-2xl font-bold text-white">Solicitar entrega</h2>
+              <h2 className="font-display text-2xl font-bold text-[var(--domi-text)]">Solicitar entrega</h2>
             </div>
           </div>
 
@@ -490,7 +517,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
 
       {!profile && !authLoading ? (
         <div
-          className="mb-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100"
+          className="mb-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-sm text-[var(--domi-text)]"
           role="status"
         >
           Inicia sesión con Google para confirmar y recibir tu código y PIN.
@@ -637,21 +664,80 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
             </div>
           ) : null}
 
-          <label className="block sm:col-span-2">
+          <div className="sm:col-span-2">
             <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
               <CalendarClock className="h-3.5 w-3.5" aria-hidden />
-              Fecha y hora *
+              Cuándo entregamos *
             </span>
-            <input
-              className="field-input"
-              type="datetime-local"
-              required
-              value={values.scheduledFor}
-              min={toDatetimeLocalValue(scheduleBounds.min)}
-              max={toDatetimeLocalValue(scheduleBounds.max)}
-              onChange={(e) => update('scheduledFor', e.target.value)}
-            />
-          </label>
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setScheduleMode('now');
+                  const { min } = scheduleWindow(new Date(), scheduleLeadMin);
+                  setValues((prev) => ({ ...prev, scheduledFor: toDatetimeLocalValue(min) }));
+                }}
+                className={`rounded-xl border px-3 py-2.5 text-left text-xs font-bold transition ${
+                  scheduleMode === 'now'
+                    ? 'border-[rgba(255,87,34,0.5)] bg-[rgba(255,87,34,0.14)] text-[var(--domi-orange)]'
+                    : 'border-[var(--domi-border)] bg-[var(--domi-panel)] text-[var(--domi-muted)]'
+                }`}
+              >
+                Para ya
+                <span className="mt-0.5 block text-[10px] font-semibold opacity-80">
+                  Hora actual + tiempo de ruta
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setScheduleMode('later')}
+                className={`rounded-xl border px-3 py-2.5 text-left text-xs font-bold transition ${
+                  scheduleMode === 'later'
+                    ? 'border-[rgba(255,87,34,0.5)] bg-[rgba(255,87,34,0.14)] text-[var(--domi-orange)]'
+                    : 'border-[var(--domi-border)] bg-[var(--domi-panel)] text-[var(--domi-muted)]'
+                }`}
+              >
+                Programar
+                <span className="mt-0.5 block text-[10px] font-semibold opacity-80">
+                  Hasta 15 días adelante
+                </span>
+              </button>
+            </div>
+
+            {scheduleMode === 'now' ? (
+              <div className="rounded-xl border border-[var(--domi-border)] bg-[var(--domi-panel)] px-3 py-3">
+                <p className="text-sm font-bold text-[var(--domi-text)]">
+                  {parseDatetimeLocal(values.scheduledFor)?.toLocaleString('es-CO', {
+                    dateStyle: 'short',
+                    timeStyle: 'short',
+                  }) || 'Calculando…'}
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-[var(--domi-muted)]">
+                  {routeKm > 0
+                    ? `Estimado según la ruta (~${scheduleLeadMin} min: viaje + margen). Se actualiza si cambias origen o destino.`
+                    : 'Marca recolección y entrega en el mapa para estimar la hora.'}
+                </p>
+              </div>
+            ) : (
+              <label className="block">
+                <span className="mb-1.5 block text-[11px] font-semibold text-[var(--domi-muted)]">
+                  Fecha y hora programada
+                </span>
+                <input
+                  className="field-input"
+                  type="datetime-local"
+                  required
+                  value={values.scheduledFor}
+                  min={toDatetimeLocalValue(scheduleBounds.min)}
+                  max={toDatetimeLocalValue(scheduleBounds.max)}
+                  onChange={(e) => update('scheduledFor', e.target.value)}
+                />
+                <span className="mt-1 block text-[10px] text-[var(--domi-muted)]">
+                  Elige el día y la hora exactos (máximo 15 días).
+                </span>
+              </label>
+            )}
+          </div>
 
           <label className="block sm:col-span-2">
             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
@@ -671,7 +757,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
               Foto (opcional)
             </span>
             <input
-              className="field-input file:mr-3 file:rounded-md file:border-0 file:bg-[rgba(0,229,255,0.15)] file:px-3 file:py-1 file:text-xs file:text-white"
+              className="field-input file:mr-3 file:rounded-md file:border-0 file:bg-[rgba(0,229,255,0.15)] file:px-3 file:py-1 file:text-xs file:font-semibold file:text-[var(--domi-text)]"
               type="file"
               accept="image/*"
               capture="environment"
@@ -761,15 +847,21 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-green)]">
             Cotización
           </p>
-          <p className="mt-1 font-display text-2xl font-extrabold text-white">
+          <p className="mt-1 font-display text-2xl font-extrabold text-[var(--domi-text)]">
             {formatCOP(quote.shippingFee)}
+          </p>
+          <p className="mt-1 text-[11px] text-[var(--domi-muted)]">
+            {quote.distanceKm.toFixed(1)} km
+            {scheduleMode === 'now'
+              ? ` · llegada estimada ~${quote.durationMin} min`
+              : ' · entrega programada'}
           </p>
         </div>
       ) : null}
 
       {error ? (
         <p
-          className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+          className="form-alert-error rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm"
           role="alert"
         >
           {error}
@@ -777,10 +869,68 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       ) : null}
 
       {(!wizard || step === 'details') && (
+        <div className="mt-6 space-y-3">
+          <label className="flex items-start gap-3 rounded-xl border border-[var(--domi-border)] bg-[var(--domi-panel)] px-3 py-3 text-sm text-[var(--domi-text)]">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 shrink-0 accent-[var(--domi-orange)]"
+              checked={acceptedTerms}
+              onChange={(e) => {
+                setAcceptedTerms(e.target.checked);
+                if (e.target.checked) setError(null);
+              }}
+            />
+            <span>
+              He leído el{' '}
+              <a
+                href="/privacy.html#aviso"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-[var(--domi-cyan)] underline-offset-2 hover:underline"
+              >
+                Aviso de Privacidad
+              </a>{' '}
+              y autorizo a DOMICLICK S.A.S. a tratar mis datos personales conforme a la{' '}
+              <a
+                href="/privacy.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-[var(--domi-cyan)] underline-offset-2 hover:underline"
+              >
+                Política de Tratamiento de Datos
+              </a>
+              , y acepto los{' '}
+              <a
+                href="/terms.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-[var(--domi-cyan)] underline-offset-2 hover:underline"
+              >
+                Términos y Condiciones
+              </a>
+              , para gestionar mi solicitud, recogida, entrega, seguimiento y atención al cliente.
+            </span>
+          </label>
+          <label className="flex items-start gap-3 rounded-xl border border-[var(--domi-border)] bg-[var(--domi-panel)] px-3 py-3 text-sm text-[var(--domi-muted)]">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 shrink-0 accent-[var(--domi-orange)]"
+              checked={acceptedMarketing}
+              onChange={(e) => setAcceptedMarketing(e.target.checked)}
+            />
+            <span>
+              Autorizo de manera voluntaria a DOMICLICK S.A.S. para enviarme promociones,
+              novedades e información comercial (opcional; no condiciona el servicio).
+            </span>
+          </label>
+        </div>
+      )}
+
+      {(!wizard || step === 'details') && (
         <button
           type="submit"
-          className="cta-primary w-full"
-          disabled={submitting || geoBusy || authLoading}
+          className="cta-primary mt-4 w-full"
+          disabled={submitting || geoBusy || authLoading || !acceptedTerms}
         >
           {submitting ? (
             <>

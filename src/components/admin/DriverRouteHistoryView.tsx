@@ -1,33 +1,195 @@
-import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  APIProvider,
+  Map,
+  AdvancedMarker,
+  useMap,
+} from '@vis.gl/react-google-maps';
 import { MotorizadoDriver, DriverLocationHistoryPoint } from '../../types';
-import { fetchDriverLocationHistory, subscribeDriverLocationHistory } from '../../lib/firebase';
+import { subscribeDriverLocationHistory } from '../../lib/firebase';
 import { VILLAVICENCIO_CENTER } from '../../data/villavicencio';
-import { createLeafletBasemapLayer } from '../../lib/cartoBasemaps';
+import { getGoogleMapsApiKey } from '../GoogleMapRadar';
 import {
   Calendar,
   Clock,
-  Gauge,
   Play,
   Pause,
   RotateCcw,
   Bike,
-  MapPin,
-  Navigation,
-  ArrowRight,
-  ChevronRight,
   TrendingUp,
   X,
-  Zap,
-  CheckCircle2,
   ListOrdered,
-  Layers,
 } from 'lucide-react';
+
+const MAP_ID =
+  (typeof import.meta !== 'undefined' &&
+    (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_GOOGLE_MAPS_MAP_ID) ||
+  process.env.VITE_GOOGLE_MAPS_MAP_ID ||
+  '7959bb6afa37dd5e9db669a8';
 
 interface DriverRouteHistoryViewProps {
   drivers: MotorizadoDriver[];
   initialSelectedDriverId?: string | null;
   onClose?: () => void;
+}
+
+type WaypointKind = 'start' | 'end' | 'stop';
+
+function waypointKind(index: number, total: number, speed?: number): WaypointKind | null {
+  if (index === 0) return 'start';
+  if (index === total - 1) return 'end';
+  if ((speed || 0) === 0) return 'stop';
+  return null;
+}
+
+function HistoryMapLayers({
+  points,
+  playbackIndex,
+}: {
+  points: DriverLocationHistoryPoint[];
+  playbackIndex: number;
+}) {
+  const map = useMap();
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
+  const glowRef = useRef<google.maps.Polyline | null>(null);
+  const fittedKeyRef = useRef<string>('');
+
+  const path = useMemo(
+    () => points.map((p) => ({ lat: p.lat, lng: p.lng })),
+    [points],
+  );
+
+  const waypoints = useMemo(() => {
+    return points
+      .map((pt, index) => {
+        const kind = waypointKind(index, points.length, pt.speed);
+        if (!kind) return null;
+        return { pt, index, kind };
+      })
+      .filter(Boolean) as Array<{
+      pt: DriverLocationHistoryPoint;
+      index: number;
+      kind: WaypointKind;
+    }>;
+  }, [points]);
+
+  const active = points[playbackIndex] || null;
+
+  useEffect(() => {
+    if (!map || !(window as unknown as { google?: typeof google }).google?.maps) return;
+
+    glowRef.current?.setMap(null);
+    polylineRef.current?.setMap(null);
+    glowRef.current = null;
+    polylineRef.current = null;
+
+    if (path.length === 0) return;
+
+    glowRef.current = new google.maps.Polyline({
+      path,
+      geodesic: true,
+      strokeColor: '#f59e0b',
+      strokeOpacity: 0.25,
+      strokeWeight: 12,
+      map,
+      zIndex: 1,
+    });
+
+    polylineRef.current = new google.maps.Polyline({
+      path,
+      geodesic: true,
+      strokeColor: '#f59e0b',
+      strokeOpacity: 0.95,
+      strokeWeight: 4,
+      icons: [
+        {
+          icon: {
+            path: 'M 0,-1 0,1',
+            strokeOpacity: 1,
+            scale: 3,
+            strokeColor: '#fbbf24',
+          },
+          offset: '0',
+          repeat: '16px',
+        },
+      ],
+      map,
+      zIndex: 2,
+    });
+
+    const fitKey = `${points.length}:${points[0]?.id || ''}:${points[points.length - 1]?.id || ''}`;
+    if (fitKey !== fittedKeyRef.current) {
+      fittedKeyRef.current = fitKey;
+      const bounds = new google.maps.LatLngBounds();
+      path.forEach((p) => bounds.extend(p));
+      map.fitBounds(bounds, 56);
+    }
+
+    return () => {
+      glowRef.current?.setMap(null);
+      polylineRef.current?.setMap(null);
+      glowRef.current = null;
+      polylineRef.current = null;
+    };
+  }, [map, path, points]);
+
+  useEffect(() => {
+    if (!map || !active) return;
+    map.panTo({ lat: active.lat, lng: active.lng });
+  }, [map, active?.lat, active?.lng, playbackIndex]);
+
+  return (
+    <>
+      {waypoints.map(({ pt, index, kind }) => {
+        const timeStr = new Date(pt.timestamp).toLocaleTimeString('es-CO', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        const label =
+          kind === 'start' ? 'INICIO' : kind === 'end' ? 'ÚLTIMO' : 'PARADA';
+        const bg =
+          kind === 'start'
+            ? 'bg-emerald-500 text-black border-emerald-300'
+            : kind === 'end'
+              ? 'bg-amber-500 text-black border-amber-300'
+              : 'bg-indigo-500 text-white border-indigo-300';
+
+        return (
+          <AdvancedMarker
+            key={`wp-${pt.id || index}`}
+            position={{ lat: pt.lat, lng: pt.lng }}
+            title={`${label} · ${timeStr}`}
+            zIndex={kind === 'end' ? 20 : 10}
+          >
+            <div
+              className={`pointer-events-none flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold shadow-xl ${bg}`}
+            >
+              <span>{label}</span>
+              <span>{timeStr}</span>
+            </div>
+          </AdvancedMarker>
+        );
+      })}
+
+      {active ? (
+        <AdvancedMarker
+          position={{ lat: active.lat, lng: active.lng }}
+          zIndex={50}
+          title="Posición de reproducción"
+        >
+          <div className="pointer-events-none relative flex h-11 w-11 items-center justify-center rounded-full border-2 border-white bg-[#f59e0b] text-black shadow-2xl">
+            <Bike className="h-5 w-5" />
+            <span className="absolute -bottom-5 whitespace-nowrap rounded-md bg-[#11141a]/95 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">
+              {new Date(active.timestamp).toLocaleTimeString('es-CO', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+          </div>
+        </AdvancedMarker>
+      ) : null}
+    </>
+  );
 }
 
 export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
@@ -37,7 +199,7 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
 }) => {
   const approvedDrivers = drivers.filter((d) => d.status === 'approved');
   const [selectedDriverId, setSelectedDriverId] = useState<string>(
-    initialSelectedDriverId || (approvedDrivers[0]?.id || '')
+    initialSelectedDriverId || approvedDrivers[0]?.id || '',
   );
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -46,22 +208,13 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
   const [historyPoints, setHistoryPoints] = useState<DriverLocationHistoryPoint[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Playback Animation State
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackIndex, setPlaybackIndex] = useState<number>(0);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1); // 1x, 2x, 4x
-  const animRef = useRef<number | null>(null);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
 
-  // Map Refs
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const polylineRef = useRef<L.Polyline | null>(null);
-  const pointMarkersRef = useRef<L.Marker[]>([]);
-  const animMarkerRef = useRef<L.Marker | null>(null);
-
+  const apiKey = getGoogleMapsApiKey();
   const currentDriver = drivers.find((d) => d.id === selectedDriverId);
 
-  // 1. Fetch History Points on Driver/Date Change
   useEffect(() => {
     if (!selectedDriverId) return;
 
@@ -79,120 +232,10 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
     };
   }, [selectedDriverId, selectedDate]);
 
-  // 2. Initialize Leaflet Map
-  useEffect(() => {
-    if (!mapContainerRef.current) return;
-    if (mapInstanceRef.current) return;
-
-    const map = L.map(mapContainerRef.current, {
-      center: [VILLAVICENCIO_CENTER.lat, VILLAVICENCIO_CENTER.lng],
-      zoom: 14,
-      zoomControl: false,
-    });
-
-    createLeafletBasemapLayer('dark_all').addTo(map);
-
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
-    mapInstanceRef.current = map;
-
-    return () => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
-      }
-    };
-  }, []);
-
-  // 3. Render Polyline & Waypoint Markers
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
-
-    // Clear previous layers
-    if (polylineRef.current) {
-      polylineRef.current.remove();
-      polylineRef.current = null;
-    }
-    pointMarkersRef.current.forEach((m) => m.remove());
-    pointMarkersRef.current = [];
-
-    if (animMarkerRef.current) {
-      animMarkerRef.current.remove();
-      animMarkerRef.current = null;
-    }
-
-    if (historyPoints.length === 0) return;
-
-    const latLngs: [number, number][] = historyPoints.map((pt) => [pt.lat, pt.lng]);
-
-    // Draw full day history route
-    const polyline = L.polyline(latLngs, {
-      color: '#f59e0b', // Amber line
-      weight: 5,
-      opacity: 0.9,
-      dashArray: '8, 8',
-    }).addTo(map);
-
-    polylineRef.current = polyline;
-
-    // Render Start (Origin) and End (Current/Latest) Markers
-    historyPoints.forEach((pt, index) => {
-      const isStart = index === 0;
-      const isEnd = index === historyPoints.length - 1;
-
-      if (isStart || isEnd || pt.speed === 0) {
-        let badgeBg = 'bg-[#11141a] text-slate-300 border-slate-700';
-        let icon = '📍';
-
-        if (isStart) {
-          badgeBg = 'bg-emerald-500 text-black border-emerald-400';
-          icon = '🚩 INICIO';
-        } else if (isEnd) {
-          badgeBg = 'bg-amber-500 text-black border-amber-400';
-          icon = '🏁 ÚLTIMO';
-        } else if (pt.speed === 0) {
-          badgeBg = 'bg-indigo-500 text-white border-indigo-400';
-          icon = '⏹️ PARADA';
-        }
-
-        const timeStr = new Date(pt.timestamp).toLocaleTimeString('es-CO', {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-
-        const customIcon = L.divIcon({
-          className: 'history-waypoint-marker',
-          html: `
-            <div class="flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold shadow-xl backdrop-blur-md ${badgeBg}">
-              <span>${icon}</span>
-              <span>${timeStr}</span>
-            </div>
-          `,
-          iconSize: [80, 24],
-          iconAnchor: [40, 12],
-        });
-
-        const marker = L.marker([pt.lat, pt.lng], { icon: customIcon }).addTo(map);
-        marker.bindPopup(`
-          <div style="color: black; font-size: 12px; font-family: sans-serif;">
-            <strong>${pt.addressName || 'Punto de Registro'}</strong><br/>
-            Hora: ${timeStr}<br/>
-            Velocidad: ${pt.speed || 0} km/h
-          </div>
-        `);
-        pointMarkersRef.current.push(marker);
-      }
-    });
-
-    map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
-  }, [historyPoints]);
-
-  // 4. Playback Animation Effect
   useEffect(() => {
     if (!isPlaying || historyPoints.length < 2) return;
 
     const intervalTime = 1200 / playbackSpeed;
-
     const timer = setInterval(() => {
       setPlaybackIndex((prev) => {
         const next = prev + 1;
@@ -207,67 +250,44 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
     return () => clearInterval(timer);
   }, [isPlaying, playbackSpeed, historyPoints]);
 
-  // Update animated bike position on map
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map || historyPoints.length === 0) return;
-
-    const currentPt = historyPoints[playbackIndex];
-    if (!currentPt) return;
-
-    if (!animMarkerRef.current) {
-      const bikeIcon = L.divIcon({
-        className: 'playback-bike-marker',
-        html: `
-          <div class="relative flex items-center justify-center w-11 h-11 rounded-full bg-[#f59e0b] text-black border-2 border-white shadow-2xl animate-bounce">
-            <span class="text-xl font-bold">🛵</span>
-          </div>
-        `,
-        iconSize: [44, 44],
-        iconAnchor: [22, 22],
-      });
-      animMarkerRef.current = L.marker([currentPt.lat, currentPt.lng], { icon: bikeIcon }).addTo(map);
-    } else {
-      animMarkerRef.current.setLatLng([currentPt.lat, currentPt.lng]);
-    }
-
-    map.panTo([currentPt.lat, currentPt.lng], { animate: true, duration: 0.5 });
-  }, [playbackIndex, historyPoints]);
-
-  // Metrics Calculation
   const totalKm = calculateTotalDistanceKm(historyPoints);
-  const maxSpeed = historyPoints.reduce((max, p) => Math.max(max, p.speed || 0), 0);
   const avgSpeed =
     historyPoints.length > 0
       ? Math.round(
-          historyPoints.reduce((sum, p) => sum + (p.speed || 0), 0) / historyPoints.length
+          historyPoints.reduce((sum, p) => sum + (p.speed || 0), 0) / historyPoints.length,
         )
       : 0;
 
+  const mapCenter =
+    historyPoints[playbackIndex] ||
+    historyPoints[historyPoints.length - 1] ||
+    VILLAVICENCIO_CENTER;
+
   return (
-    <div className="bg-[#161920] border border-[#2d3139] rounded-2xl shadow-2xl overflow-hidden p-6 space-y-6">
-      {/* Header & Controls */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#2d3139] pb-4">
+    <div className="space-y-6 overflow-hidden rounded-2xl border border-[#2d3139] bg-[#161920] p-6 shadow-2xl">
+      <div className="flex flex-col justify-between gap-4 border-b border-[#2d3139] pb-4 lg:flex-row lg:items-center">
         <div>
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 text-[#f59e0b] flex items-center justify-center">
-              <TrendingUp className="w-4 h-4" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-amber-500/40 bg-amber-500/20 text-[#f59e0b]">
+              <TrendingUp className="h-4 w-4" />
             </div>
-            <h2 className="text-lg font-extrabold text-white">Historial de Rutas GPS por Motorizado</h2>
+            <h2 className="text-lg font-extrabold text-white">
+              Historial de Rutas GPS por Motorizado
+            </h2>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Visualización de telemetría y trayectoria para la jornada operativa
+          <p className="mt-1 text-xs text-slate-400">
+            Mapa Google · telemetría y trayectoria de la jornada
+            {loading ? ' · cargando…' : ''}
           </p>
         </div>
 
-        {/* Driver Picker & Date Selector */}
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 bg-[#11141a] p-1.5 rounded-xl border border-[#2d3139]">
-            <Bike className="w-4 h-4 text-[#f59e0b] ml-1" />
+          <div className="flex items-center gap-2 rounded-xl border border-[#2d3139] bg-[#11141a] p-1.5">
+            <Bike className="ml-1 h-4 w-4 text-[#f59e0b]" />
             <select
               value={selectedDriverId}
               onChange={(e) => setSelectedDriverId(e.target.value)}
-              className="bg-transparent text-xs font-bold text-white focus:outline-none pr-2"
+              className="bg-transparent pr-2 text-xs font-bold text-white focus:outline-none"
             >
               {approvedDrivers.map((d) => (
                 <option key={d.id} value={d.id} className="bg-[#161920] text-white">
@@ -277,122 +297,149 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
             </select>
           </div>
 
-          <div className="flex items-center gap-2 bg-[#11141a] p-1.5 rounded-xl border border-[#2d3139]">
-            <Calendar className="w-4 h-4 text-emerald-400 ml-1" />
+          <div className="flex items-center gap-2 rounded-xl border border-[#2d3139] bg-[#11141a] p-1.5">
+            <Calendar className="ml-1 h-4 w-4 text-emerald-400" />
             <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-xs font-bold text-white focus:outline-none pr-1"
+              className="bg-transparent pr-1 text-xs font-bold text-white focus:outline-none"
             />
           </div>
 
-          {onClose && (
+          {onClose ? (
             <button
+              type="button"
               onClick={onClose}
-              className="p-2 rounded-xl bg-[#11141a] hover:bg-[#2d3139] text-slate-400 hover:text-white border border-[#2d3139]"
+              className="rounded-xl border border-[#2d3139] bg-[#11141a] p-2 text-slate-400 hover:bg-[#2d3139] hover:text-white"
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" />
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {/* Driver Info Card + Daily Stat Summary */}
-      {currentDriver && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-[#11141a] border border-[#2d3139] p-4 rounded-2xl flex items-center gap-3">
+      {currentDriver ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <div className="flex items-center gap-3 rounded-2xl border border-[#2d3139] bg-[#11141a] p-4">
             <img
               src={currentDriver.photoUrl}
               alt={currentDriver.fullName}
-              className="w-12 h-12 rounded-xl object-cover border border-[#2d3139]"
+              className="h-12 w-12 rounded-xl border border-[#2d3139] object-cover"
             />
             <div>
-              <h4 className="text-sm font-bold text-white leading-tight">{currentDriver.fullName}</h4>
-              <span className="text-xs font-mono font-bold text-[#f59e0b] block mt-0.5">
+              <h4 className="text-sm font-bold leading-tight text-white">{currentDriver.fullName}</h4>
+              <span className="mt-0.5 block font-mono text-xs font-bold text-[#f59e0b]">
                 Placa: {currentDriver.plateNumber}
               </span>
               <span className="text-[10px] text-slate-400">{currentDriver.motoModel}</span>
             </div>
           </div>
 
-          <div className="bg-[#11141a] border border-[#2d3139] p-4 rounded-2xl flex items-center justify-between">
+          <div className="flex items-center justify-between rounded-2xl border border-[#2d3139] bg-[#11141a] p-4">
             <div>
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Recorrido Total
               </span>
-              <span className="text-2xl font-extrabold text-amber-400 font-mono mt-1 block">
+              <span className="mt-1 block font-mono text-2xl font-extrabold text-amber-400">
                 {totalKm} km
               </span>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[#f59e0b] flex items-center justify-center text-lg">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-lg text-[#f59e0b]">
               📏
             </div>
           </div>
 
-          <div className="bg-[#11141a] border border-[#2d3139] p-4 rounded-2xl flex items-center justify-between">
+          <div className="flex items-center justify-between rounded-2xl border border-[#2d3139] bg-[#11141a] p-4">
             <div>
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Velocidad Promedio
               </span>
-              <span className="text-2xl font-extrabold text-emerald-400 font-mono mt-1 block">
+              <span className="mt-1 block font-mono text-2xl font-extrabold text-emerald-400">
                 {avgSpeed} <span className="text-xs font-normal text-slate-400">km/h</span>
               </span>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center text-lg">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-lg text-emerald-400">
               ⚡
             </div>
           </div>
 
-          <div className="bg-[#11141a] border border-[#2d3139] p-4 rounded-2xl flex items-center justify-between">
+          <div className="flex items-center justify-between rounded-2xl border border-[#2d3139] bg-[#11141a] p-4">
             <div>
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Registros GPS Hoy
               </span>
-              <span className="text-2xl font-extrabold text-indigo-400 font-mono mt-1 block">
-                {historyPoints.length} <span className="text-xs font-normal text-slate-400">puntos</span>
+              <span className="mt-1 block font-mono text-2xl font-extrabold text-indigo-400">
+                {historyPoints.length}{' '}
+                <span className="text-xs font-normal text-slate-400">puntos</span>
               </span>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center text-lg">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-lg text-indigo-400">
               🛰️
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Main Map & Timeline Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Map Column */}
-        <div className="lg:col-span-2 relative">
-          <div ref={mapContainerRef} className="h-[460px] w-full rounded-2xl border border-[#2d3139] z-0" />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="relative lg:col-span-2">
+          <div className="h-[460px] w-full overflow-hidden rounded-2xl border border-[#2d3139]">
+            {apiKey ? (
+              <APIProvider apiKey={apiKey} libraries={['marker', 'geometry']}>
+                <Map
+                  mapId={MAP_ID}
+                  colorScheme="DARK"
+                  defaultCenter={{
+                    lat: mapCenter.lat,
+                    lng: mapCenter.lng,
+                  }}
+                  defaultZoom={14}
+                  gestureHandling="greedy"
+                  disableDefaultUI={false}
+                  zoomControl
+                  mapTypeControl={false}
+                  streetViewControl={false}
+                  fullscreenControl={false}
+                  style={{ width: '100%', height: '100%' }}
+                >
+                  <HistoryMapLayers points={historyPoints} playbackIndex={playbackIndex} />
+                </Map>
+              </APIProvider>
+            ) : (
+              <div className="flex h-full items-center justify-center bg-[#0a101c] px-6 text-center text-sm text-slate-400">
+                Falta la API key de Google Maps (`VITE_GOOGLE_MAPS_PLATFORM_KEY`) para el historial.
+              </div>
+            )}
+          </div>
 
-          {/* Playback Controls Overlay Bar */}
-          <div className="absolute bottom-4 left-4 right-4 z-10 bg-[#11141a]/95 backdrop-blur-md p-3 rounded-2xl border border-[#2d3139] shadow-2xl flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="absolute bottom-4 left-4 right-4 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#2d3139] bg-[#11141a]/95 p-3 text-xs shadow-2xl backdrop-blur-md">
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={() => setIsPlaying(!isPlaying)}
                 disabled={historyPoints.length < 2}
-                className="bg-[#f59e0b] hover:bg-amber-400 disabled:opacity-50 text-black font-extrabold px-3.5 py-2 rounded-xl transition shadow flex items-center gap-1.5"
+                className="flex items-center gap-1.5 rounded-xl bg-[#f59e0b] px-3.5 py-2 font-extrabold text-black shadow transition hover:bg-amber-400 disabled:opacity-50"
               >
-                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                 <span>{isPlaying ? 'Pausar Replay' : 'Reproducir Recorrido en Vivo'}</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   setIsPlaying(false);
                   setPlaybackIndex(0);
                 }}
-                className="bg-[#161920] hover:bg-[#2d3139] text-slate-300 border border-[#2d3139] p-2 rounded-xl transition"
+                className="rounded-xl border border-[#2d3139] bg-[#161920] p-2 text-slate-300 transition hover:bg-[#2d3139]"
                 title="Reiniciar reproducción"
               >
-                <RotateCcw className="w-4 h-4" />
+                <RotateCcw className="h-4 w-4" />
               </button>
 
               <select
                 value={playbackSpeed}
                 onChange={(e) => setPlaybackSpeed(Number(e.target.value))}
-                className="bg-[#161920] border border-[#2d3139] text-white rounded-xl px-2 py-2 font-bold focus:outline-none"
+                className="rounded-xl border border-[#2d3139] bg-[#161920] px-2 py-2 font-bold text-white focus:outline-none"
               >
                 <option value={1}>1x Velocidad</option>
                 <option value={2}>2x Velocidad</option>
@@ -400,9 +447,8 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
               </select>
             </div>
 
-            {/* Scrubber / Progress indicator */}
-            {historyPoints.length > 0 && (
-              <div className="flex items-center gap-2 flex-1 max-w-xs">
+            {historyPoints.length > 0 ? (
+              <div className="flex max-w-xs flex-1 items-center gap-2">
                 <span className="font-mono text-[11px] text-slate-400">
                   {playbackIndex + 1}/{historyPoints.length}
                 </span>
@@ -415,27 +461,25 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
                     setIsPlaying(false);
                     setPlaybackIndex(Number(e.target.value));
                   }}
-                  className="w-full accent-[#f59e0b] cursor-pointer h-1.5 bg-[#2d3139] rounded-lg"
+                  className="h-1.5 w-full cursor-pointer rounded-lg bg-[#2d3139] accent-[#f59e0b]"
                 />
               </div>
-            )}
+            ) : null}
           </div>
         </div>
 
-        {/* GPS Logs Timeline Column */}
-        <div className="bg-[#11141a] border border-[#2d3139] rounded-2xl p-4 space-y-3 flex flex-col h-[460px]">
+        <div className="flex h-[460px] flex-col space-y-3 rounded-2xl border border-[#2d3139] bg-[#11141a] p-4">
           <div className="flex items-center justify-between border-b border-[#2d3139] pb-2">
-            <span className="text-xs font-bold text-white flex items-center gap-1.5">
-              <ListOrdered className="w-4 h-4 text-[#f59e0b]" />
+            <span className="flex items-center gap-1.5 text-xs font-bold text-white">
+              <ListOrdered className="h-4 w-4 text-[#f59e0b]" />
               <span>Línea de Tiempo Telemetría ({historyPoints.length})</span>
             </span>
-
-            <span className="text-[10px] text-slate-500 font-mono">{selectedDate}</span>
+            <span className="font-mono text-[10px] text-slate-500">{selectedDate}</span>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+          <div className="flex-1 space-y-2 overflow-y-auto pr-1">
             {historyPoints.length === 0 ? (
-              <div className="text-center py-16 text-slate-500 text-xs">
+              <div className="py-16 text-center text-xs text-slate-500">
                 No hay puntos GPS registrados para esta fecha.
               </div>
             ) : (
@@ -448,39 +492,39 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
                 });
 
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={pt.id || index}
                     onClick={() => {
                       setIsPlaying(false);
                       setPlaybackIndex(index);
                     }}
-                    className={`p-3 rounded-xl border transition cursor-pointer flex items-center justify-between gap-2 text-xs ${
+                    className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border p-3 text-left text-xs transition ${
                       isActivePlayback
-                        ? 'bg-amber-500/20 border-amber-500/50 text-white shadow-lg'
-                        : 'bg-[#161920] border-[#2d3139] text-slate-300 hover:bg-[#2d3139]/50'
+                        ? 'border-amber-500/50 bg-amber-500/20 text-white shadow-lg'
+                        : 'border-[#2d3139] bg-[#161920] text-slate-300 hover:bg-[#2d3139]/50'
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="font-mono text-[10px] text-slate-400 bg-[#11141a] px-1.5 py-0.5 rounded border border-[#2d3139]">
+                      <span className="rounded border border-[#2d3139] bg-[#11141a] px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
                         #{index + 1}
                       </span>
                       <div>
-                        <span className="font-bold text-white block text-[11px] leading-tight">
+                        <span className="block text-[11px] font-bold leading-tight text-white">
                           {pt.addressName || 'Calle de Villavicencio'}
                         </span>
-                        <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                          <Clock className="w-3 h-3 text-slate-500" />
+                        <span className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400">
+                          <Clock className="h-3 w-3 text-slate-500" />
                           <span>{timeStr}</span>
                         </span>
                       </div>
                     </div>
-
-                    <div className="text-right shrink-0">
-                      <span className="font-mono font-bold text-emerald-400 text-xs block">
+                    <div className="shrink-0 text-right">
+                      <span className="block font-mono text-xs font-bold text-emerald-400">
                         {pt.speed || 0} km/h
                       </span>
                     </div>
-                  </div>
+                  </button>
                 );
               })
             )}
