@@ -1,5 +1,7 @@
-import { LogIn, LogOut, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { LogIn, LogOut, Loader2, Mail, X } from 'lucide-react';
 import { useAuth } from '../lib/auth';
+import { EmailAuthForm } from './EmailAuthForm';
 
 function isAppleLikelyDevice() {
   if (typeof navigator === 'undefined') return false;
@@ -11,6 +13,7 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
   const { profile, loading, error, isOpsAdmin, opsUrl, signIn, signInApple, signOut, clearError } =
     useAuth();
   const showApple = isAppleLikelyDevice();
+  const [emailOpen, setEmailOpen] = useState(false);
 
   if (loading) {
     return (
@@ -73,13 +76,26 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div className="relative flex flex-col items-end gap-1.5">
       <div className="flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            clearError();
+            setEmailOpen((v) => !v);
+          }}
+          className="inline-flex items-center gap-2 rounded-full border border-[var(--domi-border)] bg-[var(--domi-surface)] px-3.5 py-2 text-xs font-bold text-[var(--domi-text)] shadow-sm transition hover:border-[rgba(0,229,255,0.45)] sm:text-sm"
+          aria-expanded={emailOpen}
+        >
+          <Mail className="h-3.5 w-3.5" aria-hidden />
+          <span className="hidden sm:inline">Correo</span>
+        </button>
         {showApple ? (
           <button
             type="button"
             onClick={() => {
               clearError();
+              setEmailOpen(false);
               void signInApple();
             }}
             className="inline-flex items-center gap-2 rounded-full border border-[rgba(255,255,255,0.2)] bg-white px-3.5 py-2 text-xs font-bold text-slate-900 shadow-sm transition hover:bg-slate-100 sm:text-sm"
@@ -93,6 +109,7 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
           type="button"
           onClick={() => {
             clearError();
+            setEmailOpen(false);
             void signIn();
           }}
           className="inline-flex items-center gap-2 rounded-full border border-[var(--domi-border)] bg-[var(--domi-surface)] px-3.5 py-2 text-xs font-bold text-[var(--domi-text)] shadow-sm transition hover:border-[rgba(255,87,34,0.4)] sm:text-sm"
@@ -103,7 +120,26 @@ export function AuthButton({ compact = false }: { compact?: boolean }) {
           <span className="sm:hidden">Google</span>
         </button>
       </div>
-      {error ? <p className="max-w-[16rem] text-right text-[10px] leading-snug text-red-300">{error}</p> : null}
+
+      {emailOpen ? (
+        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-[220] w-[min(92vw,20rem)] shadow-2xl">
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Cerrar"
+              className="absolute right-2 top-2 z-10 rounded-lg p-1 text-[var(--domi-muted)] hover:bg-white/5"
+              onClick={() => setEmailOpen(false)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <EmailAuthForm compact />
+          </div>
+        </div>
+      ) : null}
+
+      {!emailOpen && error ? (
+        <p className="max-w-[16rem] text-right text-[10px] leading-snug text-red-300">{error}</p>
+      ) : null}
     </div>
   );
 }

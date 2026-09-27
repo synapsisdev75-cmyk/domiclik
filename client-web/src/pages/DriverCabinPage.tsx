@@ -18,6 +18,7 @@ import { Capacitor } from '@capacitor/core';
 import { useAuth } from '../lib/auth';
 import { isNativeApp } from '../lib/appNav';
 import { opsTowerUrl } from '../lib/config';
+import { EmailAuthForm } from '../components/EmailAuthForm';
 import {
   buildGoogleMapsAbRouteUrl,
   buildGoogleMapsNavigateToUrl,
@@ -273,45 +274,48 @@ export function DriverCabinPage() {
           </p>
           <h1 className="mt-1 font-display text-2xl font-extrabold text-white">Transportistas</h1>
           <p className="mt-2 text-sm text-[var(--domi-muted)]">
-            Inicia sesión con la cuenta Google aprobada por Central para ver pedidos del día,
+            Inicia sesión con el correo o Google aprobado por Central para ver pedidos del día,
             escanear y marcar asistencia.
           </p>
         </header>
-        <div className="rounded-2xl border border-[var(--domi-border)] bg-[var(--domi-panel)] p-5">
-          <button
-            type="button"
-            className="cta-primary w-full"
-            disabled={busy}
-            onClick={async () => {
-              clearError();
-              setBusy(true);
-              try {
-                await signIn();
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Entrar con Google
-          </button>
-          {authError ? <p className="mt-3 text-xs text-amber-200">{authError}</p> : null}
-          {!native ? (
+        <div className="space-y-3">
+          <EmailAuthForm />
+          <div className="rounded-2xl border border-[var(--domi-border)] bg-[var(--domi-panel)] p-5">
             <button
               type="button"
-              className="mt-3 w-full rounded-xl border border-[var(--domi-border)] px-4 py-3 text-sm font-semibold text-[var(--domi-cyan)]"
-              onClick={() => goToOps('driver', true)}
+              className="cta-primary w-full"
+              disabled={busy}
+              onClick={async () => {
+                clearError();
+                setBusy(true);
+                try {
+                  await signIn();
+                } finally {
+                  setBusy(false);
+                }
+              }}
             >
-              Abrir cabina web (ops)
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Entrar con Google
             </button>
-          ) : null}
-          <button
-            type="button"
-            className="mt-3 w-full rounded-xl border border-[var(--domi-border)] px-4 py-3 text-sm font-semibold text-[var(--domi-orange)]"
-            onClick={() => goToOps('pending_driver')}
-          >
-            Pre-registro a la flota
-          </button>
+            {authError ? <p className="mt-3 text-xs text-amber-200">{authError}</p> : null}
+            {!native ? (
+              <button
+                type="button"
+                className="mt-3 w-full rounded-xl border border-[var(--domi-border)] px-4 py-3 text-sm font-semibold text-[var(--domi-cyan)]"
+                onClick={() => goToOps('driver', true)}
+              >
+                Abrir cabina web (ops)
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="mt-3 w-full rounded-xl border border-[var(--domi-border)] px-4 py-3 text-sm font-semibold text-[var(--domi-orange)]"
+              onClick={() => goToOps('pending_driver')}
+            >
+              Pre-registro a la flota
+            </button>
+          </div>
         </div>
       </div>
     );

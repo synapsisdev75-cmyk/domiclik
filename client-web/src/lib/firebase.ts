@@ -8,6 +8,10 @@ import {
   signInWithPopup,
   signInWithRedirect,
   signInWithCredential,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
   getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
@@ -526,6 +530,92 @@ export async function signInWithApple(): Promise<User> {
 
 export async function signOutCustomer() {
   await firebaseSignOut(auth);
+}
+
+function describeEmailAuthError(err: unknown): string {
+  const code = (err as { code?: string })?.code || '';
+  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/invalid-email') {
+    return 'Correo o contraseña incorrectos.';
+  }
+  if (code === 'auth/user-not-found') {
+    return 'No hay cuenta con ese correo. Usa Registrarse.';
+  }
+  if (code === 'auth/email-already-in-use') {
+    return 'Ese correo ya está registrado. Inicia sesión.';
+  }
+  if (code === 'auth/weak-password') {
+    return 'La contraseña debe tener al menos 6 caracteres.';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Demasiados intentos. Espera un momento e inténtalo de nuevo.';
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'Correo/contraseña no está activo en Firebase Authentication.';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Sin conexión. Revisa internet e inténtalo de nuevo.';
+  }
+  return err instanceof Error ? err.message : 'No se pudo autenticar con correo y contraseña.';
+}
+
+export async function signInWithEmailPassword(email: string, password: string): Promise<User> {
+  const mail = email.trim().toLowerCase();
+  if (!mail || !password) {
+    throw new Error('Ingresa correo y contraseña.');
+  }
+  try {
+    const res = await signInWithEmailAndPassword(auth, mail, password);
+    return res.user;
+  } catch (err) {
+    throw new Error(describeEmailAuthError(err));
+  }
+}
+
+export async function registerWithEmailPassword(
+  email: string,
+  password: string,
+  displayName?: string,
+): Promise<User> {
+  const mail = email.trim().toLowerCase();
+  const name = (displayName || '').trim();
+  if (!mail || !password) {
+    throw new Error('Ingresa correo y contraseña.');
+  }
+  if (password.length < 6) {
+    throw new Error('La contraseña debe tener al menos 6 caracteres.');
+  }
+  try {
+    const res = await createUserWithEmailAndPassword(auth, mail, password);
+    if (name) {
+      try {
+        await updateProfile(res.user, { displayName: name });
+      } catch {
+        /* ignore profile name errors */
+      }
+    }
+    return res.user;
+  } catch (err) {
+    throw new Error(describeEmailAuthError(err));
+  }
+}
+
+export async function sendCustomerPasswordReset(email: string): Promise<void> {
+  const mail = email.trim().toLowerCase();
+  if (!mail) {
+    throw new Error('Ingresa tu correo para recuperar la contraseña.');
+  }
+  try {
+    await sendPasswordResetEmail(auth, mail);
+  } catch (err) {
+    const code = (err as { code?: string })?.code || '';
+    if (code === 'auth/user-not-found') {
+      throw new Error('No hay cuenta con ese correo.');
+    }
+    if (code === 'auth/invalid-email') {
+      throw new Error('Correo inválido.');
+    }
+    throw new Error('No se pudo enviar el correo de recuperación.');
+  }
 }
 
 export function subscribeAuth(callback: (user: User | null) => void) {

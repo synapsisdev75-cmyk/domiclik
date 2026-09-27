@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
+import { EmailAuthForm } from '../components/EmailAuthForm';
 import { getCurrentTheme, THEME_CHANGE_EVENT, toggleTheme, type ThemeMode } from '../lib/theme';
 
 type MenuItem = {
@@ -164,6 +165,13 @@ export function ProfilePage() {
         </p>
 
         <div className="mt-8 flex w-full max-w-xs flex-col gap-3">
+          <EmailAuthForm className="w-full" />
+
+          <div className="relative py-1 text-center text-[10px] font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+            <span className="bg-[var(--domi-bg)] px-2 relative z-10">o continúa con</span>
+            <span className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-[var(--domi-border)]" />
+          </div>
+
           {showApple ? (
             <button
               type="button"

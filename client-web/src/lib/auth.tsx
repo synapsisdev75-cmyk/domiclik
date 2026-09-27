@@ -11,8 +11,11 @@ import type { User } from 'firebase/auth';
 import {
   completeGoogleRedirect,
   isActiveOpsAdmin,
+  registerWithEmailPassword,
   saveCustomerPhone,
+  sendCustomerPasswordReset,
   signInWithApple,
+  signInWithEmailPassword,
   signInWithGoogle,
   signOutCustomer,
   subscribeAuth,
@@ -32,6 +35,9 @@ type AuthContextValue = {
   opsUrl: string;
   signIn: () => Promise<void>;
   signInApple: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  registerWithEmail: (email: string, password: string, displayName?: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   setPhone: (phone: string) => Promise<void>;
   clearError: () => void;
@@ -85,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al iniciar sesión';
       setError(message);
+      throw err;
     }
   }, []);
 
@@ -95,6 +102,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al iniciar sesión con Apple';
       setError(message);
+      throw err;
+    }
+  }, []);
+
+  const signInWithEmail = useCallback(async (email: string, password: string) => {
+    setError(null);
+    try {
+      await signInWithEmailPassword(email, password);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error al iniciar sesión';
+      setError(message);
+      throw err;
+    }
+  }, []);
+
+  const registerWithEmail = useCallback(
+    async (email: string, password: string, displayName?: string) => {
+      setError(null);
+      try {
+        await registerWithEmailPassword(email, password, displayName);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Error al registrarse';
+        setError(message);
+        throw err;
+      }
+    },
+    [],
+  );
+
+  const resetPassword = useCallback(async (email: string) => {
+    setError(null);
+    try {
+      await sendCustomerPasswordReset(email);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No se pudo recuperar la contraseña';
+      setError(message);
+      throw err;
     }
   }, []);
 
@@ -129,11 +173,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       opsUrl,
       signIn,
       signInApple,
+      signInWithEmail,
+      registerWithEmail,
+      resetPassword,
       signOut,
       setPhone,
       clearError: () => setError(null),
     }),
-    [user, profile, loading, error, isOpsAdmin, opsUrl, signIn, signInApple, signOut, setPhone],
+    [
+      user,
+      profile,
+      loading,
+      error,
+      isOpsAdmin,
+      opsUrl,
+      signIn,
+      signInApple,
+      signInWithEmail,
+      registerWithEmail,
+      resetPassword,
+      signOut,
+      setPhone,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

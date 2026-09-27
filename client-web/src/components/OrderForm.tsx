@@ -501,7 +501,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
               onClick={() => void signIn()}
               className="cta-primary shrink-0 self-start text-sm"
             >
-              Iniciar sesión con Google
+              Iniciar sesión
             </button>
           ) : null}
         </div>
@@ -520,14 +520,15 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
           className="mb-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-sm text-[var(--domi-text)]"
           role="status"
         >
-          Inicia sesión con Google para confirmar y recibir tu código y PIN.
+          Inicia sesión con Google o correo para confirmar y recibir tu código y PIN.
           <button
             type="button"
             className="ml-2 font-bold text-[var(--domi-cyan)] underline"
             onClick={() => void signIn()}
           >
-            Entrar ahora
+            Google
           </button>
+          <span className="text-[var(--domi-muted)]"> · usa Correo en el menú superior</span>
         </div>
       ) : null}
 
