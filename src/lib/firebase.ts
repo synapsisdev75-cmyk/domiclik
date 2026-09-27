@@ -168,12 +168,22 @@ export const firebaseStorageBucket = firebaseConfig.storageBucket;
 // ----------------- STORAGE API ----------------- //
 
 export async function uploadDriverPhoto(file: File, driverId?: string): Promise<string> {
+  const maxBytes = 25 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    throw new Error('La foto supera el máximo de 25 MB.');
+  }
   const id = driverId || `tmp_${Date.now()}`;
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeName = (file.name || 'foto.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `drivers/${id}/photo_${Date.now()}_${safeName}`;
   const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
-  return getDownloadURL(storageRef);
+  const contentType =
+    file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg';
+  await uploadBytes(storageRef, file, { contentType });
+  const url = await getDownloadURL(storageRef);
+  if (!url) {
+    throw new Error('No se obtuvo la URL de la foto subida.');
+  }
+  return url;
 }
 
 export async function uploadDriverDocument(

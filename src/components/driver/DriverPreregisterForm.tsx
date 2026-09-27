@@ -9,8 +9,7 @@ interface DriverPreregisterFormProps {
   existingCandidateDriver?: MotorizadoDriver | null;
 }
 
-const DEFAULT_PHOTO =
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200';
+const MAX_PHOTO_BYTES = 25 * 1024 * 1024;
 
 export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
   onSubmittedSuccess,
@@ -23,7 +22,6 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
     documentId: '',
     birthDate: '',
     licenseNumber: '',
-    photoUrl: DEFAULT_PHOTO,
   });
 
   const [photoFile, setPhotoFile] = useState<File | null>(null);
@@ -35,12 +33,15 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setUploadError('Solo se permiten imágenes (JPG, PNG, WebP).');
+    const mime = (file.type || '').toLowerCase();
+    if (mime && !mime.startsWith('image/')) {
+      setUploadError('Solo se permiten imágenes (JPG, PNG, WebP, HEIC).');
+      e.target.value = '';
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError('La foto debe pesar menos de 5 MB.');
+    if (file.size > MAX_PHOTO_BYTES) {
+      setUploadError('La foto debe pesar máximo 25 MB.');
+      e.target.value = '';
       return;
     }
     setUploadError(null);
@@ -50,20 +51,29 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!photoFile) {
+      setUploadError('Sube tu foto para continuar (máx. 25 MB).');
+      return;
+    }
     setLoading(true);
     setUploadError(null);
 
     try {
       const tempId = 'drv_' + Date.now();
-      let photoUrl = formData.photoUrl;
+      let photoUrl: string;
+      try {
+        photoUrl = await uploadDriverPhoto(photoFile, tempId);
+      } catch (storageErr) {
+        console.error('Firebase Storage upload failed', storageErr);
+        setUploadError(
+          'No se pudo guardar la foto. Revisa tu conexión e intenta de nuevo (máx. 25 MB).',
+        );
+        return;
+      }
 
-      if (photoFile) {
-        try {
-          photoUrl = await uploadDriverPhoto(photoFile, tempId);
-        } catch (storageErr) {
-          console.warn('Firebase Storage upload failed, using default photo', storageErr);
-          setUploadError('No se pudo subir la foto a Storage; se usará la imagen por defecto.');
-        }
+      if (!photoUrl || photoUrl.includes('unsplash.com')) {
+        setUploadError('La foto no se guardó correctamente. Intenta otra imagen.');
+        return;
       }
 
       const newId = await createDriverPreregistration(
@@ -279,10 +289,23 @@ export const DriverPreregisterForm: React.FC<DriverPreregisterFormProps> = ({
             </div>
             <label className="flex-1 cursor-pointer flex items-center justify-center gap-2 bg-[#11141a] border border-dashed border-[#2d3139] hover:border-[#f59e0b] rounded-xl px-3.5 py-3 text-slate-400 hover:text-[#f59e0b] transition">
               <Upload className="w-4 h-4" />
-              <span>{photoFile ? photoFile.name : 'Subir foto (máx. 5 MB)'}</span>
-              <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+              <span>
+                {photoFile
+                  ? `${photoFile.name} (${(photoFile.size / (1024 * 1024)).toFixed(1)} MB)`
+                  : 'Subir foto (máx. 25 MB)'}
+              </span>
+              <input
+                type="file"
+                accept="image/*,image/heic,image/heif"
+                capture="user"
+                className="hidden"
+                onChange={handlePhotoChange}
+              />
             </label>
           </div>
+          {photoFile ? (
+            <p className="mt-1.5 text-[11px] text-emerald-400">Foto lista · se guardará al enviar</p>
+          ) : null}
           {uploadError && <p className="mt-1.5 text-amber-400 text-[11px]">{uploadError}</p>}
         </div>
 
