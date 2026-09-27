@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  KeyRound,
+  Tablet,
   Bike,
   CheckCircle2,
   ClipboardList,
   Loader2,
-  LogIn,
-  LogOut,
   MapPin,
   Navigation,
   Package,
@@ -31,7 +31,7 @@ import {
   findApprovedDriverByEmail,
   findOrderForScan,
   listDriverOrders,
-  recordSimpleAttendance,
+  parseAttendancePhotoUrl,
   summarizeDriverDay,
   type DriverOrder,
   type DriverProfile,
@@ -45,26 +45,16 @@ function goingToPickup(status: string): boolean {
   return PICKUP_STATUSES.has(status);
 }
 
+function openExternalUrl(url: string) {
+  if (typeof window === 'undefined') return;
+  window.location.assign(url);
+}
+
 function goToOps(role: 'driver' | 'pending_driver', google = false) {
   const url = new URL(opsTowerUrl());
   url.searchParams.set('role', role);
   if (google) url.searchParams.set('google', '1');
   window.location.assign(url.toString());
-}
-
-async function readGeo(): Promise<{ lat?: number; lng?: number }> {
-  if (!('geolocation' in navigator)) return {};
-  try {
-    const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
-        enableHighAccuracy: true,
-        timeout: 12000,
-      });
-    });
-    return { lat: pos.coords.latitude, lng: pos.coords.longitude };
-  } catch {
-    return {};
-  }
 }
 
 export function DriverCabinPage() {
@@ -148,16 +138,26 @@ export function DriverCabinPage() {
   async function lookupScan(code = scanCode) {
     const q = code.trim();
     if (q.length < 4) {
-      setErr('Escribe o escanea un código DMC-XXXX');
+      setErr('Escribe o escanea un código DMC, o el QR de la tablet.');
       return;
     }
+
+    const attendanceUrl = parseAttendancePhotoUrl(q);
+    if (attendanceUrl) {
+      setMsg('Abriendo fotos de asistencia (odómetro / placa)…');
+      openExternalUrl(attendanceUrl);
+      return;
+    }
+
     setBusy(true);
     setErr(null);
     try {
       const order = await findOrderForScan(q);
       if (!order) {
         setScanned(null);
-        setErr('No encontramos ese pedido');
+        setErr(
+          'No encontramos ese pedido. Si es el QR de la tablet, usa la cámara del teléfono o pega el enlace completo.',
+        );
         return;
       }
       if (driver && order.assignedDriverId && order.assignedDriverId !== driver.id) {
@@ -195,31 +195,12 @@ export function DriverCabinPage() {
     }
   }
 
-  async function punch(type: 'in' | 'out') {
-    if (!driver) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const geo = await readGeo();
-      await recordSimpleAttendance({
-        driverId: driver.id,
-        driverName: driver.fullName,
-        type,
-        lat: geo.lat,
-        lng: geo.lng,
-      });
-      setMsg(type === 'in' ? 'Entrada registrada · cabina activa.' : 'Salida registrada · cabina fuera de servicio.');
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'No se pudo registrar asistencia');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function startCameraScan() {
     setErr(null);
     if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) {
-      setErr('Este teléfono no soporta escaneo por cámara. Escribe el código DMC a mano.');
+      setErr(
+        'Este teléfono no soporta escaneo en la app. Usa la cámara del sistema sobre el QR de la tablet, o pega el enlace aquí.',
+      );
       return;
     }
     try {
@@ -426,7 +407,7 @@ export function DriverCabinPage() {
               {driver.isActive ? 'Disponible para Central' : 'No disponible'}
             </span>
             <span className="block text-[11px] text-[var(--domi-muted)]">
-              Solo se cambia al marcar Asistencia
+              Solo se activa con asistencia en la tablet (PIN)
             </span>
           </span>
         </span>
@@ -435,7 +416,7 @@ export function DriverCabinPage() {
           className="rounded-lg border border-[var(--domi-border)] px-2 py-1 text-[10px] font-bold text-[var(--domi-orange)]"
           onClick={() => setTab('asistencia')}
         >
-          Ir a asistencia
+          Cómo marcar
         </button>
       </div>
 
@@ -593,15 +574,20 @@ export function DriverCabinPage() {
       {tab === 'escanear' ? (
         <section className="space-y-4">
           <div className="rounded-2xl border border-[var(--domi-border)] bg-[var(--domi-panel)] p-4">
-            <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+            <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-[var(--domi-text)]">
               <QrCode className="h-4 w-4 text-[var(--domi-cyan)]" />
-              Escanear o escribir código
+              Pedido DMC o QR de asistencia
+            </p>
+            <p className="mb-3 text-[11px] leading-relaxed text-[var(--domi-muted)]">
+              Escanea un pedido <span className="font-mono text-[var(--domi-text)]">DMC-…</span> o el
+              QR de la tablet (fotos de odómetro/placa). Si la cámara de la app falla, usa la cámara
+              del teléfono sobre el QR.
             </p>
             <input
               className="field-input mb-3"
               value={scanCode}
-              onChange={(e) => setScanCode(e.target.value.toUpperCase())}
-              placeholder="DMC-XXXX o código del pedido"
+              onChange={(e) => setScanCode(e.target.value)}
+              placeholder="DMC-XXXX o pega el enlace del QR"
               autoCapitalize="characters"
             />
             <div className="grid grid-cols-2 gap-2">
@@ -685,32 +671,69 @@ export function DriverCabinPage() {
       {tab === 'asistencia' ? (
         <section className="space-y-4">
           <div className="rounded-2xl border border-[var(--domi-border)] bg-[var(--domi-panel)] p-5">
-            <h2 className="font-display text-lg font-bold text-white">Asistencia del día</h2>
+            <h2 className="font-display text-lg font-bold text-[var(--domi-text)]">
+              Asistencia en sede
+            </h2>
             <p className="mt-2 text-sm leading-relaxed text-[var(--domi-muted)]">
-              Marca entrada al iniciar turno y salida al terminar. Se guarda con tu ubicación si el
-              teléfono lo permite.
+              La entrada y salida <strong className="text-[var(--domi-text)]">no</strong> se marcan
+              desde el celular. Debes hacerlo en la <strong className="text-[var(--domi-text)]">tablet de sede</strong> con el PIN del día.
             </p>
-            <div className="mt-5 grid grid-cols-2 gap-3">
+
+            <ol className="mt-4 space-y-3 text-sm text-[var(--domi-muted)]">
+              <li className="flex gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(0,229,255,0.12)] text-xs font-bold text-[var(--domi-cyan)]">
+                  1
+                </span>
+                <span>
+                  En la tablet elige tu nombre, toma la <strong className="text-[var(--domi-text)]">foto de rostro</strong> y anota el <strong className="text-[var(--domi-text)]">PIN</strong> que se revela.
+                </span>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(0,229,255,0.12)] text-xs font-bold text-[var(--domi-cyan)]">
+                  2
+                </span>
+                <span>
+                  Digita el PIN, el km del odómetro y pulsa Entrada o Salida en la tablet.
+                </span>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[rgba(255,87,34,0.15)] text-xs font-bold text-[var(--domi-orange)]">
+                  3
+                </span>
+                <span>
+                  Con el celular, escanea el <strong className="text-[var(--domi-text)]">QR de la tablet</strong> (junto a la moto) para subir fotos de odómetro y placa.
+                </span>
+              </li>
+            </ol>
+
+            <div className="mt-5 grid grid-cols-1 gap-2">
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => void punch('in')}
-                className="flex flex-col items-center gap-2 rounded-2xl border border-[rgba(0,230,118,0.35)] bg-[rgba(0,230,118,0.1)] px-3 py-5 text-[var(--domi-green)]"
+                onClick={() => setTab('escanear')}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--domi-blue)] py-3 text-xs font-extrabold text-white"
               >
-                <LogIn className="h-6 w-6" />
-                <span className="text-xs font-extrabold uppercase tracking-wide">Entrada</span>
+                <QrCode className="h-4 w-4" />
+                Escanear QR de la tablet
               </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void punch('out')}
-                className="flex flex-col items-center gap-2 rounded-2xl border border-[rgba(255,87,34,0.4)] bg-[rgba(255,87,34,0.1)] px-3 py-5 text-[var(--domi-orange)]"
+              <a
+                href={`${opsTowerUrl()}/?view=kiosk-asistencia`}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--domi-border)] py-3 text-xs font-bold text-[var(--domi-cyan)]"
               >
-                <LogOut className="h-6 w-6" />
-                <span className="text-xs font-extrabold uppercase tracking-wide">Salida</span>
-              </button>
+                <Tablet className="h-4 w-4" />
+                Abrir terminal tablet (sede)
+              </a>
             </div>
           </div>
+
+          <div className="rounded-2xl border border-[rgba(255,87,34,0.35)] bg-[rgba(255,87,34,0.08)] px-4 py-3 text-xs leading-relaxed text-[var(--domi-muted)]">
+            <p className="flex items-start gap-2">
+              <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-[var(--domi-orange)]" />
+              <span>
+                Sin foto de rostro en la tablet, el sistema no muestra el PIN. Sin PIN no hay marca de asistencia ni cabina activa.
+              </span>
+            </p>
+          </div>
+
           <p className="text-center text-[11px] text-[var(--domi-muted)]">
             Entregas históricas: {driver.completedDeliveries || 0}
           </p>

@@ -9,7 +9,6 @@ import {
   limit,
   arrayUnion,
   increment,
-  setDoc,
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -75,12 +74,6 @@ function mapOrderDoc(id: string, data: Record<string, unknown>): DriverOrder {
 }
 
 export type AttendancePunchType = 'in' | 'out';
-
-function startOfTodayIso(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
-}
 
 function isSameLocalDay(iso?: string): boolean {
   if (!iso) return false;
@@ -239,35 +232,35 @@ export async function confirmDeliveryWithPin(
   return { ok: true };
 }
 
-export async function recordSimpleAttendance(params: {
+export async function recordSimpleAttendance(_params: {
   driverId: string;
   driverName: string;
   type: AttendancePunchType;
   lat?: number;
   lng?: number;
 }): Promise<void> {
-  const at = new Date().toISOString();
-  const id = `att_${Date.now()}`;
-  await setDoc(doc(db, 'attendance_punches', id), {
-    id,
-    driverId: params.driverId,
-    driverName: params.driverName,
-    type: params.type,
-    method: 'app_mobile',
-    at,
-    dayKey: startOfTodayIso().slice(0, 10),
-    lat: params.lat ?? null,
-    lng: params.lng ?? null,
-    createdAt: at,
-  });
-  await updateDoc(doc(db, 'drivers', params.driverId), {
-    lastPunchType: params.type,
-    lastPunchAt: at,
-    lastAttendanceAt: at,
-    lastAttendanceType: params.type,
-    isActive: params.type === 'in',
-    updatedAt: at,
-  });
+  throw new Error(
+    'La asistencia solo se marca en la tablet de sede con el PIN del día. Escanea el QR de la tablet para subir fotos del odómetro y la placa.',
+  );
+}
+
+/** Detecta enlaces del QR de asistencia (fotos moto). */
+export function parseAttendancePhotoUrl(raw: string): string | null {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  try {
+    const url = new URL(text);
+    if (url.searchParams.get('view') !== 'kiosk-fotos') return null;
+    const punch = url.searchParams.get('punch');
+    if (!punch) return null;
+    return url.toString();
+  } catch {
+    // Solo id de punch
+    if (/^att_[a-zA-Z0-9_-]+$/.test(text)) {
+      return `https://domiclick-ops.web.app/?view=kiosk-fotos&punch=${encodeURIComponent(text)}`;
+    }
+    return null;
+  }
 }
 
 export const DRIVER_STATUS_LABEL: Record<string, string> = {

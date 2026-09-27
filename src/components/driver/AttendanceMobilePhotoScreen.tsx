@@ -13,13 +13,16 @@ import {
 import { Camera, CheckCircle2, Gauge, Bike, Smartphone } from 'lucide-react';
 import { BrandLogo } from '../brand/BrandAssets';
 
+import { OPS_PUBLIC_ORIGIN } from '../../lib/publicUrls';
+
 export function isAttendanceMobilePhotoView(): boolean {
   if (typeof window === 'undefined') return false;
   return new URLSearchParams(window.location.search).get('view') === 'kiosk-fotos';
 }
 
+/** URL estable del QR (siempre producción ops), para que el celular abra la marca. */
 export function attendanceMobilePhotoUrl(punchId: string): string {
-  const url = new URL(window.location.origin + window.location.pathname);
+  const url = new URL('/', OPS_PUBLIC_ORIGIN);
   url.searchParams.set('view', 'kiosk-fotos');
   url.searchParams.set('punch', punchId);
   return url.toString();
