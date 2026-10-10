@@ -94,6 +94,8 @@ export interface MotorizadoDriver {
   lastOilChangeKm?: number;
   /** Último cambio de aceite — fecha ISO. */
   lastOilChangeAt?: string;
+  /** ID numérico del usuario en el biométrico VTA de sede. */
+  vtaUserId?: string;
   approvedBy?: string;
   rejectionReason?: string;
   createdAt: string;
@@ -138,6 +140,8 @@ export interface DeliveryOrder {
   customerName: string;
   customerPhone: string;
   customerEmail?: string;
+  /** Foto de perfil / selfie del cliente al solicitar */
+  customerPhotoURL?: string;
   pickupAddress: string;
   pickupCoords: LocationCoords;
   deliveryAddress: string;
@@ -162,6 +166,14 @@ export interface DeliveryOrder {
   notes?: string;
   /** Forma de pago informada por el cliente (sin pasarela). */
   paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
+  /** Bre-B o QR cuando el pago es transferencia. */
+  transferChannel?: 'breb' | 'qr';
+  /** Foto del comprobante de transferencia. */
+  paymentProofUrl?: string;
+  /** pending_review = no circula hasta luz verde de torre. */
+  paymentReviewStatus?: 'pending_review' | 'approved';
+  paymentReviewedAt?: string;
+  paymentReviewedBy?: string;
   paymentNote?: string;
   couponCode?: string;
   couponDiscount?: number;
@@ -220,7 +232,12 @@ export interface DispatchSettings {
 
 export type AttendancePunchType = 'in' | 'out';
 
-export type AttendancePunchMethod = 'webauthn' | 'webauthn_kiosk' | 'pin_kiosk';
+export type AttendancePunchMethod =
+  | 'webauthn'
+  | 'webauthn_kiosk'
+  | 'pin_kiosk'
+  | 'biometric_vta'
+  | 'cabin';
 
 /** PIN diario del kiosco (rota a la 01:00, jornada sede). */
 export interface AttendanceDailyPin {

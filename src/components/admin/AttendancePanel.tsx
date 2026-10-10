@@ -1,19 +1,43 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AttendancePunch, MotorizadoDriver } from '../../types';
-import { subscribeAttendancePunches } from '../../lib/firebase';
+import { importVtaAttendanceRows, subscribeAttendancePunches } from '../../lib/firebase';
 import { DEFAULT_FUEL_COP_PER_KM, formatCOP } from '../../lib/adminMetrics';
 import { summarizeDriverShift } from '../../lib/workShift';
 import { ATTENDANCE_PIN_RESET_HOUR } from '../../lib/attendance';
 import { formatGallons, formatLiters } from '../../lib/motoFuel';
-import { Fingerprint, LogIn, LogOut, Gauge, Tablet, ExternalLink, UserRound, Bike, AlertTriangle } from 'lucide-react';
+import { parseVtaAttendanceCsv } from '../../lib/vtaAttendance';
+import {
+  Fingerprint,
+  LogIn,
+  LogOut,
+  Gauge,
+  Tablet,
+  ExternalLink,
+  UserRound,
+  Bike,
+  AlertTriangle,
+  Upload,
+} from 'lucide-react';
 import { attendanceKioskUrl, openAttendanceKioskWindow } from '../driver/AttendanceKioskScreen';
 
 interface AttendancePanelProps {
   drivers: MotorizadoDriver[];
 }
 
+function methodLabel(method: AttendancePunch['method']): string {
+  if (method === 'cabin') return 'App transportista';
+  if (method === 'biometric_vta') return 'Huella VTA';
+  if (method === 'pin_kiosk') return 'PIN tablet';
+  if (method === 'webauthn_kiosk') return 'WebAuthn tablet';
+  if (method === 'webauthn') return 'WebAuthn móvil';
+  return method || '—';
+}
+
 export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => {
   const [punches, setPunches] = useState<AttendancePunch[]>([]);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const todayKey = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
@@ -24,7 +48,9 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
   const linked = approved.filter(
     (d) => d.webauthnCredentialId || d.webauthnKioskCredentialId
   );
+  const vtaLinked = approved.filter((d) => Boolean(d.vtaUserId));
   const pinPunchesToday = punches.filter((p) => p.method === 'pin_kiosk');
+  const vtaPunchesToday = punches.filter((p) => p.method === 'biometric_vta');
   const pendingMobilePhotos = pinPunchesToday.filter((p) => p.mobilePhotosPending);
 
   const shifts = useMemo(
@@ -38,6 +64,34 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
   const fleetKm = shifts.reduce((s, x) => s + x.kmDriven, 0);
   const fleetFuel = shifts.reduce((s, x) => s + x.fuelEstimateCop, 0);
 
+  async function onImportCsv(file: File) {
+    setImportBusy(true);
+    setImportMsg(null);
+    try {
+      const text = await file.text();
+      const rows = parseVtaAttendanceCsv(text);
+      if (!rows.length) {
+        setImportMsg('CSV vacío o sin columnas reconocibles (vtaUserId / UserID).');
+        return;
+      }
+      const result = await importVtaAttendanceRows(rows);
+      setImportMsg(
+        `Importadas ${result.ok}/${rows.length}` +
+          (result.failed.length
+            ? ` · fallidas: ${result.failed
+                .slice(0, 3)
+                .map((f) => `${f.vtaUserId} (${f.error})`)
+                .join('; ')}`
+            : ''),
+      );
+    } catch (e) {
+      setImportMsg(e instanceof Error ? e.message : 'Error al importar');
+    } finally {
+      setImportBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
@@ -45,14 +99,57 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
         <h3 className="text-sm font-bold text-white">Asistencia + kilometraje · hoy</h3>
       </div>
       <p className="text-xs text-slate-400">
-        Tablet sede: rostro → PIN (rota {ATTENDANCE_PIN_RESET_HOUR.toString().padStart(2, '0')}:00) → km + PIN.
-        Celular (QR): odómetro + placa en entrada. Móvil personal: huella WebAuthn.
+        Preferido: huella VTA (entrada/salida + cabina). Tablet: fotos odómetro/placa vía QR;
+        PIN diario ({ATTENDANCE_PIN_RESET_HOUR.toString().padStart(2, '0')}:00) queda como respaldo.
       </p>
+
       <div className="rounded-xl border border-[#00E5FF]/30 bg-[#00E5FF]/05 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-start gap-2 min-w-0">
-          <Tablet className="w-4 h-4 text-[#00E5FF] shrink-0 mt-0.5" />
+          <Fingerprint className="w-4 h-4 text-[#00E5FF] shrink-0 mt-0.5" />
           <div>
-            <p className="text-xs font-bold text-white">Terminal tablet · PIN diario</p>
+            <p className="text-xs font-bold text-white">VTA · huella sede</p>
+            <p className="text-[11px] text-slate-500">
+              {vtaLinked.length}/{approved.length} con ID VTA · {vtaPunchesToday.length} marca(s)
+              hoy
+            </p>
+            <p className="text-[10px] text-slate-600 mt-1">
+              Mapea el ID en Flota → perfil. Guía: docs/VTA-ASISTENCIA.md
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 shrink-0">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void onImportCsv(f);
+            }}
+          />
+          <button
+            type="button"
+            disabled={importBusy}
+            onClick={() => fileRef.current?.click()}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-500/40 text-emerald-300 text-xs font-black disabled:opacity-60"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            {importBusy ? 'Importando…' : 'Importar CSV VTA'}
+          </button>
+        </div>
+      </div>
+      {importMsg ? (
+        <p className="text-[11px] text-slate-300 rounded-lg border border-[#162748] bg-[#0A1020] px-3 py-2">
+          {importMsg}
+        </p>
+      ) : null}
+
+      <div className="rounded-xl border border-[#2B6CFF]/30 bg-[#2B6CFF]/05 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-2 min-w-0">
+          <Tablet className="w-4 h-4 text-[#2B6CFF] shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-bold text-white">Tablet · fotos moto + PIN respaldo</p>
             <p className="text-[11px] text-slate-500 break-all">{attendanceKioskUrl()}</p>
             <p className="text-[10px] text-slate-600 mt-1">
               {pinPunchesToday.length} marca(s) PIN · {pendingMobilePhotos.length} sin fotos móvil
@@ -214,6 +311,8 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
                   <div className="text-[10px] text-slate-500 font-tech flex items-center gap-1.5 flex-wrap">
                     <span>
                       {p.type === 'in' ? 'ENTRADA' : 'SALIDA'}
+                      {' · '}
+                      {methodLabel(p.method)}
                       {p.odometerKm != null
                         ? ` · ${p.odometerKm.toLocaleString('es-CO')} km`
                         : ''}

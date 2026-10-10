@@ -72,6 +72,7 @@ import {
 } from './attendance';
 import { calcShiftFuel, DEFAULT_FLEET_SETTINGS } from './motoFuel';
 import { findStaffAccount } from './staffAccount';
+import { resolveNextPunchType } from './vtaAttendance';
 
 const firebaseConfig = getFirebaseConfig();
 
@@ -710,6 +711,24 @@ export async function updateOrderStatus(
   if (driverId !== undefined) updateData.assignedDriverId = driverId;
   if (driverName !== undefined) updateData.assignedDriverName = driverName;
   await updateDoc(doc(db, 'orders', orderId), updateData);
+}
+
+/** Luz verde de comprobante: el pedido pending queda listo para circulación. */
+export async function approveTransferPayment(orderId: string, reviewer: string): Promise<void> {
+  const now = new Date().toISOString();
+  await updateDoc(doc(db, 'orders', orderId), {
+    paymentReviewStatus: 'approved',
+    paymentReviewedAt: now,
+    paymentReviewedBy: reviewer || 'torre',
+    updatedAt: now,
+    timeline: arrayUnion({
+      at: now,
+      to: 'pending',
+      byRole: 'admin',
+      byName: reviewer || 'torre',
+      note: 'Comprobante aprobado · solicitud en circulación',
+    }),
+  });
 }
 
 export async function updateOrderFields(
@@ -1414,6 +1433,129 @@ export async function updateDriverMotoFields(
     ...patch,
     updatedAt: new Date().toISOString(),
   });
+}
+
+/** Vincula el ID del VTA (huella sede) con el motorizado DomiClick. */
+export async function updateDriverVtaUserId(
+  driverId: string,
+  vtaUserId: string | null,
+): Promise<void> {
+  const cleaned = String(vtaUserId || '').trim();
+  await updateDoc(doc(db, 'drivers', driverId), {
+    vtaUserId: cleaned ? cleaned : deleteField(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function findDriverByVtaUserId(
+  vtaUserId: string,
+): Promise<MotorizadoDriver | null> {
+  const id = String(vtaUserId || '').trim();
+  if (!id) return null;
+  const snap = await getDocs(
+    query(collection(db, 'drivers'), where('vtaUserId', '==', id), limit(5)),
+  );
+  if (snap.empty) {
+    // Fallback: comparar como string por si quedó número en Firestore
+    const all = await getDocs(query(collection(db, 'drivers'), limit(300)));
+    const hit = all.docs.find((d) => String(d.data().vtaUserId || '').trim() === id);
+    if (!hit) return null;
+    return { id: hit.id, ...hit.data() } as MotorizadoDriver;
+  }
+  const d = snap.docs[0];
+  return { id: d.id, ...d.data() } as MotorizadoDriver;
+}
+
+/**
+ * Marca asistencia desde VTA: resuelve in/out según el día y activa cabina.
+ */
+export async function recordVtaAttendancePunch(params: {
+  vtaUserId: string;
+  at?: string;
+  type?: AttendancePunchType;
+}): Promise<AttendancePunch> {
+  const driver = await findDriverByVtaUserId(params.vtaUserId);
+  if (!driver) {
+    throw new Error(`No hay motorizado con ID VTA «${params.vtaUserId}»`);
+  }
+  if (driver.status !== 'approved') {
+    throw new Error(`El motorizado ${driver.fullName} no está aprobado`);
+  }
+
+  const atIso =
+    params.at && Number.isFinite(new Date(params.at).getTime())
+      ? new Date(params.at).toISOString()
+      : new Date().toISOString();
+  const dateKey = toDateKey(atIso);
+
+  let type = params.type;
+  if (!type) {
+    const daySnap = await getDocs(
+      query(
+        collection(db, 'attendance_punches'),
+        where('driverId', '==', driver.id),
+        where('dateKey', '==', dateKey),
+        limit(40),
+      ),
+    );
+    const today = daySnap.docs.map((d) => {
+      const data = d.data() as AttendancePunch;
+      return { type: data.type, at: data.at };
+    });
+    type = resolveNextPunchType(today);
+  }
+
+  const punch = await recordAttendancePunch({
+    driverId: driver.id,
+    driverName: driver.fullName,
+    type,
+    method: 'biometric_vta',
+    credentialId: `vta:${String(params.vtaUserId).trim()}`,
+    mobilePhotosPending: false,
+  });
+
+  if (punch.at !== atIso) {
+    await updateDoc(doc(db, 'attendance_punches', punch.id), {
+      at: atIso,
+      dateKey,
+    });
+    await updateDoc(doc(db, 'drivers', punch.driverId), {
+      lastPunchAt: atIso,
+      updatedAt: atIso,
+    });
+    return { ...punch, at: atIso, dateKey };
+  }
+
+  return punch;
+}
+
+/** Importa filas CSV ya parseadas (ops). */
+export async function importVtaAttendanceRows(
+  rows: Array<{ vtaUserId: string; at?: string; type?: AttendancePunchType }>,
+): Promise<{ ok: number; failed: Array<{ vtaUserId: string; error: string }> }> {
+  let ok = 0;
+  const failed: Array<{ vtaUserId: string; error: string }> = [];
+  const sorted = [...rows].sort((a, b) => {
+    const ta = a.at ? new Date(a.at).getTime() : 0;
+    const tb = b.at ? new Date(b.at).getTime() : 0;
+    return ta - tb;
+  });
+  for (const row of sorted) {
+    try {
+      await recordVtaAttendancePunch({
+        vtaUserId: row.vtaUserId,
+        at: row.at,
+        type: row.type,
+      });
+      ok += 1;
+    } catch (e) {
+      failed.push({
+        vtaUserId: row.vtaUserId,
+        error: e instanceof Error ? e.message : 'Error',
+      });
+    }
+  }
+  return { ok, failed };
 }
 
 export function subscribeMotoMaintenanceLogs(

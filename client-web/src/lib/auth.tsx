@@ -23,7 +23,9 @@ import {
   userToProfile,
   type CustomerProfile,
 } from './firebase';
+import { findApprovedDriverByEmail } from './driverCabin';
 import { opsTowerUrl } from './config';
+import { requestSessionNotificationPermission } from './pushNotifications';
 
 type AuthContextValue = {
   user: User | null;
@@ -32,6 +34,8 @@ type AuthContextValue = {
   error: string | null;
   /** Admin activo en Firestore: puede abrir la torre, pero NO se fuerza redirect (evita pantalla en blanco). */
   isOpsAdmin: boolean;
+  /** Transportista aprobado: shell solo-cabina (sin Inicio/Solicitar/Seguimiento). */
+  isApprovedDriver: boolean;
   opsUrl: string;
   signIn: () => Promise<void>;
   signInApple: () => Promise<void>;
@@ -51,11 +55,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isOpsAdmin, setIsOpsAdmin] = useState(false);
+  const [isApprovedDriver, setIsApprovedDriver] = useState(false);
 
   useEffect(() => {
     void completeGoogleRedirect()
-      .then((user) => {
-        if (user) setError(null);
+      .then((u) => {
+        if (u) setError(null);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Error al volver de Google');
@@ -66,8 +71,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (next) {
           const p = userToProfile(next);
           setProfile(p);
-          const admin = await isActiveOpsAdmin(next.email);
+          const [admin, driver] = await Promise.all([
+            isActiveOpsAdmin(next.email),
+            findApprovedDriverByEmail(next.email || '').catch(() => null),
+          ]);
           setIsOpsAdmin(admin);
+          setIsApprovedDriver(Boolean(driver && driver.status === 'approved'));
           try {
             await upsertCustomerProfile(p);
           } catch (err) {
@@ -76,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setProfile(null);
           setIsOpsAdmin(false);
+          setIsApprovedDriver(false);
         }
       } finally {
         setLoading(false);
@@ -83,6 +93,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    void requestSessionNotificationPermission(user.uid, user.email).catch((err) => {
+      console.warn('[push] permiso', err);
+    });
+  }, [user?.uid, user?.email]);
 
   const signIn = useCallback(async () => {
     setError(null);
@@ -170,6 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       isOpsAdmin,
+      isApprovedDriver,
       opsUrl,
       signIn,
       signInApple,
@@ -186,6 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       isOpsAdmin,
+      isApprovedDriver,
       opsUrl,
       signIn,
       signInApple,

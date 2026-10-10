@@ -34,7 +34,9 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
         <div>
           <h2 className="font-display text-2xl font-bold text-[var(--domi-text)]">Solicitud recibida</h2>
           <p className="mt-1 text-sm text-[var(--domi-muted)]">
-            Guarda el seguimiento y el PIN. El repartidor te pedirá el PIN al entregar.
+            {result.paymentReviewStatus === 'pending_review'
+              ? 'Tu comprobante está en revisión. El pedido entra en circulación cuando Central dé luz verde.'
+              : 'Guarda el seguimiento y el PIN. El repartidor te pedirá el PIN al entregar.'}
           </p>
         </div>
       </div>

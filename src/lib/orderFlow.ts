@@ -15,6 +15,11 @@ export function isLiveOrderStatus(status: OrderStatus | string | undefined): boo
   return LIVE_ORDER_STATUSES.includes(status as OrderStatus);
 }
 
+/** Transferencia con comprobante: no se asigna hasta que torre apruebe. */
+export function isPaymentOnHold(order: { paymentReviewStatus?: string } | null | undefined): boolean {
+  return order?.paymentReviewStatus === 'pending_review';
+}
+
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   pending: 'Pendiente de gestión',
   assigned: 'Asignado',

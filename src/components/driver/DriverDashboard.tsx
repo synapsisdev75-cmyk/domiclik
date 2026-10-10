@@ -78,11 +78,32 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
   const watchIdRef = useRef<number | null>(null);
   const lastSentRef = useRef(0);
 
-  const myAssignedOrders = orders.filter(
-    (o) =>
-      o.assignedDriverId === driver.id && o.status !== 'delivered' && o.status !== 'cancelled'
+  const myAssignedOrders = useMemo(
+    () =>
+      orders.filter(
+        (o) =>
+          o.assignedDriverId === driver.id && o.status !== 'delivered' && o.status !== 'cancelled'
+      ),
+    [orders, driver.id]
   );
-  const currentActiveOrder = myAssignedOrders[0] || null;
+  const currentActiveOrder =
+    myAssignedOrders.find((o) => o.id === selectedOrderIdForMap) || myAssignedOrders[0] || null;
+
+  // Mantener selección válida mientras el pedido siga abierto
+  useEffect(() => {
+    if (!myAssignedOrders.length) {
+      if (selectedOrderIdForMap) setSelectedOrderIdForMap(null);
+      return;
+    }
+    if (
+      selectedOrderIdForMap &&
+      myAssignedOrders.some((o) => o.id === selectedOrderIdForMap)
+    ) {
+      return;
+    }
+    setSelectedOrderIdForMap(myAssignedOrders[0].id);
+  }, [myAssignedOrders, selectedOrderIdForMap]);
+
   const myStats = useMemo(
     () => buildDriverStats([driver], orders, [], undefined, undefined)[0],
     [driver, orders]
@@ -664,7 +685,7 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                       const dest = goingToPickup
                         ? currentActiveOrder.pickupCoords
                         : currentActiveOrder.deliveryCoords;
-                      openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest));
+                      openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest, liveCoords));
                     }}
                     className="border border-[#00E5FF]/40 bg-[#00E5FF]/10 text-[#00E5FF] font-extrabold px-3 py-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
                   >
@@ -716,14 +737,29 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                 </button>
                 {DRIVER_NEXT_ACTION[currentActiveOrder.status] && (
                   <button
-                    onClick={() =>
-                      updateOrderStatus(
+                    onClick={() => {
+                      const step = DRIVER_NEXT_ACTION[currentActiveOrder.status]!;
+                      void updateOrderStatus(
                         currentActiveOrder.id,
-                        DRIVER_NEXT_ACTION[currentActiveOrder.status]!.next,
+                        step.next,
                         driver.id,
                         driver.fullName
-                      )
-                    }
+                      ).then(() => {
+                        if (
+                          (step.next === 'en_route_origin' || step.next === 'in_transit') &&
+                          currentActiveOrder.pickupCoords &&
+                          currentActiveOrder.deliveryCoords
+                        ) {
+                          const dest =
+                            step.next === 'en_route_origin'
+                              ? currentActiveOrder.pickupCoords
+                              : currentActiveOrder.deliveryCoords;
+                          openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest, liveCoords));
+                          setSelectedOrderIdForMap(currentActiveOrder.id);
+                          setActiveTab('map');
+                        }
+                      });
+                    }}
                     className="bg-emerald-500 text-black font-bold px-5 py-2.5 rounded-xl text-xs flex items-center gap-1.5"
                   >
                     <CheckCircle2 className="w-4 h-4" />
@@ -797,10 +833,37 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
             <div className="bg-[#161920] border border-[#2d3139] rounded-2xl p-12 text-center">
               <h3 className="text-lg font-bold text-white mb-1">Sin envíos activos</h3>
               <p className="text-xs text-slate-400">
-                Activa cabina: el sistema asigna al más cercano dentro del radio.
+                Activa cabina: el sistema asigna al más cercano dentro del radio. Los pedidos
+                asignados permanecen aquí hasta entrega o cancelación.
               </p>
             </div>
           )}
+
+          {myAssignedOrders.length > 1 ? (
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                Todos los pedidos abiertos ({myAssignedOrders.length})
+              </h4>
+              {myAssignedOrders.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => setSelectedOrderIdForMap(o.id)}
+                  className={`w-full rounded-xl border px-4 py-3 text-left ${
+                    currentActiveOrder?.id === o.id
+                      ? 'border-amber-500/50 bg-amber-500/10'
+                      : 'border-[#2d3139] bg-[#11141a]'
+                  }`}
+                >
+                  <p className="font-mono text-xs font-bold text-amber-300">{o.trackingCode}</p>
+                  <p className="mt-0.5 text-[11px] text-cyan-300">
+                    {ORDER_STATUS_LABEL[o.status] || o.status}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-slate-400">{o.deliveryAddress}</p>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       )}
 

@@ -17,7 +17,7 @@ import {
 } from './lib/firebase';
 import { dispatchAllPendingOrders } from './lib/autoDispatch';
 import { isDriverAssignable } from './lib/workShift';
-import { alertDeliveryComplete, alertOrderAssigned, alertPanic } from './lib/alerts';
+import { alertDeliveryComplete, alertNewClientOrder, alertOrderAssigned, alertPanic } from './lib/alerts';
 import { isLiveOrderStatus } from './lib/orderFlow';
 import { DEFAULT_DISPATCH_SETTINGS } from './lib/adminMetrics';
 import type { DispatchSettings } from './types';
@@ -218,7 +218,9 @@ function MainApp() {
     if (currentRole !== 'admin') return;
     if (!dispatchSettings.autoAssignEnabled) return;
 
-    const pending = orders.filter((o) => o.status === 'pending' && !o.assignedDriverId);
+    const pending = orders.filter(
+      (o) => o.status === 'pending' && !o.assignedDriverId && o.paymentReviewStatus !== 'pending_review',
+    );
     if (pending.length === 0) return;
 
     const hasFreeActive = drivers.some(
@@ -281,8 +283,13 @@ function MainApp() {
 
     for (const order of orders) {
       const was = prev.get(order.id);
-      if (was === undefined && order.status === 'pending' && currentRole === 'admin') {
-        alertOrderAssigned();
+      // Torre: pedido nuevo del cliente (aunque auto-despacho ya lo asigne)
+      if (
+        was === undefined &&
+        order.status !== 'cancelled' &&
+        (currentRole === 'admin' || currentRole === 'secretary')
+      ) {
+        alertNewClientOrder();
       }
       if (was !== order.status) {
         if (order.status === 'delivered' && was && was !== 'delivered') {

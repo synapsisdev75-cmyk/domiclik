@@ -92,6 +92,16 @@ export function playPanicSound() {
 }
 
 /** Vibración distinta según tipo (solo dispositivos que lo soporten). */
+/** Pedido nuevo del cliente (torre): tres pings claros. */
+export function playNewClientOrderSound() {
+  const ctx = getCtx();
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  beep(ctx, { freq: 660, duration: 0.12, startAt: t, type: 'square', gain: 0.22 });
+  beep(ctx, { freq: 880, duration: 0.12, startAt: t + 0.16, type: 'square', gain: 0.24 });
+  beep(ctx, { freq: 1174.66, duration: 0.18, startAt: t + 0.32, type: 'triangle', gain: 0.22 });
+}
+
 export function vibrateAlert(kind: AlertKind) {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
   try {
@@ -101,6 +111,8 @@ export function vibrateAlert(kind: AlertKind) {
       navigator.vibrate([80, 40, 80]); // doble pulso radio
     } else if (kind === 'panic') {
       navigator.vibrate([300, 100, 300, 100, 300, 100, 500]);
+    } else if (kind === 'assigned') {
+      navigator.vibrate([100, 50, 100, 50, 200]);
     } else {
       navigator.vibrate([50, 30, 50]);
     }
@@ -124,6 +136,13 @@ export function alertNewMessage() {
 export function alertOrderAssigned() {
   unlockAlertAudio();
   playOrderAssignedSound();
+  vibrateAlert('assigned');
+}
+
+/** Torre: llegó un pedido nuevo del cliente (landing / app). */
+export function alertNewClientOrder() {
+  unlockAlertAudio();
+  playNewClientOrderSound();
   vibrateAlert('assigned');
 }
 

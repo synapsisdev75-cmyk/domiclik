@@ -8,7 +8,7 @@ import { DEFAULT_DISPATCH_SETTINGS } from './adminMetrics';
 import { isLiveOrderStatus } from './orderFlow';
 import { calculateOptimalRoute } from '../utils/routing';
 import { updateOrderFields, updateOrderStatus } from './firebase';
-import { isDriverAssignable } from './workShift';
+import { driverCanTakeOrder, isDriverAssignable, minutesFromDistanceKm } from './workShift';
 
 /** Distancia geodésica en km (Haversine). */
 export function haversineKm(
@@ -37,7 +37,7 @@ export type NearestDriverResult = {
   distanceKm: number;
 };
 
-/** Conductores ocupados: ya tienen pedido assigned o in_transit. */
+/** Conductores ocupados: cualquier pedido en estado vivo (assigned → at_destination). */
 export function getBusyDriverIds(orders: DeliveryOrder[]): Set<string> {
   const busy = new Set<string>();
   for (const o of orders) {
@@ -55,8 +55,15 @@ export function findNearestEligibleDriver(
   drivers: MotorizadoDriver[],
   pickup: LocationCoords,
   radiusKm: number,
-  busyDriverIds: Set<string> = new Set()
+  busyDriverIds: Set<string> = new Set(),
+  job?: { durationMin?: number; delivery?: LocationCoords },
 ): NearestDriverResult | null {
+  const orderMinutes =
+    job?.durationMin && job.durationMin > 0
+      ? job.durationMin
+      : job?.delivery
+        ? minutesFromDistanceKm(haversineKm(pickup, job.delivery))
+        : 0;
   let best: NearestDriverResult | null = null;
   for (const driver of drivers) {
     if (!isDriverAssignable(driver)) continue;
@@ -64,6 +71,15 @@ export function findNearestEligibleDriver(
     if (!driver.location?.lat || !driver.location?.lng) continue;
     const distanceKm = haversineKm(driver.location, pickup);
     if (distanceKm > radiusKm) continue;
+    if (
+      !driverCanTakeOrder({
+        lastPunchAt: driver.lastPunchAt,
+        approachKm: distanceKm,
+        orderMinutes,
+      })
+    ) {
+      continue;
+    }
     if (!best || distanceKm < best.distanceKm) {
       best = { driver, distanceKm };
     }
@@ -107,6 +123,9 @@ export async function dispatchPendingOrder(
 ): Promise<DispatchResult> {
   if (order.status !== 'pending') {
     return { orderId: order.id, priced: false, assigned: false, reason: 'not_pending' };
+  }
+  if (order.paymentReviewStatus === 'pending_review') {
+    return { orderId: order.id, priced: false, assigned: false, reason: 'payment_review' };
   }
   if (order.assignedDriverId) {
     return { orderId: order.id, priced: false, assigned: false, reason: 'already_assigned' };
@@ -179,11 +198,16 @@ export async function dispatchPendingOrder(
     options.expandRadiusKm ?? Math.max(30, baseRadius * 3)
   );
 
+  const job = {
+    durationMin: routeDurationMin,
+    delivery: order.deliveryCoords,
+  };
   let nearest = findNearestEligibleDriver(
     drivers,
     order.pickupCoords,
     baseRadius,
-    busy
+    busy,
+    job,
   );
   let usedRadius = baseRadius;
 
@@ -193,7 +217,8 @@ export async function dispatchPendingOrder(
       drivers,
       order.pickupCoords,
       expandRadius,
-      busy
+      busy,
+      job,
     );
     usedRadius = expandRadius;
   }
@@ -252,7 +277,12 @@ export async function dispatchAllPendingOrders(
   settings: DispatchSettings
 ): Promise<DispatchResult[]> {
   const pending = orders
-    .filter((o) => o.status === 'pending' && !o.assignedDriverId)
+    .filter(
+      (o) =>
+        o.status === 'pending' &&
+        !o.assignedDriverId &&
+        o.paymentReviewStatus !== 'pending_review',
+    )
     .sort(
       (a, b) =>
         new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()

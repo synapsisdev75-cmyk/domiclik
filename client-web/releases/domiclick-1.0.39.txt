@@ -1,0 +1,6 @@
+DomiClick 1.0.39 (versionCode 40)
+
+Novedades
+- Al entrar a la sesión, la app pide el permiso de notificaciones.
+- Con señal débil avisa en la cabina, reintenta la ubicación y guarda el PIN hasta que vuelva la red.
+- La ruta de recogida sale de donde está el repartidor y no borra la ruta de entrega.

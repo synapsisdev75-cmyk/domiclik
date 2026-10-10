@@ -3,7 +3,8 @@ import { CalendarClock, Loader2, Package } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { submitOrder } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { uploadInvoicePhoto } from '../lib/firebase';
+import { uploadInvoicePhoto, uploadPaymentProof } from '../lib/firebase';
+import { rememberRecentOrder } from '../lib/recentOrders';
 import {
   estimateRoute,
   estimateRouteWithGoogle,
@@ -53,6 +54,7 @@ export type OrderFormValues = {
   scheduledFor: string;
   invoiceNumber: string;
   paymentMethod: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
+  transferChannel: '' | 'breb' | 'qr';
   paymentNote: string;
   couponCode: string;
 };
@@ -69,6 +71,7 @@ const INITIAL: OrderFormValues = {
   scheduledFor: '',
   invoiceNumber: '',
   paymentMethod: 'efectivo',
+  transferChannel: '',
   paymentNote: '',
   couponCode: '',
 };
@@ -113,6 +116,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [acceptedMarketing, setAcceptedMarketing] = useState(false);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  const [proofFile, setProofFile] = useState<File | null>(null);
   /** now = entrega inmediata (ETA por ruta). later = fecha/hora elegida por el usuario. */
   const [scheduleMode, setScheduleMode] = useState<'now' | 'later'>('now');
 
@@ -345,22 +349,22 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
     }
 
     if (!pickup || !delivery) {
-      setError('Marca en el mapa la recolección (A) y la entrega (B).');
+      setError('Marca en el mapa la recogida y la entrega.');
       return;
     }
     if (!addressHasRoad(pickupParts) || !addressHasRoad(deliveryParts)) {
-      setError('Escribe o busca la dirección de recolección (A) y de entrega (B).');
+      setError('Escribe o busca la dirección de recogida y de entrega.');
       return;
     }
     if (
       values.pickupAddress.trim().toLowerCase() === values.deliveryAddress.trim().toLowerCase()
     ) {
-      setError('La recolección (A) y la entrega (B) deben ser direcciones diferentes.');
+      setError('La recogida y la entrega deben ser direcciones diferentes.');
       return;
     }
     if (coordsTooClose(pickup, delivery)) {
       setError(
-        'Los puntos A y B están muy cerca. Marca recolección y entrega en lugares distintos en el mapa.'
+        'La recogida y la entrega están muy cerca. Márcalas en lugares distintos en el mapa.'
       );
       return;
     }
@@ -406,6 +410,17 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       if (!phone) {
         throw new Error('El teléfono es obligatorio');
       }
+      if (values.paymentMethod === 'transferencia') {
+        if (values.transferChannel !== 'breb' && values.transferChannel !== 'qr') {
+          throw new Error('Elige Bre-B o QR');
+        }
+        if (!proofFile) {
+          throw new Error('Sube la foto del comprobante');
+        }
+        if (proofFile.size > 25 * 1024 * 1024) {
+          throw new Error('El comprobante no puede superar 25 MB');
+        }
+      }
       await setPhone(phone);
 
       let invoicePhotoUrl: string | undefined;
@@ -414,6 +429,11 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
           throw new Error('La foto de factura no puede superar 25 MB');
         }
         invoicePhotoUrl = await uploadInvoicePhoto(invoiceFile);
+      }
+
+      let paymentProofUrl: string | undefined;
+      if (values.paymentMethod === 'transferencia' && proofFile) {
+        paymentProofUrl = await uploadPaymentProof(proofFile);
       }
 
       const result = await submitOrder({
@@ -441,6 +461,12 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
         invoiceNumber: values.invoiceNumber.trim() || undefined,
         invoicePhotoUrl,
         paymentMethod: values.paymentMethod,
+        transferChannel:
+          values.paymentMethod === 'transferencia' &&
+          (values.transferChannel === 'breb' || values.transferChannel === 'qr')
+            ? values.transferChannel
+            : undefined,
+        paymentProofUrl,
         paymentNote: values.paymentNote.trim() || undefined,
         couponCode: values.couponCode.trim() || undefined,
       });
@@ -458,10 +484,12 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
         scheduledFor: toDatetimeLocalValue(min),
         invoiceNumber: '',
         paymentMethod: 'efectivo',
+        transferChannel: '',
         paymentNote: '',
         couponCode: '',
       });
       setInvoiceFile(null);
+      setProofFile(null);
       setPickup(null);
       setDelivery(null);
       setPickupParts({ ...EMPTY_ADDRESS_PARTS });
@@ -470,6 +498,13 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       setDeliveryMapAnchored(false);
       setPath([]);
       setPickMode('pickup');
+      rememberRecentOrder({
+        trackingCode: result.trackingCode,
+        orderId: result.orderId,
+        deliveryAddress: values.deliveryAddress.trim() || undefined,
+        status: result.status || 'pending',
+        createdAt: new Date().toISOString(),
+      });
       onSuccess(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al enviar la solicitud');
@@ -632,7 +667,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
           disabled={!pickup || !delivery || geoBusy}
           onClick={() => {
             if (!pickup || !delivery) {
-              setError('Marca recolección (A) y entrega (B) en el mapa.');
+              setError('Marca la recogida y la entrega en el mapa.');
               return;
             }
             setError(null);
@@ -648,12 +683,12 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
           {wizard && pickup && delivery ? (
             <div className="rounded-xl border border-[var(--domi-border)] bg-[var(--domi-panel)] px-3 py-3 text-sm">
               <p className="text-[var(--domi-cyan)]">
-                <span className="font-semibold">A</span>{' '}
-                {composeFullAddress(pickupParts) || 'Recolección'}
+                <span className="font-semibold">Recogida</span>{' '}
+                {composeFullAddress(pickupParts) || 'Sin recogida'}
               </p>
               <p className="mt-1 text-[var(--domi-orange)]">
-                <span className="font-semibold">B</span>{' '}
-                {composeFullAddress(deliveryParts) || 'Entrega'}
+                <span className="font-semibold">Entrega</span>{' '}
+                {composeFullAddress(deliveryParts) || 'Sin entrega'}
               </p>
               <button
                 type="button"
@@ -800,7 +835,66 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
             </label>
           ) : null}
 
-          {values.paymentMethod === 'transferencia' || values.paymentMethod === 'otro' ? (
+          {values.paymentMethod === 'transferencia' ? (
+            <div className="block space-y-3 sm:col-span-2 rounded-xl border border-[rgba(0,229,255,0.25)] bg-[rgba(0,229,255,0.05)] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                Tipo de transferencia *
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ['breb', 'Bre-B'],
+                    ['qr', 'QR'],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => update('transferChannel', id)}
+                    className={`rounded-xl border px-3 py-2.5 text-sm font-bold ${
+                      values.transferChannel === id
+                        ? 'border-[var(--domi-cyan)] bg-[rgba(0,229,255,0.16)] text-white'
+                        : 'border-[var(--domi-line)] text-[var(--domi-muted)]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                  Foto del comprobante *
+                </span>
+                <input
+                  className="field-input file:mr-3 file:rounded-md file:border-0 file:bg-[rgba(0,229,255,0.15)] file:px-3 file:py-1 file:text-xs file:font-semibold file:text-[var(--domi-text)]"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  required
+                  onChange={(e) => setProofFile(e.target.files?.[0] || null)}
+                />
+                {proofFile ? (
+                  <span className="mt-1 block text-[11px] text-[var(--domi-muted)]">{proofFile.name}</span>
+                ) : null}
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                  Referencia (opcional)
+                </span>
+                <input
+                  className="field-input"
+                  value={values.paymentNote}
+                  onChange={(e) => update('paymentNote', e.target.value)}
+                  placeholder="Banco, número de referencia…"
+                />
+              </label>
+              <p className="text-[11px] leading-snug text-[var(--domi-muted)]">
+                Central revisa el comprobante. El pedido entra en circulación cuando la secretaría o el administrador den luz verde.
+              </p>
+            </div>
+          ) : null}
+
+          {values.paymentMethod === 'otro' ? (
             <label className="block sm:col-span-2">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
                 Detalle de pago

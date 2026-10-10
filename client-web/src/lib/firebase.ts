@@ -29,9 +29,11 @@ import {
   setDoc,
   getDocs,
   updateDoc,
+  onSnapshot,
   query,
   where,
   limit,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import fallback from '../firebase-applet-config.json' with { type: 'json' };
@@ -657,10 +659,16 @@ export type PublicOrderTracking = {
   deliveryConfirmCode?: string | null;
   status: string;
   customerName?: string;
+  pickupAddress?: string;
   deliveryAddress?: string;
   description?: string;
   assignedDriverId: string | null;
   assignedDriverName: string | null;
+  pickupCoords?: { lat: number; lng: number } | null;
+  deliveryCoords?: { lat: number; lng: number } | null;
+  driverLocation?: { lat: number; lng: number; updatedAt?: string } | null;
+  routeDistanceKm?: number | null;
+  routeDurationMin?: number | null;
   serviceRating?: number;
   ratingComment?: string;
   ratedAt?: string;
@@ -672,6 +680,7 @@ export type PublicOrderTracking = {
   createdAt?: string;
   updatedAt?: string;
   etaText?: string;
+  paymentReviewStatus?: 'pending_review' | 'approved';
   assignedDriverPhone?: string | null;
   timeline?: Array<{ at?: string; to?: string; note?: string }>;
 };
@@ -701,6 +710,60 @@ function etaForStatus(status: string): string {
   }
 }
 
+function parseCoords(raw: unknown): { lat: number; lng: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const lat = Number(o.lat ?? o.latitude);
+  const lng = Number(o.lng ?? o.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat === 0 && lng === 0) return null;
+  return { lat, lng };
+}
+
+function mapPublicOrder(docSnap: { id: string; data: () => Record<string, unknown> }): PublicOrderTracking {
+  const data = docSnap.data();
+  const status = String(data.status || 'pending');
+  return {
+    orderId: docSnap.id,
+    trackingCode: String(data.trackingCode || docSnap.id),
+    deliveryConfirmCode:
+      status === 'delivered' || status === 'cancelled'
+        ? null
+        : data.deliveryConfirmCode
+          ? String(data.deliveryConfirmCode)
+          : null,
+    status,
+    customerName: data.customerName ? String(data.customerName) : undefined,
+    pickupAddress: data.pickupAddress ? String(data.pickupAddress) : undefined,
+    deliveryAddress: data.deliveryAddress ? String(data.deliveryAddress) : undefined,
+    description: data.description ? String(data.description) : undefined,
+    assignedDriverId: data.assignedDriverId ? String(data.assignedDriverId) : null,
+    assignedDriverName: data.assignedDriverName ? String(data.assignedDriverName) : null,
+    assignedDriverPhone: data.assignedDriverPhone ? String(data.assignedDriverPhone) : null,
+    pickupCoords: parseCoords(data.pickupCoords),
+    deliveryCoords: parseCoords(data.deliveryCoords),
+    routeDistanceKm:
+      typeof data.routeDistanceKm === 'number' ? data.routeDistanceKm : null,
+    routeDurationMin:
+      typeof data.routeDurationMin === 'number' ? data.routeDurationMin : null,
+    timeline: Array.isArray(data.timeline) ? (data.timeline as PublicOrderTracking['timeline']) : [],
+    serviceRating: typeof data.serviceRating === 'number' ? data.serviceRating : undefined,
+    ratingComment: data.ratingComment ? String(data.ratingComment) : undefined,
+    ratedAt: data.ratedAt ? String(data.ratedAt) : undefined,
+    ratingSurvey: data.ratingSurvey as PublicOrderTracking['ratingSurvey'],
+    createdAt: data.createdAt ? String(data.createdAt) : undefined,
+    updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
+    paymentReviewStatus:
+      data.paymentReviewStatus === 'pending_review' || data.paymentReviewStatus === 'approved'
+        ? data.paymentReviewStatus
+        : undefined,
+    etaText:
+      data.paymentReviewStatus === 'pending_review'
+        ? 'Central está revisando tu comprobante'
+        : etaForStatus(status),
+  };
+}
+
 export async function findOrderByTrackingCode(code: string): Promise<PublicOrderTracking | null> {
   const trackingCode = code.trim().toUpperCase();
   if (!trackingCode) return null;
@@ -711,33 +774,114 @@ export async function findOrderByTrackingCode(code: string): Promise<PublicOrder
   if (snap.empty) return null;
 
   const docSnap = snap.docs[0];
-  const data = docSnap.data();
-  const status = String(data.status || 'pending');
+  const order = mapPublicOrder({
+    id: docSnap.id,
+    data: () => docSnap.data() as Record<string, unknown>,
+  });
 
-  return {
-    orderId: docSnap.id,
-    trackingCode: String(data.trackingCode || trackingCode),
-    deliveryConfirmCode:
-      status === 'delivered' || status === 'cancelled'
-        ? null
-        : data.deliveryConfirmCode
-          ? String(data.deliveryConfirmCode)
-          : null,
-    status,
-    customerName: data.customerName,
-    deliveryAddress: data.deliveryAddress,
-    description: data.description,
-    assignedDriverId: data.assignedDriverId || null,
-    assignedDriverName: data.assignedDriverName || null,
-    assignedDriverPhone: data.assignedDriverPhone || null,
-    timeline: Array.isArray(data.timeline) ? data.timeline : [],
-    serviceRating: data.serviceRating,
-    ratingComment: data.ratingComment,
-    ratedAt: data.ratedAt,
-    ratingSurvey: data.ratingSurvey,
-    createdAt: data.createdAt,
-    updatedAt: data.updatedAt,
-    etaText: etaForStatus(status),
+  if (order.assignedDriverId) {
+    try {
+      const drv = await getDoc(doc(db, 'drivers', order.assignedDriverId));
+      if (drv.exists()) {
+        const loc = parseCoords((drv.data() as Record<string, unknown>).location);
+        const updatedAt = (drv.data() as Record<string, unknown>).location
+          ? String(
+              ((drv.data() as Record<string, unknown>).location as Record<string, unknown>)
+                ?.updatedAt || '',
+            ) || undefined
+          : undefined;
+        if (loc) order.driverLocation = { ...loc, updatedAt };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return order;
+}
+
+/**
+ * Escucha el pedido + ubicación del motorizado en vivo (mapa de seguimiento).
+ */
+export function subscribeOrderTracking(
+  trackingCode: string,
+  callback: (order: PublicOrderTracking | null) => void,
+): Unsubscribe {
+  const code = trackingCode.trim().toUpperCase();
+  let unsubOrder: Unsubscribe | null = null;
+  let unsubDriver: Unsubscribe | null = null;
+  let latest: PublicOrderTracking | null = null;
+
+  const stopDriver = () => {
+    unsubDriver?.();
+    unsubDriver = null;
+  };
+
+  const attachDriver = (driverId: string | null) => {
+    stopDriver();
+    if (!driverId) {
+      if (latest) {
+        latest = { ...latest, driverLocation: null };
+        callback(latest);
+      }
+      return;
+    }
+    unsubDriver = onSnapshot(
+      doc(db, 'drivers', driverId),
+      (snap) => {
+        if (!latest) return;
+        if (!snap.exists()) {
+          latest = { ...latest, driverLocation: null };
+          callback(latest);
+          return;
+        }
+        const data = snap.data() as Record<string, unknown>;
+        const loc = parseCoords(data.location);
+        const updatedAt = data.location
+          ? String((data.location as Record<string, unknown>).updatedAt || '') || undefined
+          : undefined;
+        latest = {
+          ...latest,
+          driverLocation: loc ? { ...loc, updatedAt } : null,
+          assignedDriverName: data.fullName
+            ? String(data.fullName)
+            : latest.assignedDriverName,
+          assignedDriverPhone: data.phone ? String(data.phone) : latest.assignedDriverPhone,
+        };
+        callback(latest);
+      },
+      () => {
+        /* keep last */
+      },
+    );
+  };
+
+  unsubOrder = onSnapshot(
+    query(collection(db, 'orders'), where('trackingCode', '==', code), limit(1)),
+    (snap) => {
+      if (snap.empty) {
+        latest = null;
+        stopDriver();
+        callback(null);
+        return;
+      }
+      const d = snap.docs[0];
+      latest = mapPublicOrder({
+        id: d.id,
+        data: () => d.data() as Record<string, unknown>,
+      });
+      callback(latest);
+      attachDriver(latest.assignedDriverId);
+    },
+    () => {
+      latest = null;
+      stopDriver();
+      callback(null);
+    },
+  );
+
+  return () => {
+    unsubOrder?.();
+    stopDriver();
   };
 }
 
@@ -835,6 +979,8 @@ export type ClientOrderInput = {
   invoiceNumber?: string;
   invoicePhotoUrl?: string;
   paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
+  transferChannel?: 'breb' | 'qr';
+  paymentProofUrl?: string;
   paymentNote?: string;
   couponCode?: string;
 };
@@ -843,6 +989,15 @@ export async function uploadInvoicePhoto(file: File, orderIdHint?: string): Prom
   const id = orderIdHint || `tmp_${Date.now()}`;
   const safeName = (file.name || 'factura.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `orders/${id}/invoice_${Date.now()}_${safeName}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
+  return getDownloadURL(storageRef);
+}
+
+export async function uploadPaymentProof(file: File, orderIdHint?: string): Promise<string> {
+  const id = orderIdHint || `tmp_${Date.now()}`;
+  const safeName = (file.name || 'comprobante.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `orders/${id}/proof_${Date.now()}_${safeName}`;
   const storageRef = ref(storage, path);
   await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
   return getDownloadURL(storageRef);
@@ -892,6 +1047,8 @@ export async function createClientOrder(input: ClientOrderInput) {
     }
   }
   const km = Number(input.routeDistanceKm) || 0;
+  const awaitingProof =
+    input.paymentMethod === 'transferencia' && Boolean(input.paymentProofUrl);
 
   const order = {
     id: orderId,
@@ -899,7 +1056,7 @@ export async function createClientOrder(input: ClientOrderInput) {
     deliveryConfirmCode,
     customerName: input.customerName.trim(),
     customerPhone: input.customerPhone.trim(),
-    customerEmail: input.customerEmail || '',
+    customerEmail: (input.customerEmail || '').trim().toLowerCase(),
     customerUid: input.customerUid || '',
     customerPhotoURL: input.customerPhotoURL || '',
     pickupAddress: input.pickupAddress.trim() || 'Punto de recolección',
@@ -933,10 +1090,26 @@ export async function createClientOrder(input: ClientOrderInput) {
     invoiceNumber: input.invoiceNumber || '',
     invoicePhotoUrl: input.invoicePhotoUrl || '',
     paymentMethod: input.paymentMethod || 'efectivo',
+    ...(awaitingProof
+      ? {
+          transferChannel: input.transferChannel,
+          paymentProofUrl: input.paymentProofUrl,
+          paymentReviewStatus: 'pending_review' as const,
+        }
+      : {}),
     paymentNote: input.paymentNote || '',
     couponCode: couponApplied?.code || input.couponCode?.trim().toUpperCase() || '',
     couponDiscount: couponApplied?.discount || 0,
-    timeline: [{ at: now, to: 'pending', byRole: 'customer', note: 'Solicitud creada' }],
+    timeline: [
+      {
+        at: now,
+        to: 'pending',
+        byRole: 'customer',
+        note: awaitingProof
+          ? 'Solicitud creada · comprobante en revisión'
+          : 'Solicitud creada',
+      },
+    ],
     sourceSiteId: input.sourceSiteId,
     externalOrderId: '',
     createdAt: now,
@@ -955,6 +1128,7 @@ export async function createClientOrder(input: ClientOrderInput) {
     routeDistanceKm: order.routeDistanceKm || null,
     scheduledFor: order.scheduledFor || null,
     pricingBand: order.pricingBand || null,
+    paymentReviewStatus: awaitingProof ? ('pending_review' as const) : undefined,
   };
 }
 
@@ -966,37 +1140,169 @@ export type CustomerOrderSummary = {
   deliveryAddress?: string;
   description?: string;
   createdAt?: string;
+  updatedAt?: string;
   scheduledFor?: string;
 };
 
-export async function listCustomerOrders(uid: string): Promise<CustomerOrderSummary[]> {
+function mapCustomerOrderDoc(
+  id: string,
+  data: Record<string, unknown>,
+): CustomerOrderSummary | null {
+  const trackingCode = String(data.trackingCode || '').trim();
+  if (!trackingCode) return null;
+  return {
+    orderId: id,
+    trackingCode,
+    status: String(data.status || 'pending'),
+    pickupAddress: data.pickupAddress ? String(data.pickupAddress) : undefined,
+    deliveryAddress: data.deliveryAddress ? String(data.deliveryAddress) : undefined,
+    description: data.description ? String(data.description) : undefined,
+    createdAt: data.createdAt ? String(data.createdAt) : undefined,
+    updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
+    scheduledFor: data.scheduledFor ? String(data.scheduledFor) : undefined,
+  };
+}
+
+function sortCustomerOrders(rows: CustomerOrderSummary[]): CustomerOrderSummary[] {
+  return rows.sort((a, b) => {
+    const ta = Date.parse(a.updatedAt || a.createdAt || '') || 0;
+    const tb = Date.parse(b.updatedAt || b.createdAt || '') || 0;
+    return tb - ta;
+  });
+}
+
+function mergeCustomerOrderMaps(
+  ...snaps: Array<{ id: string; data: () => Record<string, unknown> }[]>
+): CustomerOrderSummary[] {
+  const byId = new Map<string, CustomerOrderSummary>();
+  for (const docs of snaps) {
+    for (const d of docs) {
+      const row = mapCustomerOrderDoc(d.id, d.data());
+      if (row) byId.set(row.orderId, row);
+    }
+  }
+  return sortCustomerOrders([...byId.values()]);
+}
+
+export async function listCustomerOrders(
+  uid: string,
+  email?: string | null,
+): Promise<CustomerOrderSummary[]> {
   const customerUid = uid.trim();
   if (!customerUid) return [];
 
-  const snap = await getDocs(
-    query(collection(db, 'orders'), where('customerUid', '==', customerUid), limit(40)),
+  const snaps: Array<{ id: string; data: () => Record<string, unknown> }[]> = [];
+
+  const byUid = await getDocs(
+    query(collection(db, 'orders'), where('customerUid', '==', customerUid), limit(80)),
+  );
+  snaps.push(byUid.docs.map((d) => ({ id: d.id, data: () => d.data() as Record<string, unknown> })));
+
+  const normalizedEmail = email?.trim().toLowerCase();
+  if (normalizedEmail) {
+    try {
+      const byEmail = await getDocs(
+        query(collection(db, 'orders'), where('customerEmail', '==', normalizedEmail), limit(40)),
+      );
+      snaps.push(
+        byEmail.docs.map((d) => ({ id: d.id, data: () => d.data() as Record<string, unknown> })),
+      );
+    } catch {
+      /* índice / campo opcional */
+    }
+  }
+
+  return mergeCustomerOrderMaps(...snaps);
+}
+
+/**
+ * Pedidos del cliente en vivo: activos hasta entregar; entregados/cancelados quedan en historial.
+ */
+export function subscribeCustomerOrders(
+  uid: string,
+  callback: (orders: CustomerOrderSummary[]) => void,
+  email?: string | null,
+): Unsubscribe {
+  const customerUid = uid.trim();
+  if (!customerUid) {
+    callback([]);
+    return () => undefined;
+  }
+
+  let uidRows: CustomerOrderSummary[] = [];
+  let emailRows: CustomerOrderSummary[] = [];
+  let emailAltRows: CustomerOrderSummary[] = [];
+  let unsubEmail: Unsubscribe | null = null;
+  let unsubEmailAlt: Unsubscribe | null = null;
+
+  const emit = () => {
+    const byId = new Map<string, CustomerOrderSummary>();
+    for (const o of [...uidRows, ...emailRows, ...emailAltRows]) byId.set(o.orderId, o);
+    callback(sortCustomerOrders([...byId.values()]));
+  };
+
+  const unsubUid = onSnapshot(
+    query(collection(db, 'orders'), where('customerUid', '==', customerUid), limit(80)),
+    (snap) => {
+      uidRows = snap.docs
+        .map((d) => mapCustomerOrderDoc(d.id, d.data() as Record<string, unknown>))
+        .filter((r): r is CustomerOrderSummary => !!r);
+      emit();
+    },
+    () => {
+      uidRows = [];
+      emit();
+    },
   );
 
-  const rows: CustomerOrderSummary[] = snap.docs.map((d) => {
-    const data = d.data();
-    return {
-      orderId: d.id,
-      trackingCode: String(data.trackingCode || ''),
-      status: String(data.status || 'pending'),
-      pickupAddress: data.pickupAddress ? String(data.pickupAddress) : undefined,
-      deliveryAddress: data.deliveryAddress ? String(data.deliveryAddress) : undefined,
-      description: data.description ? String(data.description) : undefined,
-      createdAt: data.createdAt ? String(data.createdAt) : undefined,
-      scheduledFor: data.scheduledFor ? String(data.scheduledFor) : undefined,
-    };
-  });
+  const rawEmail = email?.trim() || '';
+  const normalizedEmail = rawEmail.toLowerCase();
+  if (normalizedEmail) {
+    unsubEmail = onSnapshot(
+      query(collection(db, 'orders'), where('customerEmail', '==', normalizedEmail), limit(40)),
+      (snap) => {
+        emailRows = snap.docs
+          .map((d) => mapCustomerOrderDoc(d.id, d.data() as Record<string, unknown>))
+          .filter((r): r is CustomerOrderSummary => !!r);
+        emit();
+      },
+      () => {
+        emailRows = [];
+        emit();
+      },
+    );
+    // Pedidos antiguos pudieron guardarse con mayúsculas en el email
+    if (rawEmail !== normalizedEmail) {
+      unsubEmailAlt = onSnapshot(
+        query(collection(db, 'orders'), where('customerEmail', '==', rawEmail), limit(40)),
+        (snap) => {
+          emailAltRows = snap.docs
+            .map((d) => mapCustomerOrderDoc(d.id, d.data() as Record<string, unknown>))
+            .filter((r): r is CustomerOrderSummary => !!r);
+          emit();
+        },
+        () => {
+          emailAltRows = [];
+          emit();
+        },
+      );
+    }
+  }
 
-  rows.sort((a, b) => {
-    const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
-    const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
-    return tb - ta;
-  });
+  return () => {
+    unsubUid();
+    unsubEmail?.();
+    unsubEmailAlt?.();
+  };
+}
 
-  return rows.filter((r) => r.trackingCode);
+/** Pedidos aún no cerrados (el cliente debe verlos hasta entregar). */
+export function isCustomerOrderActive(status: string): boolean {
+  return status !== 'delivered' && status !== 'cancelled';
+}
+
+/** Historial: entregados o cancelados. */
+export function isCustomerOrderHistory(status: string): boolean {
+  return status === 'delivered' || status === 'cancelled';
 }
 

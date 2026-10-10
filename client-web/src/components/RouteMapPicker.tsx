@@ -60,7 +60,7 @@ function PinBadge({
             transform: 'rotate(45deg)',
             color: '#fff',
             fontWeight: 800,
-            fontSize: 13,
+            fontSize: letter ? 13 : 0,
             fontFamily: 'Outfit, sans-serif',
           }}
         >
@@ -288,11 +288,11 @@ function InnerMap(props: RouteMapPickerProps) {
         <AdvancedMarker
           position={{ lat: pickup.lat, lng: pickup.lng }}
           draggable
-          title="A · Recolección (arrastra para ajustar)"
+          title="Recogida (arrastra para ajustar)"
           onDragStart={() => beginDrag('pickup')}
           onDragEnd={endDragPickup}
         >
-          <PinBadge letter="A" color="#2B6CFF" caption="Recolección" />
+          <PinBadge letter="" color="#2B6CFF" caption="Recogida" />
         </AdvancedMarker>
       ) : null}
 
@@ -300,11 +300,11 @@ function InnerMap(props: RouteMapPickerProps) {
         <AdvancedMarker
           position={{ lat: delivery.lat, lng: delivery.lng }}
           draggable
-          title="B · Entrega (arrastra para ajustar)"
+          title="Entrega (arrastra para ajustar)"
           onDragStart={() => beginDrag('delivery')}
           onDragEnd={endDragDelivery}
         >
-          <PinBadge letter="B" color="#FF5722" caption="Entrega" />
+          <PinBadge letter="" color="#FF5722" caption="Entrega" />
         </AdvancedMarker>
       ) : null}
     </Map>
@@ -324,7 +324,7 @@ export function RouteMapPickerInner(props: RouteMapPickerProps) {
       const loc = await getPreciseLocation();
       onPick({ lat: loc.lat, lng: loc.lng });
       const meters = Math.round(loc.accuracyM);
-      const which = pickMode === 'delivery' ? 'B · Entrega' : 'A · Recolección';
+      const which = pickMode === 'delivery' ? 'Entrega' : 'Recogida';
       setGpsHint(
         meters <= 25
           ? `GPS preciso (~${meters} m) → ${which}`
@@ -350,8 +350,8 @@ export function RouteMapPickerInner(props: RouteMapPickerProps) {
         disabled={gpsBusy}
         title={
           pickMode === 'delivery'
-            ? 'Usar GPS preciso para B · Entrega'
-            : 'Usar GPS preciso para A · Recolección'
+            ? 'Usar GPS preciso para la entrega'
+            : 'Usar GPS preciso para la recogida'
         }
         aria-label="Tomar ubicación precisa con GPS"
         className="absolute bottom-3 left-3 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-[#0b1220]/92 text-[var(--domi-cyan)] shadow-lg backdrop-blur-sm transition hover:border-[var(--domi-cyan)] hover:bg-[#101a2c] disabled:opacity-60"
@@ -375,7 +375,7 @@ export function RouteMapPickerInner(props: RouteMapPickerProps) {
           ? 'Suelta el pin para actualizar la ruta'
           : gpsBusy
             ? 'Obteniendo GPS preciso…'
-            : 'DomiClick: Arrastra A / B · ruta se actualiza'}
+            : 'Arrastra recogida o entrega · la ruta se actualiza'}
       </p>
     </div>
   );

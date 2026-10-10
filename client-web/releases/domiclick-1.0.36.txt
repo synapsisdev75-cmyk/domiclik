@@ -1,0 +1,7 @@
+DomiClick 1.0.36 (versionCode 37)
+
+Novedades
+- A 6 minutos de las 8 horas el transportista deja de recibir encargos.
+- El tiempo del pedido se calcula con la distancia. Si no cabe antes de ese margen, no se asigna.
+- Aviso en la cabina: si tiene pedido, que lo entregue; si no, que vuelva a la oficina y marque la salida.
+- La salida se marca en la tablet: foto del tacómetro, de la placa, foto de salida y kilómetros.

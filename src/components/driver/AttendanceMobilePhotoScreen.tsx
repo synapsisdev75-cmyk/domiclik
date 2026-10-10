@@ -49,7 +49,7 @@ export const AttendanceMobilePhotoScreen: React.FC = () => {
   const [plateFile, setPlateFile] = useState<File | null>(null);
   const [platePreview, setPlatePreview] = useState<string | null>(null);
 
-  const plateRequired = punch?.type === 'in';
+  const plateRequired = punch?.type === 'in' || punch?.type === 'out';
 
   useEffect(() => {
     document.title = 'DomiClick · Fotos moto';
@@ -113,7 +113,7 @@ export const AttendanceMobilePhotoScreen: React.FC = () => {
         throw new Error('Toma la foto del odómetro.');
       }
       if (plateRequired && !plateFile && !punch.platePhotoUrl) {
-        throw new Error('En entrada debes fotografiar la placa de la moto.');
+        throw new Error('Debes fotografiar la placa de la moto.');
       }
 
       const odometerUrl = odometerFile
@@ -281,11 +281,11 @@ export const AttendanceMobilePhotoScreen: React.FC = () => {
               </>
             )}
 
-            {!plateRequired && (
-              <p className="text-[11px] text-slate-500">
-                En salida solo se pide odómetro. La placa es obligatoria en entrada.
-              </p>
-            )}
+            <p className="text-[11px] text-slate-500">
+              {punch.type === 'out'
+                ? 'En la salida también van el tacómetro y la placa. Tu foto de salida queda en la tablet.'
+                : 'En la entrada van el odómetro y la placa.'}
+            </p>
 
             <button
               type="button"

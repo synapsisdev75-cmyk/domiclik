@@ -36,6 +36,8 @@ export type IngestOrderBody = {
   invoiceNumber?: string;
   invoicePhotoUrl?: string;
   paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
+  transferChannel?: 'breb' | 'qr';
+  paymentProofUrl?: string;
   paymentNote?: string;
   couponCode?: string;
 };
@@ -51,6 +53,7 @@ export type IngestOrderResponse = {
   routeDistanceKm?: number | null;
   scheduledFor?: string | null;
   pricingBand?: 'peak' | 'normal' | null;
+  paymentReviewStatus?: 'pending_review' | 'approved';
 };
 
 export type IngestErrorResponse = {

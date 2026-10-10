@@ -19,6 +19,7 @@ import {
   subscribeDispatchSettings,
   cancelOrder,
   deleteOrder,
+  approveTransferPayment,
   subscribeIncidents,
   resolveIncident,
   deleteIncident,
@@ -29,7 +30,8 @@ import { AttendancePanel } from './AttendancePanel';
 import { FleetControlPanel } from './FleetControlPanel';
 import { FleetMotoPanel } from './FleetMotoPanel';
 import { DEFAULT_DISPATCH_SETTINGS, formatCOP } from '../../lib/adminMetrics';
-import { driverAssignBlockReason, isDriverAssignable } from '../../lib/workShift';
+import { driverAssignBlockReason, isDriverAssignable, minutesFromDistanceKm } from '../../lib/workShift';
+import { haversineKm } from '../../lib/autoDispatch';
 import {
   MapPin,
   MessageSquare,
@@ -47,6 +49,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   Star,
+  MessageCircle,
+  Phone,
+  X,
 } from 'lucide-react';
 import {
   DomiCargoIcon,
@@ -59,6 +64,7 @@ import { SecretariatPanel } from './SecretariatPanel';
 import { SecretaryChatsPanel } from './SecretaryChatsPanel';
 import { canAccessSection, staffCan } from '../../lib/staffAccess';
 import type { StaffRole } from '../../types';
+import { customerOrderWhatsAppText, openWhatsAppTo } from '../../lib/whatsapp';
 
 export type AdminSection =
   | 'dashboard'
@@ -75,7 +81,8 @@ export type AdminSection =
   | 'usuarios'
   | 'ajustes';
 
-import { ORDER_STATUS_LABEL, isLiveOrderStatus } from '../../lib/orderFlow';
+import { ORDER_STATUS_LABEL, isLiveOrderStatus, isPaymentOnHold } from '../../lib/orderFlow';
+import { dispatchPendingOrder, getBusyDriverIds } from '../../lib/autoDispatch';
 
 function statusBadge(status: OrderStatus) {
   if (status === 'assigned' || status === 'accepted') return 'bg-blue-500/20 text-blue-300 border-blue-500/40';
@@ -158,6 +165,8 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
   const [dispatchDraft, setDispatchDraft] = useState<DispatchSettings>(DEFAULT_DISPATCH_SETTINGS);
   const [dispatchSaving, setDispatchSaving] = useState(false);
   const [dispatchSaved, setDispatchSaved] = useState(false);
+  const [detailOrder, setDetailOrder] = useState<DeliveryOrder | null>(null);
+  const [photoLightbox, setPhotoLightbox] = useState<string | null>(null);
 
   useEffect(() => {
     return subscribeDispatchSettings((s) => {
@@ -193,9 +202,16 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
     );
   };
 
+  const paymentReviews = useMemo(
+    () => orders.filter((o) => o.status === 'pending' && isPaymentOnHold(o)).filter(filterText),
+    [orders, search],
+  );
   const pendingOrders = useMemo(
-    () => orders.filter((o) => o.status === 'pending').filter(filterText),
-    [orders, search]
+    () =>
+      orders
+        .filter((o) => o.status === 'pending' && !isPaymentOnHold(o))
+        .filter(filterText),
+    [orders, search],
   );
   const transitOrders = useMemo(
     () =>
@@ -299,15 +315,26 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
     showAssign?: boolean;
   }> = ({ ord, showAssign }) => (
     <div className="bg-[#0A1020] border border-[#162748] rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-[#FF5722]/40 transition">
-      <div className="flex items-start gap-3 min-w-0">
-        <div className="w-10 h-10 rounded-xl bg-[#FF5722]/15 border border-[#FF5722]/40 flex items-center justify-center shrink-0">
-          <DomiCargoIcon className="w-5 h-5" color="#FF5722" />
+      <button
+        type="button"
+        onClick={() => setDetailOrder(ord)}
+        className="flex items-start gap-3 min-w-0 text-left flex-1"
+      >
+        <div className="w-10 h-10 rounded-xl bg-[#FF5722]/15 border border-[#FF5722]/40 flex items-center justify-center shrink-0 overflow-hidden">
+          {ord.customerPhotoURL ? (
+            <img src={ord.customerPhotoURL} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <DomiCargoIcon className="w-5 h-5" color="#FF5722" />
+          )}
         </div>
         <div className="min-w-0">
           <div className="text-xs font-bold text-white font-tech">{ord.trackingCode || ord.id}</div>
           <div className="text-[11px] text-slate-400 truncate">
             {ord.customerName} → {ord.deliveryAddress}
           </div>
+          {ord.customerPhone ? (
+            <div className="text-[10px] text-emerald-300/90 mt-0.5">{ord.customerPhone}</div>
+          ) : null}
           {ord.assignedDriverName && (
             <div className="text-[10px] text-[#00E5FF] mt-0.5">
               Motorizado: {ord.assignedDriverName}
@@ -329,6 +356,11 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
               Factura / orden: {ord.invoiceNumber}
             </div>
           ) : null}
+          {isPaymentOnHold(ord) ? (
+            <div className="text-[10px] font-bold text-emerald-300 mt-0.5">
+              {ord.transferChannel === 'qr' ? 'QR' : 'Bre-B'} · comprobante por aprobar
+            </div>
+          ) : null}
           {ord.sourceSiteId && (
             <div className="text-[10px] text-slate-500 font-tech">Origen: {ord.sourceSiteId}</div>
           )}
@@ -338,14 +370,27 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
               {ord.serviceRating}★ · {Math.round((Number(ord.serviceRating) / 5) * 100)}% cliente
             </div>
           ) : null}
+          <div className="text-[10px] text-[#FF5722]/80 mt-1 font-bold">Ver ficha completa →</div>
         </div>
-      </div>
+      </button>
       <div className="flex items-center gap-2 shrink-0 flex-wrap">
         <span
           className={`text-[10px] font-tech font-bold px-2.5 py-1 rounded-lg border ${statusBadge(ord.status)}`}
         >
           {ORDER_STATUS_LABEL[ord.status] || ord.status}
         </span>
+        {ord.customerPhone ? (
+          <button
+            type="button"
+            title="WhatsApp cliente"
+            onClick={() =>
+              openWhatsAppTo(ord.customerPhone, customerOrderWhatsAppText(ord))
+            }
+            className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1.5 rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+          >
+            <MessageCircle className="w-3.5 h-3.5" /> WA
+          </button>
+        ) : null}
         {showAssign &&
           staffCan(staffRole, 'orders.assign') &&
           ord.status === 'pending' &&
@@ -360,8 +405,15 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           >
             <option value="">Asignar…</option>
             {approvedDrivers.map((d) => {
-              const ok = isDriverAssignable(d);
-              const reason = driverAssignBlockReason(d);
+              const approachKm =
+                d.location?.lat && ord.pickupCoords?.lat
+                  ? haversineKm(d.location, ord.pickupCoords)
+                  : 0;
+              const orderMinutes =
+                ord.routeDurationMin ||
+                minutesFromDistanceKm(ord.routeDistanceKm || 0);
+              const reason = driverAssignBlockReason(d, { approachKm, orderMinutes });
+              const ok = isDriverAssignable(d) && !reason;
               return (
                 <option key={d.id} value={d.id} disabled={!ok}>
                   {d.fullName} {ok ? '●' : `○ ${reason || ''}`}
@@ -398,6 +450,236 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
     </div>
   );
 
+  const orderDetailModal =
+    detailOrder ? (
+      <div className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center bg-black/70 p-3 sm:p-6">
+        <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-[#1a2744] bg-[#0A1020] shadow-2xl">
+          <div className="sticky top-0 flex items-center justify-between gap-2 border-b border-[#162748] bg-[#0A1020]/95 px-4 py-3 backdrop-blur">
+            <div>
+              <p className="text-[10px] font-tech uppercase text-slate-500">Ficha del pedido</p>
+              <p className="font-tech text-sm font-black text-white">
+                {detailOrder.trackingCode || detailOrder.id}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDetailOrder(null)}
+              className="rounded-lg border border-[#1a2744] p-1.5 text-slate-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="space-y-4 p-4">
+            <div className="flex items-start gap-3">
+              {detailOrder.customerPhotoURL ? (
+                <button
+                  type="button"
+                  onClick={() => setPhotoLightbox(detailOrder.customerPhotoURL || null)}
+                  className="h-16 w-16 shrink-0 overflow-hidden rounded-xl border border-[#162748]"
+                >
+                  <img
+                    src={detailOrder.customerPhotoURL}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+              ) : (
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-[#162748] bg-[#070B16]">
+                  <Users className="w-6 h-6 text-slate-500" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-base font-bold text-white">{detailOrder.customerName}</p>
+                <p className="text-xs text-slate-400">{detailOrder.customerPhone || 'Sin teléfono'}</p>
+                {detailOrder.customerEmail ? (
+                  <p className="text-[10px] text-slate-500">{detailOrder.customerEmail}</p>
+                ) : null}
+                <span
+                  className={`mt-2 inline-block text-[10px] font-tech font-bold px-2 py-1 rounded-lg border ${statusBadge(detailOrder.status)}`}
+                >
+                  {ORDER_STATUS_LABEL[detailOrder.status] || detailOrder.status}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {detailOrder.customerPhone ? (
+                <>
+                  <a
+                    href={`tel:${String(detailOrder.customerPhone).replace(/\D/g, '')}`}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-[#1a2744] px-3 py-2 text-[11px] font-bold text-[#00E5FF]"
+                  >
+                    <Phone className="w-3.5 h-3.5" /> Llamar
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openWhatsAppTo(
+                        detailOrder.customerPhone,
+                        customerOrderWhatsAppText(detailOrder),
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] font-bold text-emerald-300"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                  </button>
+                </>
+              ) : null}
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-[#162748] bg-[#070B16] p-3 text-[11px] text-slate-300">
+              <p>
+                <span className="text-[#7aa2ff] font-bold">A · </span>
+                {detailOrder.pickupAddress}
+              </p>
+              <p>
+                <span className="text-[#ff8a65] font-bold">B · </span>
+                {detailOrder.deliveryAddress}
+              </p>
+              {detailOrder.assignedDriverName ? (
+                <p className="text-[#00E5FF]">Motorizado: {detailOrder.assignedDriverName}</p>
+              ) : null}
+              {detailOrder.description ? <p>Detalle: {detailOrder.description}</p> : null}
+              {detailOrder.notes ? <p>Notas: {detailOrder.notes}</p> : null}
+              {detailOrder.paymentMethod ? (
+                <p>
+                  Pago: {detailOrder.paymentMethod}
+                  {detailOrder.transferChannel === 'breb'
+                    ? ' · Bre-B'
+                    : detailOrder.transferChannel === 'qr'
+                      ? ' · QR'
+                      : ''}
+                  {detailOrder.paymentNote ? ` · ${detailOrder.paymentNote}` : ''}
+                  {isPaymentOnHold(detailOrder) ? ' · esperando luz verde' : ''}
+                </p>
+              ) : null}
+            </div>
+
+            {detailOrder.paymentProofUrl ? (
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+                <p className="text-[10px] font-tech uppercase text-emerald-200/80">
+                  Comprobante {detailOrder.transferChannel === 'qr' ? 'QR' : 'Bre-B'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setPhotoLightbox(detailOrder.paymentProofUrl || null)}
+                  className="mt-2 block overflow-hidden rounded-lg border border-[#162748]"
+                >
+                  <img
+                    src={detailOrder.paymentProofUrl}
+                    alt="Comprobante"
+                    className="max-h-56 w-full object-contain bg-black/40"
+                  />
+                </button>
+                {isPaymentOnHold(detailOrder) ? (
+                  <button
+                    type="button"
+                    disabled={orderBusyId === detailOrder.id}
+                    onClick={() => {
+                      void (async () => {
+                        setOrderBusyId(detailOrder.id);
+                        try {
+                          await approveTransferPayment(
+                            detailOrder.id,
+                            currentAdminEmail || 'torre',
+                          );
+                          const approved = {
+                            ...detailOrder,
+                            paymentReviewStatus: 'approved' as const,
+                          };
+                          setDetailOrder(approved);
+                          if (dispatchDraft.autoAssignEnabled) {
+                            await dispatchPendingOrder(approved, drivers, dispatchDraft, {
+                              busyDriverIds: getBusyDriverIds(orders),
+                            });
+                          }
+                        } finally {
+                          setOrderBusyId(null);
+                        }
+                      })();
+                    }}
+                    className="mt-3 w-full rounded-xl bg-emerald-600 py-2.5 text-xs font-black text-white"
+                  >
+                    {orderBusyId === detailOrder.id
+                      ? 'Aprobando…'
+                      : 'Luz verde · poner en circulación'}
+                  </button>
+                ) : (
+                  <p className="mt-2 text-[10px] text-emerald-300">
+                    Aprobado
+                    {detailOrder.paymentReviewedBy ? ` por ${detailOrder.paymentReviewedBy}` : ''}
+                  </p>
+                )}
+              </div>
+            ) : null}
+
+            {(detailOrder.invoiceNumber || detailOrder.invoicePhotoUrl) && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                <p className="text-[10px] font-tech uppercase text-amber-200/80">Factura</p>
+                {detailOrder.invoiceNumber ? (
+                  <p className="mt-1 text-sm font-bold text-white">{detailOrder.invoiceNumber}</p>
+                ) : null}
+                {detailOrder.invoicePhotoUrl ? (
+                  <button
+                    type="button"
+                    onClick={() => setPhotoLightbox(detailOrder.invoicePhotoUrl || null)}
+                    className="mt-2 block overflow-hidden rounded-lg border border-[#162748]"
+                  >
+                    <img
+                      src={detailOrder.invoicePhotoUrl}
+                      alt="Factura"
+                      className="max-h-48 w-full object-contain bg-black/40"
+                    />
+                  </button>
+                ) : null}
+              </div>
+            )}
+
+            {detailOrder.timeline && detailOrder.timeline.length > 0 ? (
+              <div>
+                <p className="mb-2 text-[10px] font-tech uppercase text-slate-500">Timeline</p>
+                <ul className="space-y-1.5 max-h-40 overflow-y-auto">
+                  {[...detailOrder.timeline]
+                    .slice()
+                    .reverse()
+                    .map((ev, i) => (
+                      <li
+                        key={`${ev.at}-${i}`}
+                        className="rounded-lg border border-[#162748] bg-[#070B16] px-2.5 py-1.5 text-[10px] text-slate-400"
+                      >
+                        <span className="font-tech text-white">
+                          {ORDER_STATUS_LABEL[ev.to as OrderStatus] || ev.to}
+                        </span>
+                        {ev.note ? ` · ${ev.note}` : ''}
+                        <span className="block text-slate-600">
+                          {new Date(ev.at).toLocaleString('es-CO')}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    ) : null;
+
+  const photoLightboxModal =
+    photoLightbox ? (
+      <button
+        type="button"
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4"
+        onClick={() => setPhotoLightbox(null)}
+      >
+        <img
+          src={photoLightbox}
+          alt="Detalle"
+          className="max-h-[90vh] max-w-full rounded-xl border border-white/20 object-contain"
+        />
+      </button>
+    ) : null;
+
   if (section === 'solicitudes') {
     return (
       <div className="space-y-5">
@@ -425,6 +707,19 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             className="w-full bg-[#0A1020] border border-[#162748] rounded-xl pl-9 pr-3 py-2 text-xs text-white"
           />
         </div>
+        {paymentReviews.length > 0 ? (
+          <div className="space-y-2.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+            <p className="text-[11px] font-black uppercase tracking-wide text-emerald-200">
+              Comprobantes por aprobar · {paymentReviews.length}
+            </p>
+            <p className="text-[11px] text-emerald-100/70">
+              Transferencia Bre-B o QR. Abre la ficha, revisa la foto y da luz verde para ponerla en circulación.
+            </p>
+            {paymentReviews.map((ord) => (
+              <OrderRow key={ord.id} ord={ord} />
+            ))}
+          </div>
+        ) : null}
         {pendingOrders.length === 0 ? (
           <EmptyState
             title="Sin solicitudes pendientes"
@@ -437,6 +732,8 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             ))}
           </div>
         )}
+        {orderDetailModal}
+        {photoLightboxModal}
       </div>
     );
   }
@@ -625,6 +922,8 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             ))}
           </div>
         </div>
+        {orderDetailModal}
+        {photoLightboxModal}
       </div>
     );
   }
@@ -848,6 +1147,8 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             ))}
           </div>
         )}
+        {orderDetailModal}
+        {photoLightboxModal}
       </div>
     );
   }

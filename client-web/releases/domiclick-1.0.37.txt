@@ -1,0 +1,6 @@
+DomiClick 1.0.37 (versionCode 38)
+
+Novedades
+- El trazado de la ruta se va ocultando a medida que avanza el repartidor. Solo se ve lo que falta por recorrer.
+- Google Maps abre en otra pantalla y DomiClick vuelve solo a la cabina.
+- La navegación sale desde la ubicación del transportista, no desde el GPS del teléfono si está en otra ciudad.

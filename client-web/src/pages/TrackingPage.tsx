@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, KeyRound, Loader2, PackageSearch, RefreshCw } from 'lucide-react';
 import type { TrackingStatus } from '../contracts/salesIngest';
 import { BrandLogo } from '../components/BrandLogo';
 import { RatingForm } from '../components/RatingForm';
 import { AuthButton } from '../components/AuthButton';
-import { findOrderByTrackingCode, type PublicOrderTracking } from '../lib/firebase';
+import { subscribeOrderTracking, type PublicOrderTracking } from '../lib/firebase';
+import { LiveTripMap } from '../components/LiveTripMap';
+import { CustomerOrdersPanel } from '../components/CustomerOrdersPanel';
 import { useAuth } from '../lib/auth';
 import { pushForStatus } from '../lib/brandCopy';
+import { rememberRecentOrder } from '../lib/recentOrders';
 
 const STATUS_LABEL: Record<TrackingStatus, string> = {
   pending: 'Pendiente de asignación',
@@ -50,31 +53,6 @@ export function TrackingPage() {
   const [loading, setLoading] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
 
-  const load = useCallback(async (trackingCode: string) => {
-    if (!profile) {
-      setData(null);
-      setError('Debes iniciar sesión con Google para ver el seguimiento.');
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await findOrderByTrackingCode(trackingCode);
-      if (!res) {
-        setData(null);
-        setError('No se encontró un pedido con ese código');
-        return;
-      }
-      setData(res);
-    } catch (err: unknown) {
-      setData(null);
-      setError(err instanceof Error ? err.message : 'No se pudo consultar el pedido');
-    } finally {
-      setLoading(false);
-    }
-  }, [profile]);
-
   useEffect(() => {
     if (!code) {
       setData(null);
@@ -83,8 +61,32 @@ export function TrackingPage() {
     }
     setLookup(code.toUpperCase());
     if (authLoading) return;
-    void load(code);
-  }, [code, load, refreshToken, authLoading]);
+    if (!profile) {
+      setData(null);
+      setError('Debes iniciar sesión para ver el seguimiento.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const unsub = subscribeOrderTracking(code, (res) => {
+      setLoading(false);
+      if (!res) {
+        setData(null);
+        setError('No se encontró un pedido con ese código');
+        return;
+      }
+      setData(res);
+      setError(null);
+      rememberRecentOrder({
+        trackingCode: res.trackingCode,
+        orderId: res.orderId,
+        deliveryAddress: res.deliveryAddress,
+        status: res.status,
+        createdAt: res.createdAt || new Date().toISOString(),
+      });
+    });
+    return () => unsub();
+  }, [code, profile, authLoading, refreshToken]);
 
   function goLookup(e: FormEvent) {
     e.preventDefault();
@@ -179,6 +181,11 @@ export function TrackingPage() {
             <p className="font-mono mt-1 text-2xl font-bold tracking-wider text-white">
               {data.trackingCode}
             </p>
+            {data.paymentReviewStatus === 'pending_review' ? (
+              <div className="mt-4 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+                Central está revisando tu comprobante. El pedido entra en circulación cuando den luz verde.
+              </div>
+            ) : null}
 
             {push ? (
               <div className="mt-5 rounded-xl border border-[rgba(43,108,255,0.35)] bg-[rgba(43,108,255,0.08)] px-4 py-4">
@@ -192,6 +199,26 @@ export function TrackingPage() {
                 Domiclick:{' '}
                 <span className="text-white">{data.assignedDriverName}</span>
               </p>
+            ) : null}
+
+            {(data.pickupCoords || data.deliveryCoords || data.driverLocation) &&
+            status !== 'cancelled' ? (
+              <div className="mt-5 overflow-hidden rounded-xl border border-[var(--domi-border)]">
+                <LiveTripMap
+                  pickup={data.pickupCoords}
+                  delivery={data.deliveryCoords}
+                  driver={
+                    status !== 'pending' && status !== 'delivered' ? data.driverLocation : null
+                  }
+                  status={status || undefined}
+                  heightClass="h-56 sm:h-72"
+                />
+                {status !== 'pending' && status !== 'delivered' && !data.driverLocation ? (
+                  <p className="border-t border-[var(--domi-border)] px-3 py-2 text-xs text-[var(--domi-muted)]">
+                    Esperando ubicación del repartidor…
+                  </p>
+                ) : null}
+              </div>
             ) : null}
 
             {data.deliveryConfirmCode && status !== 'delivered' && status !== 'cancelled' ? (
@@ -275,9 +302,13 @@ export function TrackingPage() {
         ) : null}
 
         {!loading && !data && !error && !code ? (
-          <p className="text-sm text-[var(--domi-muted)]">
-            Ingresa un código para ver el estado de tu entrega.
-          </p>
+          <CustomerOrdersPanel className="mt-2" />
+        ) : null}
+
+        {code && data ? (
+          <div className="mt-8">
+            <CustomerOrdersPanel highlightCode={data.trackingCode} />
+          </div>
         ) : null}
 
         <footer className="mt-16 border-t border-[var(--domi-border)] pt-8 text-center text-xs text-[var(--domi-muted)]">

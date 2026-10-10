@@ -1,0 +1,6 @@
+DomiClick 1.0.33 (versionCode 34)
+
+Novedades
+- Botón visible Marcar salida / Marcar entrada en Pedidos, Mapa, Turno y Perfil.
+- La salida deja al transportista fuera de servicio para Central.
+- La entrada lo vuelve a dejar disponible.

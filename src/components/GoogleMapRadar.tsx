@@ -15,8 +15,13 @@ const MAP_ID =
 
 /** Solicitudes (pending) */
 export const ROUTE_COLOR_SOLICITUD = '#FF8A00';
-/** En proceso / activo (assigned + in_transit) */
+/** Entrega: recogida → destino */
 export const ROUTE_COLOR_EN_PROCESO = '#00E5FF';
+/** Recogida: donde está el repartidor → punto de recogida */
+export const ROUTE_COLOR_RECOGIDA = '#C8F542';
+
+const PICKUP_LEG = new Set(['assigned', 'accepted', 'en_route_origin']);
+const DELIVERY_LEG = new Set(['picked_up', 'in_transit', 'at_destination']);
 
 interface GoogleMapRadarProps {
   drivers: MotorizadoDriver[];
@@ -42,11 +47,82 @@ type Drawn = {
   line: google.maps.Polyline;
 };
 
+type LatLng = { lat: number; lng: number };
+
+function distanceToRouteMeters(path: LatLng[], driver: LatLng): number {
+  if (path.length < 2) return Infinity;
+  let bestD = Infinity;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+    const dx = b.lng - a.lng;
+    const dy = b.lat - a.lat;
+    const len2 = dx * dx + dy * dy;
+    let t = 0;
+    if (len2 > 0) {
+      t = ((driver.lng - a.lng) * dx + (driver.lat - a.lat) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+    }
+    const dLat = driver.lat - (a.lat + dy * t);
+    const dLng = driver.lng - (a.lng + dx * t);
+    const d = dLat * dLat + dLng * dLng;
+    if (d < bestD) bestD = d;
+  }
+  return Math.sqrt(bestD) * 111_320;
+}
+
+/** Parte de la ruta que falta. Lo ya recorrido se oculta. Si el moto está lejos de la vía, se deja completa. */
+function remainingRoute(path: LatLng[], driver: LatLng): LatLng[] {
+  if (path.length < 2) return path;
+  let bestI = 0;
+  let bestT = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+    const dx = b.lng - a.lng;
+    const dy = b.lat - a.lat;
+    const len2 = dx * dx + dy * dy;
+    let t = 0;
+    if (len2 > 0) {
+      t = ((driver.lng - a.lng) * dx + (driver.lat - a.lat) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+    }
+    const lat = a.lat + dy * t;
+    const lng = a.lng + dx * t;
+    const dLat = driver.lat - lat;
+    const dLng = driver.lng - lng;
+    const d = dLat * dLat + dLng * dLng;
+    if (d < bestD) {
+      bestD = d;
+      bestI = i;
+      bestT = t;
+    }
+  }
+  const meters = Math.sqrt(bestD) * 111_320;
+  if (meters > 180) return path;
+  const a = path[bestI];
+  const b = path[bestI + 1];
+  const snap = {
+    lat: a.lat + (b.lat - a.lat) * bestT,
+    lng: a.lng + (b.lng - a.lng) * bestT,
+  };
+  const ahead = path.slice(bestI + 1);
+  return ahead.length ? [snap, ...ahead] : [snap, b];
+}
+
 /**
  * Dibuja rutas por calles (Google Directions / OSRM) — no línea recta.
  * Solicitudes = naranja · En proceso = cian.
+ * En proceso, el trazo detrás del repartidor se va ocultando.
  */
-function StreetRoutesLayer({ orders }: { orders: DeliveryOrder[] }) {
+function StreetRoutesLayer({
+  orders,
+  drivers,
+}: {
+  orders: DeliveryOrder[];
+  drivers: MotorizadoDriver[];
+}) {
   const map = useMap();
   const drawnRef = useRef<Drawn[]>([]);
   const cacheRef = useRef<Record<string, google.maps.LatLngLiteral[]>>({});
@@ -68,6 +144,20 @@ function StreetRoutesLayer({ orders }: { orders: DeliveryOrder[] }) {
     // En proceso primero (prioridad visual), luego solicitudes
     return [...proceso, ...solicitudes];
   }, [orders]);
+
+  const progressKey = useMemo(() => {
+    return routeOrders
+      .map((order) => {
+        if (order.status === 'pending' || !order.assignedDriverId) return `${order.id}:full`;
+        const driver = drivers.find((d) => d.id === order.assignedDriverId);
+        const loc = driver?.location;
+        if (!loc?.lat || !loc.lng) return `${order.id}:full`;
+        return `${order.id}:${loc.lat.toFixed(4)},${loc.lng.toFixed(4)}`;
+      })
+      .join('|');
+  }, [routeOrders, drivers]);
+
+  const fittedKeyRef = useRef('');
 
   useEffect(() => {
     if (!map || !(window as unknown as { google?: typeof google }).google?.maps) return;
@@ -152,13 +242,60 @@ function StreetRoutesLayer({ orders }: { orders: DeliveryOrder[] }) {
         if (cancelled) return;
         if (!path || path.length < 2) continue;
 
-        // Proceso encima de solicitudes
-        drawPath(path, color, kind === 'proceso' ? 40 : 20);
-        path.forEach((p) => bounds.extend(p));
+        const driver = order.assignedDriverId
+          ? drivers.find((d) => d.id === order.assignedDriverId)
+          : undefined;
+        const loc =
+          driver?.location?.lat && driver.location.lng
+            ? { lat: driver.location.lat, lng: driver.location.lng }
+            : null;
+
+        if (kind === 'proceso' && PICKUP_LEG.has(order.status)) {
+          // La entrega se queda completa. No se recorta aunque el moto cruce esa vía.
+          drawPath(path, ROUTE_COLOR_EN_PROCESO, 30);
+          path.forEach((p) => bounds.extend(p));
+          if (loc) {
+            const approachKey = `${order.id}:approach`;
+            let approach = cacheRef.current[approachKey];
+            const stale = !approach || distanceToRouteMeters(approach, loc) > 350;
+            if (stale) {
+              try {
+                const route = await calculateOptimalRoute(
+                  loc.lat,
+                  loc.lng,
+                  order.pickupCoords.lat,
+                  order.pickupCoords.lng
+                );
+                approach = route.coordinates.map(([lat, lng]) => ({ lat, lng }));
+                if (approach.length >= 2) cacheRef.current[approachKey] = approach;
+              } catch {
+                approach = [
+                  loc,
+                  { lat: order.pickupCoords.lat, lng: order.pickupCoords.lng },
+                ];
+              }
+            }
+            if (cancelled) return;
+            if (approach && approach.length >= 2) {
+              const visibleApproach = remainingRoute(approach, loc);
+              drawPath(visibleApproach, ROUTE_COLOR_RECOGIDA, 55);
+              visibleApproach.forEach((p) => bounds.extend(p));
+            }
+          }
+        } else if (kind === 'proceso' && DELIVERY_LEG.has(order.status) && loc) {
+          const visible = remainingRoute(path, loc);
+          drawPath(visible, color, 40);
+          visible.forEach((p) => bounds.extend(p));
+        } else {
+          drawPath(path, color, kind === 'proceso' ? 40 : 20);
+          path.forEach((p) => bounds.extend(p));
+        }
         anyPath = true;
       }
 
-      if (!cancelled && anyPath) {
+      const fitKey = routeOrders.map((o) => o.id).join('|');
+      if (!cancelled && anyPath && fittedKeyRef.current !== fitKey) {
+        fittedKeyRef.current = fitKey;
         map.fitBounds(bounds, 72);
       }
     };
@@ -169,7 +306,7 @@ function StreetRoutesLayer({ orders }: { orders: DeliveryOrder[] }) {
       cancelled = true;
       clear();
     };
-  }, [map, routeOrders]);
+  }, [map, routeOrders, progressKey, drivers]);
 
   return null;
 }
@@ -209,7 +346,7 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
           style={{ width: '100%', height: '100%' }}
           className="w-full h-full"
         >
-          <StreetRoutesLayer orders={orders} />
+          <StreetRoutesLayer orders={orders} drivers={drivers} />
           <Driver3DMarkersLayer drivers={drivers} onModelReady={setModel3dReady} />
 
           {!model3dReady &&
@@ -325,8 +462,18 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
               }}
             />
             <span>
-              En proceso <span className="text-slate-400">({procesoCount})</span>
+              Entrega <span className="text-slate-400">({procesoCount})</span>
             </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-block h-1 w-6 rounded-full"
+              style={{
+                background: ROUTE_COLOR_RECOGIDA,
+                boxShadow: `0 0 6px ${ROUTE_COLOR_RECOGIDA}`,
+              }}
+            />
+            <span>Hacia la recogida</span>
           </div>
           <div className="flex items-center gap-2 pt-0.5 text-[9px] text-slate-500">
             <span className="inline-block h-2 w-2 rounded-full bg-[#00E676]" />

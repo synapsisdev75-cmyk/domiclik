@@ -1,0 +1,5 @@
+DomiClick 1.0.35 (versionCode 36)
+
+Novedades
+- El mapa ya no te regresa a tu ubicación al hacer zoom o moverlo.
+- Puedes ver el mapa completo. Ubicarme es el único que te centra de nuevo.

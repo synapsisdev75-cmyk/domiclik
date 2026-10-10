@@ -1,0 +1,7 @@
+DomiClick 1.0.32 (versionCode 33)
+
+Novedades
+- Transferencia: elige Bre-B o QR y sube la foto del comprobante.
+- Ese pedido espera luz verde de la secretaría o el administrador antes de entrar en circulación.
+- Efectivo, ya pagado y otro siguen asignándose de inmediato.
+- El seguimiento avisa cuando el comprobante está en revisión.

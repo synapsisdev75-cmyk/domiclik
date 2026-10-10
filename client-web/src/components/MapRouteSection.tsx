@@ -82,7 +82,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
     <div className="flex flex-wrap items-center gap-2">
       <MapPinned className="h-4 w-4 text-[var(--domi-cyan)]" aria-hidden />
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-        {mapFirst ? 'Arrastra A / B en el mapa' : 'Ruta en el mapa'}
+        {mapFirst ? 'Arrastra recogida y entrega en el mapa' : 'Ruta en el mapa'}
       </p>
       <div className="ml-auto flex flex-wrap gap-2">
         <button
@@ -94,7 +94,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
           }`}
           onClick={() => onPickModeChange('pickup')}
         >
-          A · Recolección
+          Recogida
         </button>
         <button
           type="button"
@@ -105,7 +105,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
           }`}
           onClick={() => onPickModeChange('delivery')}
         >
-          B · Entrega
+          Entrega
         </button>
       </div>
     </div>
@@ -116,7 +116,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
       <div className="map-route-fields-stack space-y-3">
         <div className={pickMode === 'pickup' ? 'block' : 'block lg:hidden'}>
           <StructuredAddressFields
-            title="Recolección (A)"
+            title="Recogida"
             accent="pickup"
             inputPrefix="domiclick-pickup"
             parts={pickupParts}
@@ -130,7 +130,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
         </div>
         <div className={pickMode === 'delivery' ? 'block' : 'block lg:hidden'}>
           <StructuredAddressFields
-            title="Entrega (B)"
+            title="Entrega"
             accent="delivery"
             inputPrefix="domiclick-delivery"
             parts={deliveryParts}
@@ -146,7 +146,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
     ) : (
       <div className="map-route-fields-stack space-y-3">
         <PlaceSearchField
-          label="Dirección de recolección (A) *"
+          label="Dirección de recogida *"
           required
           accent="pickup"
           inputName="domiclick-pickup-address"
@@ -158,7 +158,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
           onActivate={() => onPickModeChange('pickup')}
         />
         <PlaceSearchField
-          label="Dirección de entrega (B) *"
+          label="Dirección de entrega *"
           required
           accent="delivery"
           inputName="domiclick-delivery-address"
@@ -195,11 +195,11 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
     pickup && delivery && !compactSummary ? (
       <div className="space-y-1 rounded-xl border border-[rgba(0,229,255,0.25)] bg-[rgba(0,229,255,0.06)] px-3 py-2 text-sm text-[var(--domi-text)]">
         <p>
-          <span className="font-semibold text-[var(--domi-cyan)]">A · Recolección:</span>{' '}
+          <span className="font-semibold text-[var(--domi-cyan)]">Recogida:</span>{' '}
           {pickupLabel || 'Punto de salida'}
         </p>
         <p>
-          <span className="font-semibold text-[var(--domi-orange)]">B · Entrega:</span>{' '}
+          <span className="font-semibold text-[var(--domi-orange)]">Entrega:</span>{' '}
           {deliveryLabel || 'Punto de llegada'}
         </p>
         {geoBusy ? (

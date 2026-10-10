@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Bell, Package, Search, ShoppingBag, UtensilsCrossed, MoreHorizontal } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { OFFICE_CITY } from '../lib/companyInfo';
 import { useAuth } from '../lib/auth';
-import { listCustomerOrders, type CustomerOrderSummary } from '../lib/firebase';
+import {
+  isCustomerOrderActive,
+  isCustomerOrderHistory,
+  subscribeCustomerOrders,
+  type CustomerOrderSummary,
+} from '../lib/firebase';
 
 const CATEGORIES = [
   { id: 'comida', label: 'Comida', icon: UtensilsCrossed, color: 'text-[var(--domi-orange)]', bg: 'bg-[rgba(255,87,34,0.12)]' },
@@ -35,20 +40,18 @@ export function AppHomePage() {
       setOrders([]);
       return;
     }
-    let cancelled = false;
-    void listCustomerOrders(profile.uid)
-      .then((rows) => {
-        if (!cancelled) setOrders(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setOrders([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [profile?.uid]);
+    const unsub = subscribeCustomerOrders(profile.uid, setOrders, profile.email);
+    return () => unsub();
+  }, [profile?.uid, profile?.email]);
 
-  const recent = orders.slice(0, 3);
+  const active = useMemo(
+    () => orders.filter((o) => isCustomerOrderActive(o.status)).slice(0, 5),
+    [orders],
+  );
+  const historyPreview = useMemo(
+    () => orders.filter((o) => isCustomerOrderHistory(o.status)).slice(0, 2),
+    [orders],
+  );
 
   return (
     <div className="app-screen mx-auto min-h-[100svh] max-w-lg px-4 pb-8 sm:px-6">
@@ -111,23 +114,60 @@ export function AppHomePage() {
         </div>
       </section>
 
-      <section>
+      <section className="mb-6">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-base font-bold text-white">Tus últimos pedidos</h2>
+          <h2 className="font-display text-base font-bold text-white">En curso</h2>
           <Link to="/pedidos" className="text-xs font-semibold text-[var(--domi-cyan)]">
             Ver todos
           </Link>
         </div>
 
-        {recent.length === 0 ? (
+        {active.length === 0 ? (
           <div className="glass-panel rounded-2xl px-4 py-5">
             <p className="text-sm text-[var(--domi-muted)]">
-              Aún no tienes pedidos. Toca <span className="text-white">Solicitar</span> para el primero.
+              No hay pedidos activos. Toca <span className="text-white">Solicitar</span> para el
+              primero; se mantiene aquí hasta la entrega.
             </p>
           </div>
         ) : (
           <ul className="space-y-3">
-            {recent.map((order) => (
+            {active.map((order) => (
+              <li key={order.orderId}>
+                <Link
+                  to={`/seguimiento/${encodeURIComponent(order.trackingCode)}`}
+                  className="glass-panel block rounded-2xl border-[rgba(255,87,34,0.3)] px-4 py-3.5 transition active:border-[rgba(0,229,255,0.35)]"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-mono text-sm font-bold text-white">{order.trackingCode}</p>
+                    <span className="shrink-0 text-[11px] font-semibold text-[var(--domi-orange)]">
+                      {STATUS_SHORT[order.status] || order.status}
+                    </span>
+                  </div>
+                  {order.deliveryAddress ? (
+                    <p className="mt-1.5 line-clamp-1 text-xs text-[var(--domi-muted)]">
+                      {order.deliveryAddress}
+                    </p>
+                  ) : null}
+                  <p className="mt-1.5 text-[11px] font-semibold text-[var(--domi-cyan)]">
+                    Seguir en vivo →
+                  </p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {historyPreview.length > 0 ? (
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-display text-base font-bold text-white">Historial</h2>
+            <Link to="/pedidos" className="text-xs font-semibold text-[var(--domi-cyan)]">
+              Ver historial
+            </Link>
+          </div>
+          <ul className="space-y-3">
+            {historyPreview.map((order) => (
               <li key={order.orderId}>
                 <Link
                   to={`/seguimiento/${encodeURIComponent(order.trackingCode)}`}
@@ -135,7 +175,13 @@ export function AppHomePage() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <p className="font-mono text-sm font-bold text-white">{order.trackingCode}</p>
-                    <span className="shrink-0 text-[11px] font-semibold text-[var(--domi-cyan)]">
+                    <span
+                      className={`shrink-0 text-[11px] font-semibold ${
+                        order.status === 'delivered'
+                          ? 'text-[var(--domi-green)]'
+                          : 'text-red-300'
+                      }`}
+                    >
                       {STATUS_SHORT[order.status] || order.status}
                     </span>
                   </div>
@@ -148,8 +194,8 @@ export function AppHomePage() {
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      ) : null}
     </div>
   );
 }

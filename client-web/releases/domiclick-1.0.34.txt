@@ -1,0 +1,7 @@
+DomiClick 1.0.34 (versionCode 35)
+
+Novedades
+- Mapa del transportista a pantalla completa, con la ficha más abajo.
+- Botón Ubicarme: marca la ubicación precisa donde estás.
+- El GPS arranca más rápido, también mientras esperas un pedido.
+- Botón Marcar salida / Marcar entrada en Pedidos, Mapa, Turno y Perfil.

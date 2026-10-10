@@ -3,14 +3,29 @@ import {
   doc,
   getDoc,
   getDocs,
+  setDoc,
   updateDoc,
+  onSnapshot,
   query,
   where,
   limit,
   arrayUnion,
   increment,
+  type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
+import {
+  enqueueAdvance,
+  isBrowserOnline,
+  enqueuePin,
+  noteNetworkResult,
+  readAdvanceQueue,
+  readPinQueue,
+  removeQueuedAdvance,
+  removeQueuedPin,
+  withTimeout,
+  type QueuedAdvance,
+} from './driverOffline';
 
 export type DriverProfile = {
   id: string;
@@ -18,6 +33,8 @@ export type DriverProfile = {
   email: string;
   phone?: string;
   plateNumber?: string;
+  motoModel?: string;
+  photoUrl?: string;
   status: string;
   isActive: boolean;
   completedDeliveries?: number;
@@ -31,13 +48,20 @@ export type DriverOrder = {
   status: string;
   customerName?: string;
   customerPhone?: string;
+  customerPhotoURL?: string;
   pickupAddress?: string;
   deliveryAddress?: string;
   pickupCoords?: LatLng | null;
   deliveryCoords?: LatLng | null;
   description?: string;
+  notes?: string;
+  paymentMethod?: string;
+  invoiceNumber?: string;
+  invoicePhotoUrl?: string;
   assignedDriverId?: string | null;
   deliveryConfirmCode?: string;
+  routeDistanceKm?: number | null;
+  routeDurationMin?: number | null;
   createdAt?: string;
   updatedAt?: string;
   scheduledFor?: string;
@@ -60,13 +84,22 @@ function mapOrderDoc(id: string, data: Record<string, unknown>): DriverOrder {
     status: String(data.status || 'pending'),
     customerName: data.customerName ? String(data.customerName) : undefined,
     customerPhone: data.customerPhone ? String(data.customerPhone) : undefined,
+    customerPhotoURL: data.customerPhotoURL ? String(data.customerPhotoURL) : undefined,
     pickupAddress: data.pickupAddress ? String(data.pickupAddress) : undefined,
     deliveryAddress: data.deliveryAddress ? String(data.deliveryAddress) : undefined,
     pickupCoords: parseLatLng(data.pickupCoords),
     deliveryCoords: parseLatLng(data.deliveryCoords),
     description: data.description ? String(data.description) : undefined,
+    notes: data.notes ? String(data.notes) : undefined,
+    paymentMethod: data.paymentMethod ? String(data.paymentMethod) : undefined,
+    invoiceNumber: data.invoiceNumber ? String(data.invoiceNumber) : undefined,
+    invoicePhotoUrl: data.invoicePhotoUrl ? String(data.invoicePhotoUrl) : undefined,
     assignedDriverId: data.assignedDriverId ? String(data.assignedDriverId) : null,
     deliveryConfirmCode: data.deliveryConfirmCode ? String(data.deliveryConfirmCode) : undefined,
+    routeDistanceKm:
+      typeof data.routeDistanceKm === 'number' ? data.routeDistanceKm : null,
+    routeDurationMin:
+      typeof data.routeDurationMin === 'number' ? data.routeDurationMin : null,
     createdAt: data.createdAt ? String(data.createdAt) : undefined,
     updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
     scheduledFor: data.scheduledFor ? String(data.scheduledFor) : undefined,
@@ -106,6 +139,8 @@ export async function findApprovedDriverByEmail(email: string): Promise<DriverPr
     email: String(approved.email || normalized),
     phone: approved.phone ? String(approved.phone) : undefined,
     plateNumber: approved.plateNumber ? String(approved.plateNumber) : undefined,
+    motoModel: approved.motoModel ? String(approved.motoModel) : undefined,
+    photoUrl: approved.photoUrl ? String(approved.photoUrl) : undefined,
     status: String(approved.status || 'pending'),
     isActive: Boolean(approved.isActive),
     completedDeliveries: Number(approved.completedDeliveries) || 0,
@@ -116,29 +151,203 @@ export async function setDriverActive(_driverId: string, _isActive: boolean): Pr
   throw new Error('La cabina solo se activa o desactiva al marcar asistencia.');
 }
 
-export async function listDriverOrders(driverId: string): Promise<DriverOrder[]> {
-  const snap = await getDocs(
-    query(collection(db, 'orders'), where('assignedDriverId', '==', driverId), limit(80)),
+/** Entrada o salida desde la app del transportista. Salida apaga la cabina. */
+export async function punchCabinShift(params: {
+  driverId: string;
+  driverName: string;
+  type: 'in' | 'out';
+  lat?: number;
+  lng?: number;
+}): Promise<void> {
+  const at = new Date().toISOString();
+  const id = 'att_' + Date.now();
+  const lat = Number(params.lat);
+  const lng = Number(params.lng);
+  await setDoc(doc(db, 'attendance_punches', id), {
+    id,
+    driverId: params.driverId,
+    driverName: params.driverName || '',
+    type: params.type,
+    at,
+    dateKey: at.slice(0, 10),
+    method: 'cabin',
+    ...(Number.isFinite(lat) ? { lat } : {}),
+    ...(Number.isFinite(lng) ? { lng } : {}),
+  });
+  await updateDoc(doc(db, 'drivers', params.driverId), {
+    lastPunchType: params.type,
+    lastPunchAt: at,
+    isActive: params.type === 'in',
+    updatedAt: at,
+  });
+}
+
+const OPEN_ORDER_STATUSES = [
+  'assigned',
+  'accepted',
+  'en_route_origin',
+  'at_origin',
+  'picked_up',
+  'in_transit',
+  'at_destination',
+] as const;
+
+function sortOrdersByRecency(rows: DriverOrder[]): DriverOrder[] {
+  return rows.sort((a, b) =>
+    String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')),
   );
-  const rows = snap.docs.map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>));
-  return rows.sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+}
+
+export async function listDriverOrders(driverId: string): Promise<DriverOrder[]> {
+  // Pedidos vivos primero (evita que el historial entregado tape los abiertos con limit)
+  try {
+    const liveSnap = await getDocs(
+      query(
+        collection(db, 'orders'),
+        where('assignedDriverId', '==', driverId),
+        where('status', 'in', [...OPEN_ORDER_STATUSES]),
+        limit(40),
+      ),
+    );
+    const live = liveSnap.docs.map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>));
+    // Historial reciente para métricas del día (entregados)
+    const histSnap = await getDocs(
+      query(collection(db, 'orders'), where('assignedDriverId', '==', driverId), limit(60)),
+    );
+    const hist = histSnap.docs.map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>));
+    const byId = new Map<string, DriverOrder>();
+    for (const o of [...live, ...hist]) byId.set(o.id, o);
+    return sortOrdersByRecency([...byId.values()]);
+  } catch {
+    const snap = await getDocs(
+      query(collection(db, 'orders'), where('assignedDriverId', '==', driverId), limit(120)),
+    );
+    return sortOrdersByRecency(
+      snap.docs.map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>)),
+    );
+  }
+}
+
+/** Pedidos abiertos del transportista en tiempo real (hasta entregado/cancelado). */
+export function subscribeDriverOrders(
+  driverId: string,
+  callback: (orders: DriverOrder[]) => void,
+): Unsubscribe {
+  const openQ = query(
+    collection(db, 'orders'),
+    where('assignedDriverId', '==', driverId),
+    where('status', 'in', [...OPEN_ORDER_STATUSES]),
+    limit(40),
+  );
+  const allQ = query(collection(db, 'orders'), where('assignedDriverId', '==', driverId), limit(120));
+
+  let openRows: DriverOrder[] = [];
+  let histRows: DriverOrder[] = [];
+  let unsubOpen: Unsubscribe | null = null;
+  let unsubHist: Unsubscribe | null = null;
+
+  const emit = () => {
+    const byId = new Map<string, DriverOrder>();
+    for (const o of [...openRows, ...histRows]) byId.set(o.id, o);
+    callback(sortOrdersByRecency([...byId.values()]));
+  };
+
+  try {
+    unsubOpen = onSnapshot(
+      openQ,
+      (snap) => {
+        openRows = snap.docs.map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>));
+        emit();
+      },
+      () => {
+        // Sin índice compuesto: cae a consulta simple
+        if (unsubOpen) {
+          unsubOpen();
+          unsubOpen = null;
+        }
+        unsubHist = onSnapshot(
+          allQ,
+          (snap) => {
+            histRows = snap.docs.map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>));
+            openRows = [];
+            emit();
+          },
+          () => callback([]),
+        );
+      },
+    );
+    unsubHist = onSnapshot(
+      allQ,
+      (snap) => {
+        histRows = snap.docs.map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>));
+        emit();
+      },
+      () => {
+        /* keep open rows */
+      },
+    );
+  } catch {
+    unsubHist = onSnapshot(
+      allQ,
+      (snap) => {
+        histRows = snap.docs.map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>));
+        openRows = [];
+        emit();
+      },
+      () => callback([]),
+    );
+  }
+
+  return () => {
+    unsubOpen?.();
+    unsubHist?.();
+  };
+}
+
+/** Publica GPS del motorizado para que el cliente vea el desplazamiento. */
+export async function publishDriverLiveLocation(params: {
+  driverId: string;
+  lat: number;
+  lng: number;
+  heading?: number;
+}): Promise<boolean> {
+  const updatedAt = new Date().toISOString();
+  try {
+    await withTimeout(
+      updateDoc(doc(db, 'drivers', params.driverId), {
+        location: {
+          lat: params.lat,
+          lng: params.lng,
+          heading: params.heading || 0,
+          addressName: 'GPS en vivo',
+          neighborhood: 'En trayecto',
+          updatedAt,
+        },
+        updatedAt,
+      }),
+    );
+    noteNetworkResult(true);
+    return true;
+  } catch {
+    noteNetworkResult(false);
+    return false;
+  }
 }
 
 export function summarizeDriverDay(orders: DriverOrder[]) {
+  const open = orders.filter((o) => o.status !== 'delivered' && o.status !== 'cancelled');
   const today = orders.filter(
     (o) => isSameLocalDay(o.createdAt) || isSameLocalDay(o.updatedAt) || isSameLocalDay(o.scheduledFor),
   );
-  const active = today.filter((o) => o.status !== 'delivered' && o.status !== 'cancelled');
   const deliveredToday = today.filter((o) => o.status === 'delivered');
-  const inProgress = orders.filter(
-    (o) => o.status !== 'delivered' && o.status !== 'cancelled' && o.status !== 'pending',
-  );
+  const inProgress = open.filter((o) => o.status !== 'pending');
   return {
-    assignedToday: today.length,
-    activeToday: active.length,
+    assignedToday: today.filter((o) => o.status !== 'cancelled').length,
+    activeToday: open.length,
     deliveredToday: deliveredToday.length,
     inProgress: inProgress.length,
-    activeOrders: inProgress.length ? inProgress : active,
+    /** Siempre todos los pedidos abiertos hasta entrega — no se ocultan por día. */
+    activeOrders: open,
   };
 }
 
@@ -169,25 +378,73 @@ export async function advanceDriverOrderStatus(
   status: string,
   driverId: string,
   driverName: string,
-): Promise<void> {
+): Promise<{ queued: boolean }> {
   if (status === 'delivered') {
     throw new Error('Para entregar usa el PIN del cliente.');
   }
-  const now = new Date().toISOString();
-  await updateDoc(doc(db, 'orders', orderId), {
-    status,
-    updatedAt: now,
-    timeline: arrayUnion({
-      at: now,
-      to: status,
-      byRole: 'driver',
-      note: `Actualizado por ${driverName}`,
-    }),
-  });
-  void driverId;
+
+  const doWrite = async () => {
+    const now = new Date().toISOString();
+    await updateDoc(doc(db, 'orders', orderId), {
+      status,
+      updatedAt: now,
+      timeline: arrayUnion({
+        at: now,
+        to: status,
+        byRole: 'driver',
+        note: `Actualizado por ${driverName}`,
+      }),
+    });
+  };
+
+  if (!isBrowserOnline()) {
+    enqueueAdvance({ orderId, status, driverId, driverName });
+    noteNetworkResult(false);
+    return { queued: true };
+  }
+
+  try {
+    await withTimeout(doWrite());
+    noteNetworkResult(true);
+    return { queued: false };
+  } catch {
+    noteNetworkResult(false);
+    enqueueAdvance({ orderId, status, driverId, driverName });
+    return { queued: true };
+  }
 }
 
-export async function confirmDeliveryWithPin(
+/** Envía la cola offline cuando vuelve la red. */
+export async function flushAdvanceQueue(): Promise<{ sent: number; failed: number }> {
+  const queue = readAdvanceQueue();
+  if (!queue.length || !isBrowserOnline()) return { sent: 0, failed: 0 };
+  let sent = 0;
+  let failed = 0;
+  for (const q of queue) {
+    try {
+      const now = new Date().toISOString();
+      await updateDoc(doc(db, 'orders', q.orderId), {
+        status: q.status,
+        updatedAt: now,
+        timeline: arrayUnion({
+          at: now,
+          to: q.status,
+          byRole: 'driver',
+          note: `Actualizado por ${q.driverName} (offline sync)`,
+        }),
+      });
+      removeQueuedAdvance(q.id);
+      sent += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { sent, failed };
+}
+
+export type { QueuedAdvance };
+
+async function applyDeliveryPin(
   orderId: string,
   pin: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -230,6 +487,61 @@ export async function confirmDeliveryWithPin(
     });
   }
   return { ok: true };
+}
+
+export async function confirmDeliveryWithPin(
+  orderId: string,
+  pin: string,
+): Promise<{ ok: true; queued?: boolean } | { ok: false; error: string }> {
+  const given = pin.trim();
+  if (!isBrowserOnline()) {
+    enqueuePin(orderId, given);
+    noteNetworkResult(false);
+    return { ok: true, queued: true };
+  }
+  try {
+    const result = await withTimeout(applyDeliveryPin(orderId, given));
+    noteNetworkResult(true);
+    return result;
+  } catch {
+    noteNetworkResult(false);
+    enqueuePin(orderId, given);
+    return { ok: true, queued: true };
+  }
+}
+
+/** Confirma los PIN guardados cuando la señal vuelve. No vuelve a sumar si ya estaba entregado. */
+export async function flushPinQueue(): Promise<{ sent: number; failed: number; rejected: string }> {
+  const queue = readPinQueue();
+  if (!queue.length || !isBrowserOnline()) return { sent: 0, failed: 0, rejected: '' };
+  let sent = 0;
+  let failed = 0;
+  let rejected = '';
+  for (const q of queue) {
+    try {
+      const result = await withTimeout(applyDeliveryPin(q.orderId, q.pin));
+      noteNetworkResult(true);
+      if (result.ok) {
+        removeQueuedPin(q.id);
+        sent += 1;
+      } else if (
+        result.error === 'Ya estaba entregado' ||
+        result.error === 'Pedido cancelado' ||
+        result.error.includes('incorrecto') ||
+        result.error === 'Pedido no encontrado'
+      ) {
+        removeQueuedPin(q.id);
+        if (result.error.includes('incorrecto')) rejected = result.error;
+      } else {
+        failed += 1;
+      }
+    } catch {
+      noteNetworkResult(false);
+      failed += 1;
+      break;
+    }
+  }
+  return { sent, failed, rejected };
 }
 
 export async function recordSimpleAttendance(_params: {
@@ -285,3 +597,222 @@ export const DRIVER_NEXT_STATUS: Record<string, string | null> = {
   in_transit: 'at_destination',
   at_destination: null, // PIN
 };
+
+export const DRIVER_NEXT_LABEL: Record<string, string> = {
+  assigned: 'Aceptar servicio',
+  accepted: 'Iniciar ruta al origen',
+  en_route_origin: 'Llegué al origen',
+  at_origin: 'Confirmar recogida',
+  picked_up: 'Iniciar entrega al destino',
+  in_transit: 'Llegué al destino',
+};
+
+export const DRIVER_INCIDENT_REASONS = [
+  'Usuario no localizado',
+  'Dirección incorrecta',
+  'Problema con el pedido',
+  'Problema con el vehículo',
+  'Accidente / incidente',
+  'Imposibilidad de realizar entrega',
+  'Problema de acceso',
+  'Lluvia / clima',
+  'Otro',
+] as const;
+
+export type CabinAttendancePunch = {
+  id: string;
+  driverId: string;
+  type: 'in' | 'out';
+  at: string;
+  dateKey?: string;
+  odometerKm?: number;
+};
+
+export type CabinShiftSummary = {
+  hoursWorked: number;
+  open: boolean;
+  inAt?: string;
+  outAt?: string;
+  kmDriven: number;
+  kmIn?: number;
+  kmOut?: number;
+};
+
+export type CabinEarningsSummary = {
+  deliveredToday: number;
+  openCount: number;
+  routeKmToday: number;
+  hoursWorked: number;
+  odometerKm: number;
+  shiftOpen: boolean;
+};
+
+function hoursBetween(fromIso?: string, toIso?: string): number {
+  if (!fromIso) return 0;
+  const end = toIso ? new Date(toIso).getTime() : Date.now();
+  const ms = end - new Date(fromIso).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.round((ms / 36e5) * 100) / 100;
+}
+
+/** Deja de recibir encargos cuando faltan estos minutos para las 8 h. */
+export const SHIFT_CLOSE_BUFFER_MIN = 6;
+const SHIFT_LIMIT_MIN = 8 * 60;
+
+export function shiftRemainingMinutes(inAt?: string, now = Date.now()): number | null {
+  if (!inAt) return null;
+  const start = new Date(inAt).getTime();
+  if (!Number.isFinite(start)) return null;
+  const elapsed = (now - start) / 60000;
+  if (!Number.isFinite(elapsed)) return null;
+  return SHIFT_LIMIT_MIN - Math.max(0, elapsed);
+}
+
+export function shiftCloseMessage(remainingMin: number, hasOpenOrder: boolean): string {
+  const left = Math.max(0, Math.round(remainingMin));
+  if (hasOpenOrder) {
+    return `Faltan ${left} min para tus 8 horas. Entrega el pedido que tienes. Ya no te llegan encargos nuevos.`;
+  }
+  return `Faltan ${left} min para tus 8 horas. No tienes pedido: vuelve a la oficina y marca tu salida.`;
+}
+
+export function todayDateKey(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+export function summarizeCabinShift(
+  punches: CabinAttendancePunch[],
+  driverId: string,
+): CabinShiftSummary {
+  const mine = punches
+    .filter((p) => p.driverId === driverId)
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  const firstIn = mine.find((p) => p.type === 'in');
+  const outs = mine.filter((p) => p.type === 'out');
+  const lastOut = outs.length ? outs[outs.length - 1] : undefined;
+  const kmIn = firstIn?.odometerKm;
+  const kmOut = lastOut?.odometerKm;
+  const kmDriven =
+    typeof kmIn === 'number' && typeof kmOut === 'number' && kmOut >= kmIn
+      ? Math.round((kmOut - kmIn) * 10) / 10
+      : 0;
+  const inAt = firstIn?.at;
+  const outAt = lastOut?.at;
+  const open = Boolean(inAt) && !outAt;
+  return {
+    hoursWorked: hoursBetween(inAt, open ? undefined : outAt),
+    open,
+    inAt,
+    outAt,
+    kmDriven,
+    kmIn,
+    kmOut,
+  };
+}
+
+export function summarizeCabinEarnings(
+  orders: DriverOrder[],
+  shift: CabinShiftSummary,
+): CabinEarningsSummary {
+  const day = summarizeDriverDay(orders);
+  const delivered = orders.filter(
+    (o) =>
+      o.status === 'delivered' &&
+      (isSameLocalDay(o.updatedAt) || isSameLocalDay(o.createdAt)),
+  );
+  const routeKmToday = delivered.reduce((sum, o) => sum + (Number(o.routeDistanceKm) || 0), 0);
+  return {
+    deliveredToday: day.deliveredToday,
+    openCount: day.activeToday,
+    routeKmToday: Math.round(routeKmToday * 10) / 10,
+    hoursWorked: shift.hoursWorked,
+    odometerKm: shift.kmDriven,
+    shiftOpen: shift.open,
+  };
+}
+
+/** Escucha marcas de asistencia del día para el motorizado. */
+export function subscribeDriverTodayPunches(
+  driverId: string,
+  callback: (punches: CabinAttendancePunch[]) => void,
+): Unsubscribe {
+  const dayKey = todayDateKey();
+  return onSnapshot(
+    collection(db, 'attendance_punches'),
+    (snap) => {
+      const rows: CabinAttendancePunch[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        if (String(data.driverId || '') !== driverId) return;
+        const dateKey = data.dateKey ? String(data.dateKey) : '';
+        if (dateKey && dateKey !== dayKey) return;
+        if (!dateKey) {
+          const at = String(data.at || '');
+          if (at && !at.startsWith(dayKey)) return;
+        }
+        const type = String(data.type || '') === 'out' ? 'out' : 'in';
+        rows.push({
+          id: d.id,
+          driverId,
+          type,
+          at: String(data.at || ''),
+          dateKey: dateKey || undefined,
+          odometerKm:
+            typeof data.odometerKm === 'number' ? data.odometerKm : Number(data.odometerKm) || undefined,
+        });
+      });
+      rows.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      callback(rows);
+    },
+    () => callback([]),
+  );
+}
+
+export async function createDriverIncident(params: {
+  driverId: string;
+  driverName: string;
+  category: string;
+  description: string;
+  orderId?: string;
+  trackingCode?: string;
+  isPanic?: boolean;
+  lat?: number;
+  lng?: number;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const id = 'inc_' + Date.now();
+  const title = params.isPanic ? '🚨 Botón de pánico' : params.category;
+  await setDoc(doc(db, 'incidents', id), {
+    id,
+    orderId: params.orderId || null,
+    trackingCode: params.trackingCode || null,
+    driverId: params.driverId,
+    driverName: params.driverName,
+    reportedByRole: 'driver',
+    reportedByName: params.driverName,
+    category: params.category,
+    title,
+    description: params.description.trim() || title,
+    status: 'open',
+    isPanic: Boolean(params.isPanic),
+    lat: params.lat ?? null,
+    lng: params.lng ?? null,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+export function normalizeCoPhone(phone?: string): string {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('57') && digits.length >= 12) return digits;
+  if (digits.length === 10) return `57${digits}`;
+  return digits;
+}
+
+export function openWhatsAppTo(phone?: string, text?: string): void {
+  const n = normalizeCoPhone(phone);
+  if (!n) return;
+  const q = text ? `?text=${encodeURIComponent(text)}` : '';
+  window.location.href = `https://wa.me/${n}${q}`;
+}

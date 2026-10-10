@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, KeyRound, Loader2, MessageCircle, PackageSearch, Phone, RefreshCw } from 'lucide-react';
 import type { TrackingStatus } from '../contracts/salesIngest';
 import { BrandLogo } from '../components/BrandLogo';
+import { LiveTripMap } from '../components/LiveTripMap';
 import { RatingForm } from '../components/RatingForm';
-import { findOrderByTrackingCode, type PublicOrderTracking } from '../lib/firebase';
+import { subscribeOrderTracking, type PublicOrderTracking } from '../lib/firebase';
 import { useAuth } from '../lib/auth';
 import { pushForStatus } from '../lib/brandCopy';
+import { CustomerOrdersPanel } from '../components/CustomerOrdersPanel';
+import { rememberRecentOrder } from '../lib/recentOrders';
 
 const STATUS_LABEL: Record<TrackingStatus, string> = {
   pending: 'Pendiente de asignación',
@@ -58,34 +61,6 @@ export function AppTrackingPage() {
   const [loading, setLoading] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
 
-  const load = useCallback(
-    async (trackingCode: string) => {
-      if (!profile) {
-        setData(null);
-        setError('Debes iniciar sesión con Google para ver el seguimiento.');
-        setLoading(false);
-        return;
-      }
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await findOrderByTrackingCode(trackingCode);
-        if (!res) {
-          setData(null);
-          setError('No se encontró un pedido con ese código');
-          return;
-        }
-        setData(res);
-      } catch (err: unknown) {
-        setData(null);
-        setError(err instanceof Error ? err.message : 'No se pudo consultar el pedido');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [profile],
-  );
-
   useEffect(() => {
     if (!code) {
       setData(null);
@@ -94,8 +69,33 @@ export function AppTrackingPage() {
     }
     setLookup(code.toUpperCase());
     if (authLoading) return;
-    void load(code);
-  }, [code, load, refreshToken, authLoading]);
+    if (!profile) {
+      setData(null);
+      setError('Debes iniciar sesión para ver el seguimiento.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    const unsub = subscribeOrderTracking(code, (res) => {
+      setLoading(false);
+      if (!res) {
+        setData(null);
+        setError('No se encontró un pedido con ese código');
+        return;
+      }
+      setData(res);
+      setError(null);
+      rememberRecentOrder({
+        trackingCode: res.trackingCode,
+        orderId: res.orderId,
+        deliveryAddress: res.deliveryAddress,
+        status: res.status,
+        createdAt: res.createdAt || new Date().toISOString(),
+      });
+    });
+    return () => unsub();
+  }, [code, profile, authLoading, refreshToken]);
 
   function goLookup(e: FormEvent) {
     e.preventDefault();
@@ -168,13 +168,46 @@ export function AppTrackingPage() {
         <div className="mt-5 space-y-4">
           <div className="flex items-center justify-between gap-2">
             <p className="font-mono text-lg font-bold tracking-wider text-white">{data.trackingCode}</p>
-            <span className={`text-xs font-bold ${STATUS_COLOR[status]}`}>{STATUS_LABEL[status]}</span>
+            <span className={`text-xs font-bold ${STATUS_COLOR[status]}`}>
+              {data.paymentReviewStatus === 'pending_review'
+                ? 'Comprobante en revisión'
+                : STATUS_LABEL[status]}
+            </span>
           </div>
+          {data.paymentReviewStatus === 'pending_review' ? (
+            <div className="rounded-2xl border border-emerald-500/35 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+              Central está revisando tu transferencia. Aún no hay Domiclick asignado.
+            </div>
+          ) : null}
 
           {push ? (
             <div className="rounded-2xl border border-[rgba(43,108,255,0.35)] bg-[rgba(43,108,255,0.08)] px-4 py-3">
               <p className="font-bold text-white">{push.title}</p>
               <p className="mt-1 text-sm text-[var(--domi-muted)]">{push.body}</p>
+            </div>
+          ) : null}
+
+          {(data.pickupCoords || data.deliveryCoords || data.driverLocation) &&
+          status !== 'cancelled' ? (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+                Ruta en vivo
+              </p>
+              <LiveTripMap
+                pickup={data.pickupCoords}
+                delivery={data.deliveryCoords}
+                driver={
+                  status !== 'pending' && status !== 'delivered' ? data.driverLocation : null
+                }
+                status={status || undefined}
+                heightClass="h-64"
+              />
+              {status !== 'pending' && status !== 'delivered' && !data.driverLocation ? (
+                <p className="text-[11px] text-[var(--domi-muted)]">
+                  Esperando ubicación del repartidor… debe tener el pedido abierto en la cabina con
+                  GPS activo.
+                </p>
+              ) : null}
             </div>
           ) : null}
 
@@ -277,9 +310,7 @@ export function AppTrackingPage() {
       ) : null}
 
       {!loading && !data && !error && !code ? (
-        <p className="mt-6 text-sm text-[var(--domi-muted)]">
-          Ingresa tu código DMC-XXXX para ver el estado en tiempo real.
-        </p>
+        <CustomerOrdersPanel className="mt-6" />
       ) : null}
 
       {!code ? (

@@ -25,6 +25,9 @@ const config: CapacitorConfig = {
     Geolocation: {
       // Permisos se solicitan al usar
     },
+    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
     SocialLogin: {
       providers: {
         google: true,

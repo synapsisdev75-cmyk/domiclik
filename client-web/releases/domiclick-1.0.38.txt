@@ -1,0 +1,6 @@
+DomiClick 1.0.38 (versionCode 39)
+
+Novedades
+- La ruta hacia la recogida se dibuja desde donde está el repartidor.
+- La ruta de entrega se mantiene completa mientras va a recoger, aunque las dos vías se crucen.
+- Al salir hacia el destino, la recogida desaparece y la entrega se oculta solo por donde ya pasó.

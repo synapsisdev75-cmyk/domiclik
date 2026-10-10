@@ -54,7 +54,7 @@ const GUIDE_SOLICITAR = [
   'Guía paso a paso para solicitar una entrega en DomiClick:',
   '',
   '1) Entra a “Solicitar” (o baja al formulario en la web).',
-  '2) Marca en el mapa el punto A (recolección) y el punto B (entrega), o búscalos por dirección / lugar.',
+  '2) Marca en el mapa la recogida y la entrega, o búscalas por dirección / lugar.',
   '3) Completa complemento si aplica (mz, casa, apto, torre, referencia).',
   '4) Indica fecha/hora, factura u orden si la tienes, y forma de pago.',
   '5) Confirma la solicitud.',
@@ -84,7 +84,7 @@ const QUIENES_SOMOS = [
 const COMO_LO_HACEMOS = [
   'Así funciona DomiClick (cómo lo hacemos):',
   '',
-  '1) Tú defines recolección (A) y entrega (B) en el mapa o por búsqueda.',
+  '1) Tú defines la recogida y la entrega en el mapa o por búsqueda.',
   '2) Calculamos ruta y tarifa por distancia (con mínimos y ajustes de hora pico).',
   '3) Confirmas el pedido: se genera DMC-XXXX + PIN de 6 dígitos.',
   '4) Central asigna al motorizado disponible más cercano.',
@@ -267,7 +267,7 @@ const INTENTS: Intent[] = [
     ],
     reply: () => ({
       text:
-        'Tarifas DomiClick:\n\n• $2.300 COP por kilómetro (mínimo $5.000).\n• Hora pico: ×1.35.\n• Puedes programar la entrega hasta 15 días adelante.\n• Formas de pago según lo que elijas en el formulario (p. ej. efectivo al recibir).\n\nLa cotización exacta la ves en el mapa al marcar A y B.',
+        'Tarifas DomiClick:\n\n• $2.300 COP por kilómetro (mínimo $5.000).\n• Hora pico: ×1.35.\n• Puedes programar la entrega hasta 15 días adelante.\n• Formas de pago según lo que elijas en el formulario (p. ej. efectivo al recibir).\n\nLa cotización exacta la ves en el mapa al marcar la recogida y la entrega.',
       suggestions: ['¿Cómo solicito?', 'Hablar con Central'],
     }),
   },

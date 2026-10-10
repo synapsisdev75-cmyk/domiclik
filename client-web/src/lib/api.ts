@@ -95,6 +95,8 @@ export async function submitOrder(
     invoiceNumber: payload.invoiceNumber,
     invoicePhotoUrl: payload.invoicePhotoUrl,
     paymentMethod: payload.paymentMethod,
+    transferChannel: payload.transferChannel,
+    paymentProofUrl: payload.paymentProofUrl,
     paymentNote: payload.paymentNote,
     couponCode: payload.couponCode,
     sourceSiteId: SITE_ID,

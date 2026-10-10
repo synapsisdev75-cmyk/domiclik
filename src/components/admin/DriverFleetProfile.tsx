@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AttendancePunch, MotorizadoDriver } from '../../types';
-import { subscribeDriverAttendancePunches } from '../../lib/firebase';
+import {
+  subscribeDriverAttendancePunches,
+  subscribeFleetSettings,
+  updateDriverVtaUserId,
+} from '../../lib/firebase';
 import {
   DEFAULT_FUEL_COP_PER_KM,
   EXPECTED_SHIFT_HOURS,
@@ -8,7 +12,6 @@ import {
 } from '../../lib/adminMetrics';
 import { buildDriverShiftHistory, summarizeDriverShift } from '../../lib/workShift';
 import { calcMaintenanceDueItems, DEFAULT_FLEET_SETTINGS, formatGallons, formatLiters } from '../../lib/motoFuel';
-import { subscribeFleetSettings } from '../../lib/firebase';
 import { Fingerprint, Gauge, LogIn, LogOut, X, Wrench, AlertTriangle } from 'lucide-react';
 
 interface DriverFleetProfileProps {
@@ -24,9 +27,17 @@ export const DriverFleetProfile: React.FC<DriverFleetProfileProps> = ({
 }) => {
   const [punches, setPunches] = useState<AttendancePunch[]>([]);
   const [fleet, setFleet] = useState(DEFAULT_FLEET_SETTINGS);
+  const [vtaIdDraft, setVtaIdDraft] = useState(driver.vtaUserId || '');
+  const [vtaBusy, setVtaBusy] = useState(false);
+  const [vtaMsg, setVtaMsg] = useState<string | null>(null);
   const todayKey = new Date().toISOString().split('T')[0];
 
   useEffect(() => subscribeFleetSettings(setFleet), []);
+
+  useEffect(() => {
+    setVtaIdDraft(driver.vtaUserId || '');
+    setVtaMsg(null);
+  }, [driver.id, driver.vtaUserId]);
 
   useEffect(() => {
     return subscribeDriverAttendancePunches(driver.id, setPunches);
@@ -64,6 +75,19 @@ export const DriverFleetProfile: React.FC<DriverFleetProfileProps> = ({
   );
 
   const maint = useMemo(() => calcMaintenanceDueItems(driver, fleet), [driver, fleet]);
+
+  async function saveVtaId() {
+    setVtaBusy(true);
+    setVtaMsg(null);
+    try {
+      await updateDriverVtaUserId(driver.id, vtaIdDraft.trim() || null);
+      setVtaMsg(vtaIdDraft.trim() ? 'ID VTA guardado' : 'ID VTA quitado');
+    } catch (e) {
+      setVtaMsg(e instanceof Error ? e.message : 'No se pudo guardar');
+    } finally {
+      setVtaBusy(false);
+    }
+  }
 
   return (
     <div className="bg-[#070B16] border border-[#FF5722]/35 rounded-3xl p-4 sm:p-5 space-y-4">
@@ -132,6 +156,33 @@ export const DriverFleetProfile: React.FC<DriverFleetProfileProps> = ({
           </span>
         </div>
       )}
+
+      <div className="bg-[#0A1020] border border-[#00E5FF]/25 rounded-2xl p-3.5 space-y-2">
+        <div className="flex items-center gap-2">
+          <Fingerprint className="w-4 h-4 text-[#00E5FF]" />
+          <span className="text-xs font-black text-white font-tech uppercase">ID VTA (huella sede)</span>
+        </div>
+        <p className="text-[10px] text-slate-500">
+          Mismo número de usuario en el software / aparato VTA. Ver docs/VTA-ASISTENCIA.md
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={vtaIdDraft}
+            onChange={(e) => setVtaIdDraft(e.target.value.replace(/[^\d]/g, ''))}
+            placeholder="Ej. 12"
+            className="flex-1 min-w-[120px] bg-[#070B16] border border-[#1a2744] rounded-xl px-3 py-2 text-xs text-white font-tech"
+          />
+          <button
+            type="button"
+            disabled={vtaBusy}
+            onClick={() => void saveVtaId()}
+            className="px-3 py-2 rounded-xl bg-[#2B6CFF] text-white text-[11px] font-black disabled:opacity-60"
+          >
+            {vtaBusy ? '…' : 'Guardar'}
+          </button>
+        </div>
+        {vtaMsg ? <p className="text-[10px] text-emerald-300">{vtaMsg}</p> : null}
+      </div>
 
       <div className="bg-[#0A1020] border border-[#162748] rounded-2xl p-3.5 space-y-2">
         <div className="flex items-center gap-2">

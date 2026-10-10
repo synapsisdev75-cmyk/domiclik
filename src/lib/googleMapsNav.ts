@@ -52,25 +52,29 @@ export function buildGoogleMapsAbRouteUrl(pickup: LatLng, delivery: LatLng, navi
   });
 }
 
-/** Navegar desde GPS actual hacia un punto (A o B). */
-export function buildGoogleMapsNavigateToUrl(destination: LatLng): string {
+/** Navegar hacia un punto. Si hay GPS del motorizado, ese es el origen (no el del navegador). */
+export function buildGoogleMapsNavigateToUrl(destination: LatLng, origin?: LatLng | null): string {
   return buildGoogleMapsDirectionsUrl({
-    origin: 'current',
+    origin: origin && isValid(origin) ? origin : 'current',
     destination,
     navigate: true,
   });
 }
 
+function isMapsUrl(url: string): boolean {
+  return /google\.[^/]+\/maps/i.test(url);
+}
+
+/** Abre Maps en otra pestaña. Si esta pantalla se va a Maps, vuelve sola a DomiClick. */
 export function openGoogleMapsNav(url: string): void {
   if (typeof window === 'undefined') return;
-  // En WebView / móvil, location.href abre Google Maps (app o web) de forma más fiable.
-  const isMobile =
-    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
-    window.matchMedia('(max-width: 768px)').matches;
-  if (isMobile) {
-    window.location.href = url;
-    return;
-  }
-  const w = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!w) window.location.href = url;
+  const home = window.location.href;
+  window.open(url, '_blank', 'noopener,noreferrer');
+  const back = () => {
+    if (!isMapsUrl(window.location.href)) return;
+    if (!home || isMapsUrl(home)) return;
+    window.location.replace(home);
+  };
+  window.setTimeout(back, 600);
+  window.setTimeout(back, 1500);
 }

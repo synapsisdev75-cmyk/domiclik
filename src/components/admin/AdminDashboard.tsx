@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MotorizadoDriver, DeliveryOrder, AdminAccount } from '../../types';
+import { MotorizadoDriver, DeliveryOrder, AdminAccount, type StaffRole } from '../../types';
 import { MapComponent, MapStyleType } from '../MapComponent';
 import { GoogleMapRadar, getGoogleMapsApiKey } from '../GoogleMapRadar';
 import { BrandIcon } from '../brand/BrandAssets';
@@ -21,9 +21,6 @@ import { staffCan } from '../../lib/staffAccess';
 import { subscribeIncidents } from '../../lib/firebase';
 import type { OpsIncident } from '../../types';
 import { AlertTriangle } from 'lucide-react';
-
-import type { AdminSection } from './AdminSectionPanels';
-import type { StaffRole } from '../../types';
 
 interface AdminDashboardProps {
   drivers: MotorizadoDriver[];

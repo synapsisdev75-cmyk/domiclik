@@ -6,6 +6,42 @@ import {
 } from './adminMetrics';
 import { calcShiftFuel, DEFAULT_FLEET_SETTINGS } from './motoFuel';
 
+/** Minutos de margen antes de las 8 h: ya no recibe encargos. */
+export const SHIFT_CLOSE_BUFFER_MIN = 6;
+
+/** Minutos de viaje en ciudad a partir de la distancia (mismo criterio del despacho). */
+export function minutesFromDistanceKm(distanceKm: number): number {
+  if (distanceKm <= 0) return 0;
+  return Math.max(5, Math.ceil(distanceKm * 4));
+}
+
+/** Minutos que faltan para cumplir las 8 h desde la entrada. Negativo si ya las pasó. */
+export function shiftRemainingMinutes(inAt?: string, now = Date.now()): number | null {
+  if (!inAt) return null;
+  const start = new Date(inAt).getTime();
+  if (!Number.isFinite(start)) return null;
+  const elapsed = (now - start) / 60000;
+  if (!Number.isFinite(elapsed)) return null;
+  return EXPECTED_SHIFT_HOURS * 60 - Math.max(0, elapsed);
+}
+
+/**
+ * Cabe el encargo si termina al menos 6 min antes de las 8 h.
+ * approachKm: del motorizado a la recogida. orderMinutes: el pedido en ruta.
+ */
+export function driverCanTakeOrder(params: {
+  lastPunchAt?: string;
+  approachKm: number;
+  orderMinutes: number;
+  now?: number;
+}): boolean {
+  const left = shiftRemainingMinutes(params.lastPunchAt, params.now);
+  if (left == null) return true;
+  if (left <= SHIFT_CLOSE_BUFFER_MIN) return false;
+  const trip = minutesFromDistanceKm(params.approachKm) + Math.max(0, params.orderMinutes);
+  return left - trip >= SHIFT_CLOSE_BUFFER_MIN;
+}
+
 export function hoursBetween(fromIso?: string, toIso?: string): number {
   if (!fromIso || !toIso) return 0;
   const ms = new Date(toIso).getTime() - new Date(fromIso).getTime();
@@ -112,11 +148,28 @@ export function isDriverAssignable(driver: MotorizadoDriver): boolean {
   return isDriverOnShiftToday(driver);
 }
 
-export function driverAssignBlockReason(driver: MotorizadoDriver): string | null {
+export function driverAssignBlockReason(
+  driver: MotorizadoDriver,
+  job?: { approachKm?: number; orderMinutes?: number },
+): string | null {
   if (driver.status !== 'approved') return 'No está aprobado';
   if (driver.suspended) return 'Suspendido';
   if (!isDriverOnShiftToday(driver)) return 'Sin asistencia de entrada hoy';
   if (!driver.isActive) return 'Cabina inactiva';
+  const left = shiftRemainingMinutes(driver.lastPunchAt);
+  if (left != null && left <= SHIFT_CLOSE_BUFFER_MIN) {
+    return 'Cierra turno: faltan pocos minutos para las 8 h';
+  }
+  if (
+    job &&
+    !driverCanTakeOrder({
+      lastPunchAt: driver.lastPunchAt,
+      approachKm: job.approachKm || 0,
+      orderMinutes: job.orderMinutes || 0,
+    })
+  ) {
+    return 'El encargo no cabe antes de las 8 h';
+  }
   return null;
 }
 

@@ -9,6 +9,8 @@ import {
   subscribeRealtimeStatus,
   RealtimeSyncMeta,
   uploadAttendanceFacePhoto,
+  uploadOdometerPhoto,
+  uploadPlatePhoto,
   verifyDailyAttendancePin,
 } from '../../lib/firebase';
 import {
@@ -20,6 +22,7 @@ import { parseOdometerKm, summarizeDriverShift } from '../../lib/workShift';
 import { formatFuelFormulaSummary, formatGallons, formatLiters, formatFuelRateSummary } from '../../lib/motoFuel';
 import {
   ArrowLeft,
+  Bike,
   Camera,
   Fuel,
   Gauge,
@@ -56,7 +59,7 @@ export function attendanceKioskUrl(): string {
   return opsPublicUrl('/', { view: 'kiosk-asistencia' });
 }
 
-type KioskStep = 'pick' | 'face' | 'punch' | 'done';
+type KioskStep = 'pick' | 'face' | 'punch' | 'salida' | 'done';
 
 export const AttendanceKioskScreen: React.FC = () => {
   const [drivers, setDrivers] = useState<MotorizadoDriver[]>([]);
@@ -74,6 +77,10 @@ export const AttendanceKioskScreen: React.FC = () => {
   const [pinDayKey, setPinDayKey] = useState('');
   const [typedPin, setTypedPin] = useState('');
   const [odometerKm, setOdometerKm] = useState('');
+  const [odometerFile, setOdometerFile] = useState<File | null>(null);
+  const [odometerPreview, setOdometerPreview] = useState<string | null>(null);
+  const [plateFile, setPlateFile] = useState<File | null>(null);
+  const [platePreview, setPlatePreview] = useState<string | null>(null);
   const [lastPunchId, setLastPunchId] = useState<string | null>(null);
   const [lastPunchType, setLastPunchType] = useState<'in' | 'out' | null>(null);
   const [lastPunchFuel, setLastPunchFuel] = useState<AttendancePunch | null>(null);
@@ -152,6 +159,8 @@ export const AttendanceKioskScreen: React.FC = () => {
 
   const clearPreviews = () => {
     if (facePreview) URL.revokeObjectURL(facePreview);
+    if (odometerPreview) URL.revokeObjectURL(odometerPreview);
+    if (platePreview) URL.revokeObjectURL(platePreview);
   };
 
   const resetSession = () => {
@@ -163,6 +172,10 @@ export const AttendanceKioskScreen: React.FC = () => {
     setPinDayKey('');
     setTypedPin('');
     setOdometerKm('');
+    setOdometerFile(null);
+    setOdometerPreview(null);
+    setPlateFile(null);
+    setPlatePreview(null);
     setLastPunchId(null);
     setLastPunchType(null);
     setLastPunchFuel(null);
@@ -176,9 +189,15 @@ export const AttendanceKioskScreen: React.FC = () => {
   };
 
   const pickDriver = (driver: MotorizadoDriver) => {
+    const shift = summarizeDriverShift(
+      punches.filter((p) => p.driverId === driver.id),
+      driver.id,
+      driver.fullName,
+      calendarToday,
+    );
     resetSession();
     setSelected(driver);
-    setStep('face');
+    setStep(shift.open ? 'salida' : 'face');
   };
 
   const handleRevealPin = async () => {
@@ -264,6 +283,70 @@ export const AttendanceKioskScreen: React.FC = () => {
     }
   };
 
+  const handleSalida = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setMsg('');
+    try {
+      if (!odometerFile) throw new Error('Toma la foto del tacómetro.');
+      if (!plateFile) throw new Error('Toma la foto de la placa.');
+      if (!faceFile) throw new Error('Toma tu foto de salida.');
+      const km = parseOdometerKm(odometerKm);
+      if (km == null) throw new Error('Anota el kilometraje del tablero.');
+      if (!typedPin.trim()) throw new Error('Digita el PIN del día.');
+
+      const lastPunchKm = selectedPunches
+        .map((p) => Number(p.odometerKm))
+        .filter((n) => Number.isFinite(n) && n > 0)
+        .reduce((max, n) => Math.max(max, n), 0);
+      const lastKm = lastPunchKm || Number(selected.lastOdometerKm) || 0;
+      if (lastKm > 0 && km < lastKm) {
+        throw new Error(
+          `Km debe ser ≥ ${lastKm.toLocaleString('es-CO')}. Último registro del turno.`,
+        );
+      }
+
+      const pinDoc = await verifyDailyAttendancePin(selected.id, typedPin, now);
+      const [faceUrl, odometerUrl, plateUrl] = await Promise.all([
+        uploadAttendanceFacePhoto(faceFile, selected.id),
+        uploadOdometerPhoto(odometerFile, selected.id, 'out'),
+        uploadPlatePhoto(plateFile, selected.id, 'out'),
+      ]);
+      const entryKm =
+        selectedPunches.find((p) => p.type === 'in')?.odometerKm ?? todayShift?.kmIn;
+      const punch = await recordAttendancePunch({
+        driverId: selected.id,
+        driverName: selected.fullName,
+        type: 'out',
+        credentialId: pinDoc.pin,
+        method: 'pin_kiosk',
+        odometerKm: km,
+        odometerPhotoUrl: odometerUrl,
+        platePhotoUrl: plateUrl,
+        facePhotoUrl: faceUrl,
+        pinDayKey: pinDoc.pinDayKey,
+        mobilePhotosPending: false,
+        entryOdometerKm: entryKm,
+        motoModel: selected.motoModel,
+        motoKmPerGallon: selected.motoKmPerGallon,
+      });
+      setFacePhotoUrl(faceUrl);
+      setLastPunchId(punch.id);
+      setLastPunchType('out');
+      setLastPunchFuel(punch);
+      setMsg(
+        punch.shiftKmDriven != null
+          ? `Salida · ${km.toLocaleString('es-CO')} km · ${punch.shiftKmDriven.toLocaleString('es-CO')} km recorridos`
+          : `Salida registrada · ${km.toLocaleString('es-CO')} km`,
+      );
+      setStep('done');
+    } catch (err: unknown) {
+      setMsg(err instanceof Error ? err.message : 'No se pudo marcar la salida.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="min-h-screen min-h-dvh bg-[#05080f] text-[#e8eef9] flex flex-col">
       <header className="shrink-0 border-b border-[#1a2744] bg-[#0B101D]/95 backdrop-blur px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
@@ -277,7 +360,7 @@ export const AttendanceKioskScreen: React.FC = () => {
               </h1>
             </div>
             <p className="text-[11px] text-slate-500 truncate">
-              Tablet: rostro + PIN + km · Celular: odómetro + placa
+              Entrada: rostro + PIN + km · Salida: tacómetro, placa, foto y km
             </p>
           </div>
         </div>
@@ -376,7 +459,7 @@ export const AttendanceKioskScreen: React.FC = () => {
           </div>
         )}
 
-        {(step === 'face' || step === 'punch' || step === 'done') && selected && (
+        {(step === 'face' || step === 'punch' || step === 'salida' || step === 'done') && selected && (
           <div className="max-w-lg mx-auto space-y-5">
             <button
               type="button"
@@ -450,27 +533,159 @@ export const AttendanceKioskScreen: React.FC = () => {
                     )}
                   </div>
                 )}
+                {lastPunchType === 'out' ? (
+                  <div className="grid grid-cols-1 gap-3 text-left">
+                    {odometerPreview ? (
+                      <figure>
+                        <figcaption className="mb-1 text-[10px] font-bold uppercase text-slate-400">
+                          Tacómetro · {odometerKm} km
+                        </figcaption>
+                        <img src={odometerPreview} alt="Tacómetro" className="max-h-40 w-full rounded-xl object-cover" />
+                      </figure>
+                    ) : null}
+                    {platePreview ? (
+                      <figure>
+                        <figcaption className="mb-1 text-[10px] font-bold uppercase text-slate-400">Placa</figcaption>
+                        <img src={platePreview} alt="Placa" className="max-h-40 w-full rounded-xl object-cover" />
+                      </figure>
+                    ) : null}
+                    {facePreview ? (
+                      <figure>
+                        <figcaption className="mb-1 text-[10px] font-bold uppercase text-slate-400">Foto de salida</figcaption>
+                        <img src={facePreview} alt="Foto de salida" className="max-h-40 w-full rounded-xl object-cover" />
+                      </figure>
+                    ) : null}
+                  </div>
+                ) : null}
+                {lastPunchType === 'in' ? (
                 <div className="rounded-xl border border-[#1a2744] bg-[#0B101D] p-4 space-y-3">
                   <div className="flex items-center justify-center gap-2 text-sm font-bold text-white">
                     <Smartphone className="w-4 h-4 text-[#00E5FF]" />
                     Escanea con tu celular junto a la moto
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    {lastPunchType === 'in'
-                      ? 'Sube foto del odómetro y de la placa.'
-                      : 'Sube foto del odómetro.'}
+                    Sube foto del odómetro y de la placa.
                   </p>
                   <div className="flex justify-center">
                     <AttendancePunchQr punchId={lastPunchId} />
                   </div>
                   <p className="text-[10px] text-slate-500 break-all">{attendanceMobilePhotoUrl(lastPunchId)}</p>
                 </div>
+                ) : null}
                 <button
                   type="button"
                   onClick={goBack}
                   className="w-full py-3 rounded-xl bg-[#2B6CFF] text-white text-sm font-black"
                 >
                   Siguiente transportista
+                </button>
+              </div>
+            ) : step === 'salida' ? (
+              <div className="rounded-2xl border border-[#FF5722]/40 bg-[#0B101D] p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <LogOut className="w-5 h-5 text-[#FF5722]" />
+                  <h3 className="text-sm font-black text-white uppercase">Salida en la tablet</h3>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Al revés de la entrada: aquí se ven el tacómetro, la placa, tu foto de salida y los kilómetros.
+                </p>
+                <label className="block">
+                  <span className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
+                    <Gauge className="w-4 h-4" /> Foto del tacómetro *
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="w-full text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-[#FF5722] file:px-4 file:py-3 file:text-sm file:font-black file:text-white"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      if (odometerPreview) URL.revokeObjectURL(odometerPreview);
+                      setOdometerFile(file);
+                      setOdometerPreview(file ? URL.createObjectURL(file) : null);
+                    }}
+                  />
+                </label>
+                {odometerPreview ? (
+                  <img src={odometerPreview} alt="Tacómetro" className="max-h-44 w-full rounded-xl object-cover" />
+                ) : null}
+                <label className="block">
+                  <span className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
+                    <Bike className="w-4 h-4" /> Foto de la placa *
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="w-full text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-[#2B6CFF] file:px-4 file:py-3 file:text-sm file:font-black file:text-white"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      if (platePreview) URL.revokeObjectURL(platePreview);
+                      setPlateFile(file);
+                      setPlatePreview(file ? URL.createObjectURL(file) : null);
+                    }}
+                  />
+                </label>
+                {platePreview ? (
+                  <img src={platePreview} alt="Placa" className="max-h-44 w-full rounded-xl object-cover" />
+                ) : null}
+                <label className="block">
+                  <span className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
+                    <Camera className="w-4 h-4" /> Tu foto de salida *
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="user"
+                    className="w-full text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-[#00E5FF] file:px-4 file:py-3 file:text-sm file:font-black file:text-black"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      if (facePreview) URL.revokeObjectURL(facePreview);
+                      setFaceFile(file);
+                      setFacePreview(file ? URL.createObjectURL(file) : null);
+                    }}
+                  />
+                </label>
+                {facePreview ? (
+                  <img src={facePreview} alt="Foto de salida" className="max-h-44 w-full rounded-xl object-cover" />
+                ) : null}
+                <label className="block">
+                  <span className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
+                    <Gauge className="w-4 h-4" /> Kilometraje del tablero *
+                  </span>
+                  <input
+                    className="w-full rounded-xl border border-[#1a2744] bg-[#070B16] px-4 py-4 font-mono text-lg text-white"
+                    inputMode="numeric"
+                    value={odometerKm}
+                    onChange={(e) => setOdometerKm(e.target.value.replace(/[^\d]/g, ''))}
+                    placeholder={
+                      todayShift?.kmIn
+                        ? `≥ ${todayShift.kmIn.toLocaleString('es-CO')}`
+                        : 'Ej. 45280'
+                    }
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
+                    <KeyRound className="w-4 h-4" /> PIN del día
+                  </span>
+                  <input
+                    className="w-full rounded-xl border border-[#1a2744] bg-[#070B16] px-4 py-4 text-center font-mono text-2xl tracking-[0.35em] text-white"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={typedPin}
+                    onChange={(e) => setTypedPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="••••••"
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleSalida()}
+                  className="flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl bg-[#FF5722] py-4 text-sm font-black text-white disabled:opacity-50"
+                >
+                  <LogOut className="w-5 h-5" />
+                  {busy ? 'Guardando salida…' : 'Marcar salida'}
                 </button>
               </div>
             ) : step === 'face' ? (
@@ -570,24 +785,17 @@ export const AttendanceKioskScreen: React.FC = () => {
                       placeholder="••••••"
                     />
                   </label>
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void handlePunch('in')}
-                      className="py-4 rounded-2xl bg-[#00E676]/15 border-2 border-[#00E676]/50 text-[#00E676] text-sm font-black flex items-center justify-center gap-2 disabled:opacity-50 min-h-[56px]"
-                    >
-                      <LogIn className="w-5 h-5" /> Entrada
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void handlePunch('out')}
-                      className="py-4 rounded-2xl bg-[#FF5722]/15 border-2 border-[#FF5722]/50 text-[#FF5722] text-sm font-black flex items-center justify-center gap-2 disabled:opacity-50 min-h-[56px]"
-                    >
-                      <LogOut className="w-5 h-5" /> Salida
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handlePunch('in')}
+                    className="flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl border-2 border-[#00E676]/50 bg-[#00E676]/15 py-4 text-sm font-black text-[#00E676] disabled:opacity-50"
+                  >
+                    <LogIn className="w-5 h-5" /> Marcar entrada
+                  </button>
+                  <p className="text-center text-[11px] text-slate-500">
+                    La salida, si el turno está abierto, pide tacómetro, placa, tu foto y los km en esta tablet.
+                  </p>
                 </div>
               </div>
             )}
