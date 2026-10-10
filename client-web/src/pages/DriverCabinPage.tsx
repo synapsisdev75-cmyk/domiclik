@@ -35,6 +35,7 @@ import { LiveTripMap } from '../components/LiveTripMap';
 import {
   buildGoogleMapsAbRouteUrl,
   buildGoogleMapsNavigateToUrl,
+  navStop,
   openGoogleMapsNav,
 } from '../lib/googleMapsNav';
 import {
@@ -66,6 +67,8 @@ import {
   rankPosition,
   readPreRouteChecklist,
   sendCabinChatMessage,
+  setRadioUnread,
+  bumpRadioUnread,
   subscribeCabinChat,
   tipOfTheDay,
   whatsAppKindForStatus,
@@ -189,6 +192,7 @@ export function DriverCabinPage() {
 
   const [chatMsgs, setChatMsgs] = useState<CabinChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [radioLive, setRadioLive] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [checkState, setCheckState] = useState<Record<string, boolean>>({});
@@ -259,6 +263,8 @@ export function DriverCabinPage() {
   const shiftWarnedRef = useRef(false);
   const knownOpenIdsRef = useRef<Set<string> | null>(null);
   const chatPrimedRef = useRef(false);
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   const lastChatIdRef = useRef<string | null>(null);
 
   const activeOrder =
@@ -361,23 +367,33 @@ export function DriverCabinPage() {
     chatPrimedRef.current = false;
     lastChatIdRef.current = null;
     const chatId = `chat_${driver.id}`;
-    return subscribeCabinChat(chatId, (msgs) => {
-      setChatMsgs(msgs);
-      if (!msgs.length) return;
-      const last = msgs[msgs.length - 1];
-      if (!chatPrimedRef.current) {
-        chatPrimedRef.current = true;
-        lastChatIdRef.current = last.id;
-        return;
-      }
-      if (last.id !== lastChatIdRef.current) {
-        lastChatIdRef.current = last.id;
-        if (last.senderRole !== 'driver') {
-          alertNewMessage();
+    return subscribeCabinChat(
+      chatId,
+      (msgs) => {
+        setChatMsgs(msgs);
+        setRadioLive(true);
+        if (!msgs.length) return;
+        const last = msgs[msgs.length - 1];
+        if (!chatPrimedRef.current) {
+          chatPrimedRef.current = true;
+          lastChatIdRef.current = last.id;
+          return;
         }
-      }
-    });
+        if (last.id !== lastChatIdRef.current) {
+          lastChatIdRef.current = last.id;
+          if (last.senderRole !== 'driver') {
+            alertNewMessage();
+            if (tabRef.current !== 'radio') bumpRadioUnread();
+          }
+        }
+      },
+      setRadioLive,
+    );
   }, [driver?.id, driver?.status]);
+
+  useEffect(() => {
+    if (tab === 'radio') setRadioUnread(0);
+  }, [tab]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -462,7 +478,7 @@ export function DriverCabinPage() {
       }
       if (!publish) return;
       const now = Date.now();
-      if (now - lastGpsSent.current < 4000) return;
+      if (now - lastGpsSent.current < 2500) return;
       lastGpsSent.current = now;
       const fix = {
         driverId,
@@ -486,7 +502,9 @@ export function DriverCabinPage() {
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => applyFix(pos, true),
-      () => setGpsLiveOk(false),
+      (err) => {
+        if (err.code === 1) setGpsLiveOk(false);
+      },
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 },
     );
 
@@ -561,7 +579,9 @@ export function DriverCabinPage() {
       setErr('Sin coordenadas de recogida y entrega. Central debe marcarlas en el mapa.');
       return;
     }
-    const dest = goingToPickup(order.status) ? order.pickupCoords : order.deliveryCoords;
+    const dest = goingToPickup(order.status)
+      ? navStop(order.pickupCoords, order.pickupAddress, order.pickupPlaceId)
+      : navStop(order.deliveryCoords, order.deliveryAddress, order.deliveryPlaceId);
     openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest, liveCoords));
   }
 
@@ -600,7 +620,10 @@ export function DriverCabinPage() {
         order.pickupCoords &&
         order.deliveryCoords
       ) {
-        const dest = next === 'en_route_origin' ? order.pickupCoords : order.deliveryCoords;
+        const dest =
+          next === 'en_route_origin'
+            ? navStop(order.pickupCoords, order.pickupAddress, order.pickupPlaceId)
+            : navStop(order.deliveryCoords, order.deliveryAddress, order.deliveryPlaceId);
         openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest, liveCoords));
         setTab('mapa');
       }
@@ -1017,7 +1040,7 @@ export function DriverCabinPage() {
           [
             { id: 'hoy' as const, label: 'Pedidos', icon: ClipboardList },
             { id: 'mapa' as const, label: 'Mapa', icon: MapIcon },
-            { id: 'radio' as const, label: 'Chat', icon: MessageCircle },
+            { id: 'radio' as const, label: 'Radio', icon: Radio },
             { id: 'perfil' as const, label: 'Perfil', icon: UserRound },
           ] as const
         ).map(({ id, label, icon: Icon }) => (
@@ -1256,8 +1279,16 @@ export function DriverCabinPage() {
                         onClick={() => {
                           openGoogleMapsNav(
                             buildGoogleMapsAbRouteUrl(
-                              activeOrder.pickupCoords!,
-                              activeOrder.deliveryCoords!,
+                              navStop(
+                                activeOrder.pickupCoords!,
+                                activeOrder.pickupAddress,
+                                activeOrder.pickupPlaceId,
+                              ),
+                              navStop(
+                                activeOrder.deliveryCoords!,
+                                activeOrder.deliveryAddress,
+                                activeOrder.deliveryPlaceId,
+                              ),
                               true,
                             ),
                           );
@@ -1508,10 +1539,12 @@ export function DriverCabinPage() {
           <div className="rounded-2xl border border-[var(--domi-border)] bg-[var(--domi-panel)] p-4">
             <h2 className="flex items-center gap-2 font-display text-base font-bold text-white">
               <Radio className="h-4 w-4 text-[var(--domi-cyan)]" />
-              Radio con Central
+              Radio con la torre
             </h2>
             <p className="mt-1 text-[11px] text-[var(--domi-muted)]">
-              Misma sala que ve la torre de control. Respuestas rápidas abajo.
+              {radioLive
+                ? 'Canal directo y en vivo. Lo que escribas llega a Radios en la torre de control.'
+                : 'Reconectando el radio con la torre…'}
             </p>
           </div>
 
@@ -1568,7 +1601,7 @@ export function DriverCabinPage() {
               className="field-input flex-1 text-sm"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Escribe a Central…"
+              placeholder="Mensaje a la torre…"
               disabled={chatBusy}
             />
             <button type="submit" disabled={chatBusy || !chatInput.trim()} className="cta-primary shrink-0 !px-3">
@@ -2088,6 +2121,17 @@ export function DriverCabinPage() {
             alt="Detalle"
             className="max-h-[85vh] max-w-full rounded-xl border border-white/20 object-contain"
           />
+        </button>
+      ) : null}
+
+      {tab !== 'radio' ? (
+        <button
+          type="button"
+          onClick={() => setTab('radio')}
+          className="fixed bottom-32 left-4 z-[60] inline-flex items-center gap-2 rounded-2xl border-2 border-cyan-200 bg-[#00E5FF] px-3.5 py-3 text-[11px] font-black uppercase tracking-wide text-black shadow-[0_0_24px_rgba(0,229,255,0.45)] sm:bottom-8"
+        >
+          <Radio className="h-4 w-4" />
+          Radio
         </button>
       ) : null}
 

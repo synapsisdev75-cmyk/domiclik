@@ -50,7 +50,9 @@ export type DriverOrder = {
   customerPhone?: string;
   customerPhotoURL?: string;
   pickupAddress?: string;
+  pickupPlaceId?: string;
   deliveryAddress?: string;
+  deliveryPlaceId?: string;
   pickupCoords?: LatLng | null;
   deliveryCoords?: LatLng | null;
   description?: string;
@@ -86,7 +88,9 @@ function mapOrderDoc(id: string, data: Record<string, unknown>): DriverOrder {
     customerPhone: data.customerPhone ? String(data.customerPhone) : undefined,
     customerPhotoURL: data.customerPhotoURL ? String(data.customerPhotoURL) : undefined,
     pickupAddress: data.pickupAddress ? String(data.pickupAddress) : undefined,
+    pickupPlaceId: data.pickupPlaceId ? String(data.pickupPlaceId) : undefined,
     deliveryAddress: data.deliveryAddress ? String(data.deliveryAddress) : undefined,
+    deliveryPlaceId: data.deliveryPlaceId ? String(data.deliveryPlaceId) : undefined,
     pickupCoords: parseLatLng(data.pickupCoords),
     deliveryCoords: parseLatLng(data.deliveryCoords),
     description: data.description ? String(data.description) : undefined,
@@ -305,6 +309,32 @@ export function subscribeDriverOrders(
 }
 
 /** Publica GPS del motorizado para que el cliente vea el desplazamiento. */
+const openOrderIdsCache = new Map<string, { ids: string[]; at: number }>();
+
+async function mirrorDriverLiveOntoOrders(
+  driverId: string,
+  live: { lat: number; lng: number; heading: number; updatedAt: string },
+) {
+  const now = Date.now();
+  let cached = openOrderIdsCache.get(driverId);
+  if (!cached || now - cached.at > 8000) {
+    const snap = await getDocs(
+      query(collection(db, 'orders'), where('assignedDriverId', '==', driverId)),
+    );
+    const ids: string[] = [];
+    snap.forEach((docSnap) => {
+      const status = String(docSnap.data().status || '');
+      if (status === 'delivered' || status === 'cancelled' || status === 'pending') return;
+      ids.push(docSnap.id);
+    });
+    cached = { ids, at: now };
+    openOrderIdsCache.set(driverId, cached);
+  }
+  await Promise.all(
+    cached.ids.map((id) => updateDoc(doc(db, 'orders', id), { driverLive: live })),
+  );
+}
+
 export async function publishDriverLiveLocation(params: {
   driverId: string;
   lat: number;
@@ -312,6 +342,12 @@ export async function publishDriverLiveLocation(params: {
   heading?: number;
 }): Promise<boolean> {
   const updatedAt = new Date().toISOString();
+  const live = {
+    lat: params.lat,
+    lng: params.lng,
+    heading: params.heading || 0,
+    updatedAt,
+  };
   try {
     await withTimeout(
       updateDoc(doc(db, 'drivers', params.driverId), {
@@ -326,6 +362,9 @@ export async function publishDriverLiveLocation(params: {
         updatedAt,
       }),
     );
+    void mirrorDriverLiveOntoOrders(params.driverId, live).catch(() => {
+      openOrderIdsCache.delete(params.driverId);
+    });
     noteNetworkResult(true);
     return true;
   } catch {
@@ -589,21 +628,21 @@ export const DRIVER_STATUS_LABEL: Record<string, string> = {
 };
 
 export const DRIVER_NEXT_STATUS: Record<string, string | null> = {
-  assigned: 'accepted',
-  accepted: 'en_route_origin',
-  en_route_origin: 'at_origin',
-  at_origin: 'picked_up',
+  assigned: 'in_transit',
+  accepted: 'in_transit',
+  en_route_origin: 'in_transit',
+  at_origin: 'in_transit',
   picked_up: 'in_transit',
   in_transit: 'at_destination',
   at_destination: null, // PIN
 };
 
 export const DRIVER_NEXT_LABEL: Record<string, string> = {
-  assigned: 'Aceptar servicio',
-  accepted: 'Iniciar ruta al origen',
-  en_route_origin: 'Llegué al origen',
+  assigned: 'Confirmar recogida',
+  accepted: 'Confirmar recogida',
+  en_route_origin: 'Confirmar recogida',
   at_origin: 'Confirmar recogida',
-  picked_up: 'Iniciar entrega al destino',
+  picked_up: 'Confirmar recogida',
   in_transit: 'Llegué al destino',
 };
 

@@ -213,9 +213,15 @@ export function TrackingPage() {
                   status={status || undefined}
                   heightClass="h-56 sm:h-72"
                 />
-                {status !== 'pending' && status !== 'delivered' && !data.driverLocation ? (
+                {status !== 'pending' && status !== 'delivered' ? (
                   <p className="border-t border-[var(--domi-border)] px-3 py-2 text-xs text-[var(--domi-muted)]">
-                    Esperando ubicación del repartidor…
+                    {data.driverLocation
+                      ? `En vivo${
+                          data.driverLocation.updatedAt
+                            ? ` · ${new Date(data.driverLocation.updatedAt).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                            : ''
+                        }`
+                      : 'Esperando ubicación del repartidor…'}
                   </p>
                 ) : null}
               </div>

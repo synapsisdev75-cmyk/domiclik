@@ -101,6 +101,11 @@ export function summarizeDriverShift(
   const inAt = firstIn?.at || mine.find((p) => p.type === 'in')?.at;
   const outAt = lastOut?.at || [...mine].reverse().find((p) => p.type === 'out')?.at;
   const hoursWorked = hoursBetween(inAt, outAt);
+  const lastIn = [...mine].reverse().find((p) => p.type === 'in');
+  const closedAfterLastIn = Boolean(
+    lastIn &&
+      mine.some((p) => p.type === 'out' && new Date(p.at).getTime() > new Date(lastIn.at).getTime()),
+  );
 
   return {
     driverId,
@@ -124,7 +129,7 @@ export function summarizeDriverShift(
     motoCatalogId: fuelCalc?.motoCatalogId,
     photoInUrl: firstIn?.odometerPhotoUrl,
     photoOutUrl: lastOut?.odometerPhotoUrl,
-    open: Boolean(inAt) && !outAt,
+    open: Boolean(lastIn) && !closedAfterLastIn,
   };
 }
 

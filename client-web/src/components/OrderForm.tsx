@@ -8,7 +8,7 @@ import { rememberRecentOrder } from '../lib/recentOrders';
 import {
   estimateRoute,
   estimateRouteWithGoogle,
-  reverseGeocode,
+  reverseGeocodePlace,
   coordsTooClose,
   type LatLng,
 } from '../lib/geo';
@@ -101,6 +101,8 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
   });
   const [pickup, setPickup] = useState<LatLng | null>(null);
   const [delivery, setDelivery] = useState<LatLng | null>(null);
+  const [pickupPlaceId, setPickupPlaceId] = useState('');
+  const [deliveryPlaceId, setDeliveryPlaceId] = useState('');
   const [pickupParts, setPickupParts] = useState<AddressParts>({ ...EMPTY_ADDRESS_PARTS });
   const [deliveryParts, setDeliveryParts] = useState<AddressParts>({ ...EMPTY_ADDRESS_PARTS });
   const [pickupMapAnchored, setPickupMapAnchored] = useState(false);
@@ -259,12 +261,26 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
 
   function applyPickupParts(parts: AddressParts) {
     setPickupParts(parts);
+    setPickupPlaceId('');
     update('pickupAddress', composeFullAddress(parts));
   }
 
   function applyDeliveryParts(parts: AddressParts) {
     setDeliveryParts(parts);
+    setDeliveryPlaceId('');
     update('deliveryAddress', composeFullAddress(parts));
+  }
+
+  function lockPickupAddress(label: string, placeId?: string) {
+    setPickupPlaceId(placeId || '');
+    setValues((v) => ({ ...v, pickupAddress: label }));
+    setPickupParts((prev) => partsFromFullAddress(label, prev.general));
+  }
+
+  function lockDeliveryAddress(label: string, placeId?: string) {
+    setDeliveryPlaceId(placeId || '');
+    setValues((v) => ({ ...v, deliveryAddress: label }));
+    setDeliveryParts((prev) => partsFromFullAddress(label, prev.general));
   }
 
   const onMapPick = useCallback(
@@ -275,22 +291,14 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       if (pickMode === 'pickup') {
         setPickup(point);
         setPickupMapAnchored(true);
-        void reverseGeocode(point.lat, point.lng).then((label) => {
-          setPickupParts((prev) => {
-            const next = partsFromFullAddress(label, prev.general);
-            setValues((v) => ({ ...v, pickupAddress: composeFullAddress(next) || label }));
-            return next;
-          });
+        void reverseGeocodePlace(point.lat, point.lng).then((hit) => {
+          lockPickupAddress(hit.label, hit.placeId);
         });
       } else if (pickMode === 'delivery') {
         setDelivery(point);
         setDeliveryMapAnchored(true);
-        void reverseGeocode(point.lat, point.lng).then((label) => {
-          setDeliveryParts((prev) => {
-            const next = partsFromFullAddress(label, prev.general);
-            setValues((v) => ({ ...v, deliveryAddress: composeFullAddress(next) || label }));
-            return next;
-          });
+        void reverseGeocodePlace(point.lat, point.lng).then((hit) => {
+          lockDeliveryAddress(hit.label, hit.placeId);
         });
       }
     },
@@ -309,12 +317,8 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
     setPickMode('pickup');
     setPickup(point);
     setPickupMapAnchored(true);
-    void reverseGeocode(point.lat, point.lng).then((label) => {
-      setPickupParts((prev) => {
-        const next = partsFromFullAddress(label, prev.general);
-        setValues((v) => ({ ...v, pickupAddress: composeFullAddress(next) || label }));
-        return next;
-      });
+    void reverseGeocodePlace(point.lat, point.lng).then((hit) => {
+      lockPickupAddress(hit.label, hit.placeId);
     });
   }, []);
 
@@ -324,12 +328,8 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
     setPickMode('delivery');
     setDelivery(point);
     setDeliveryMapAnchored(true);
-    void reverseGeocode(point.lat, point.lng).then((label) => {
-      setDeliveryParts((prev) => {
-        const next = partsFromFullAddress(label, prev.general);
-        setValues((v) => ({ ...v, deliveryAddress: composeFullAddress(next) || label }));
-        return next;
-      });
+    void reverseGeocodePlace(point.lat, point.lng).then((hit) => {
+      lockDeliveryAddress(hit.label, hit.placeId);
     });
   }, []);
 
@@ -443,9 +443,11 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
         pickupAddress: values.pickupAddress.trim(),
         pickupLat: pickup.lat,
         pickupLng: pickup.lng,
+        pickupPlaceId: pickupPlaceId || undefined,
         deliveryAddress: values.deliveryAddress.trim(),
         deliveryLat: delivery.lat,
         deliveryLng: delivery.lng,
+        deliveryPlaceId: deliveryPlaceId || undefined,
         description: values.description.trim() || undefined,
         notes: values.notes.trim() || undefined,
         declaredValue: declared,
@@ -627,13 +629,21 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
             onDeliveryPartsChange={applyDeliveryParts}
             pickupAddress={values.pickupAddress}
             deliveryAddress={values.deliveryAddress}
-            onPickupAddressChange={(v) => update('pickupAddress', v)}
-            onDeliveryAddressChange={(v) => update('deliveryAddress', v)}
+            onPickupAddressChange={(v) => {
+              update('pickupAddress', v);
+              setPickupPlaceId('');
+            }}
+            onDeliveryAddressChange={(v) => {
+              update('deliveryAddress', v);
+              setDeliveryPlaceId('');
+            }}
             onPickupPicked={(hit) => {
               draggingRef.current = false;
               setPinDragging(false);
               setPickMode('pickup');
               setPickup({ lat: hit.lat, lng: hit.lng });
+              setPickupPlaceId(hit.placeId || '');
+              if (hit.label) update('pickupAddress', hit.label);
               setError(null);
             }}
             onDeliveryPicked={(hit) => {
@@ -641,6 +651,8 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
               setPinDragging(false);
               setPickMode('delivery');
               setDelivery({ lat: hit.lat, lng: hit.lng });
+              setDeliveryPlaceId(hit.placeId || '');
+              if (hit.label) update('deliveryAddress', hit.label);
               setError(null);
             }}
             pickup={pickup}

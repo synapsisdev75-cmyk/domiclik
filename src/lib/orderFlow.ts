@@ -38,13 +38,13 @@ export type DriverStepAction = {
   label: string;
 };
 
-/** Flujo matriz: Aceptar → Iniciar ruta → Llegué origen → Recogida → Iniciar entrega → Llegué destino */
+/** Confirmar recogida activa la entrega (in_transit). Luego: llegué al destino → PIN. */
 export const DRIVER_NEXT_ACTION: Partial<Record<OrderStatus, DriverStepAction>> = {
-  assigned: { next: 'accepted', label: 'Aceptar servicio' },
-  accepted: { next: 'en_route_origin', label: 'Iniciar ruta' },
-  en_route_origin: { next: 'at_origin', label: 'Llegué al origen' },
-  at_origin: { next: 'picked_up', label: 'Confirmar recogida' },
-  picked_up: { next: 'in_transit', label: 'Iniciar entrega' },
+  assigned: { next: 'in_transit', label: 'Confirmar recogida' },
+  accepted: { next: 'in_transit', label: 'Confirmar recogida' },
+  en_route_origin: { next: 'in_transit', label: 'Confirmar recogida' },
+  at_origin: { next: 'in_transit', label: 'Confirmar recogida' },
+  picked_up: { next: 'in_transit', label: 'Confirmar recogida' },
   in_transit: { next: 'at_destination', label: 'Llegué al destino' },
 };
 

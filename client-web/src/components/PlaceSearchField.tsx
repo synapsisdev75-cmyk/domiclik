@@ -356,7 +356,9 @@ export function PlaceSearchField({
       }
       skipSearch.current = true;
       onUnlockMapPin?.();
-      const clean = formatMapsStyleAddress(hit.label);
+      const clean = hit.placeId
+        ? hit.label.replace(/,?\s*colombia\s*$/i, '').trim()
+        : formatMapsStyleAddress(hit.label);
       setDraft(clean);
       if (writeBackLabel) onQueryChange(clean);
       onPlacePicked({ ...hit, label: clean });
@@ -414,7 +416,9 @@ export function PlaceSearchField({
         return;
       }
       skipSearch.current = true;
-      const clean = formatMapsStyleAddress(hit.label);
+      const clean = hit.placeId
+        ? hit.label.replace(/,?\s*colombia\s*$/i, '').trim()
+        : formatMapsStyleAddress(hit.label);
       setDraft(clean);
       if (writeBackLabel) onQueryChange(clean);
       onPlacePicked({ ...hit, label: clean });

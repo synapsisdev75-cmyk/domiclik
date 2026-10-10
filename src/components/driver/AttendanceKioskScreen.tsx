@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AttendancePunch, MotorizadoDriver } from '../../types';
 import {
   connectFirestore,
@@ -34,6 +34,7 @@ import {
   Smartphone,
   Tablet,
   UserRound,
+  ImagePlus,
 } from 'lucide-react';
 import { BrandLogo } from '../brand/BrandAssets';
 import {
@@ -60,6 +61,166 @@ export function attendanceKioskUrl(): string {
 }
 
 type KioskStep = 'pick' | 'face' | 'punch' | 'salida' | 'done';
+
+/** Cámara frontal de la tablet o una foto ya guardada en la galería. */
+function FrontFaceCamera({
+  preview,
+  onCapture,
+  onRetake,
+}: {
+  preview: string | null;
+  onCapture: (file: File, previewUrl: string) => void;
+  onRetake: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (preview) return;
+    let cancelled = false;
+    async function start() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('Esta tablet no abrió la cámara. Puedes elegir la foto en la galería.');
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef.current = stream;
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          await video.play();
+        }
+        setReady(true);
+      } catch {
+        setError('Permite la cámara frontal o elige la foto en la galería.');
+      }
+    }
+    void start();
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
+  }, [preview]);
+
+  function useFile(file: File | null) {
+    if (!file) return;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    onCapture(file, URL.createObjectURL(file));
+  }
+
+  function shoot() {
+    const video = videoRef.current;
+    if (!video?.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        useFile(new File([blob], `rostro-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      },
+      'image/jpeg',
+      0.9,
+    );
+  }
+
+  const galleryInput = (
+    <input
+      ref={galleryRef}
+      type="file"
+      accept="image/*"
+      className="hidden"
+      onChange={(e) => {
+        useFile(e.target.files?.[0] || null);
+        e.target.value = '';
+      }}
+    />
+  );
+
+  if (preview) {
+    return (
+      <div className="space-y-3">
+        <img
+          src={preview}
+          alt="Foto de rostro"
+          className="max-h-72 w-full rounded-xl border border-[#1a2744] object-cover"
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={onRetake}
+            className="rounded-xl border border-[#1a2744] py-3 text-sm font-bold text-white"
+          >
+            Repetir con cámara
+          </button>
+          <button
+            type="button"
+            onClick={() => galleryRef.current?.click()}
+            className="flex items-center justify-center gap-1.5 rounded-xl border border-[#1a2744] py-3 text-sm font-bold text-white"
+          >
+            <ImagePlus className="h-4 w-4" />
+            Galería
+          </button>
+        </div>
+        {galleryInput}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="relative overflow-hidden rounded-xl border border-[#1a2744] bg-black">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="aspect-[3/4] max-h-80 w-full object-cover [transform:scaleX(-1)]"
+        />
+        {!ready && !error ? (
+          <p className="absolute inset-0 flex items-center justify-center text-sm text-white">
+            Abriendo cámara frontal…
+          </p>
+        ) : null}
+      </div>
+      {error ? <p className="text-xs text-amber-300">{error}</p> : null}
+      <button
+        type="button"
+        disabled={!ready}
+        onClick={shoot}
+        className="flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl bg-[#2B6CFF] py-4 text-sm font-black text-white disabled:opacity-50"
+      >
+        <Camera className="h-5 w-5" />
+        Tomar foto
+      </button>
+      <button
+        type="button"
+        onClick={() => galleryRef.current?.click()}
+        className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl border border-[#2B6CFF] py-3 text-sm font-black text-white"
+      >
+        <ImagePlus className="h-5 w-5" />
+        Elegir de la galería
+      </button>
+      {galleryInput}
+    </div>
+  );
+}
 
 export const AttendanceKioskScreen: React.FC = () => {
   const [drivers, setDrivers] = useState<MotorizadoDriver[]>([]);
@@ -434,17 +595,23 @@ export const AttendanceKioskScreen: React.FC = () => {
                         </div>
                       </div>
                       <div className="mt-auto">
-                        <span
-                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
-                            shift.open
-                              ? 'text-amber-300 border-amber-500/40'
-                              : shift.inAt
-                                ? 'text-slate-400 border-slate-600/40'
-                                : 'text-slate-500 border-slate-700/40'
-                          }`}
-                        >
-                          {shift.open ? 'EN TURNO' : shift.inAt ? 'CERRADO' : 'SIN MARCA'}
-                        </span>
+                        {(() => {
+                          const onDuty = Boolean(driver.isActive) || shift.open;
+                          const label = onDuty ? 'ACTIVO' : shift.inAt ? 'CERRADO' : 'SIN MARCA';
+                          return (
+                            <span
+                              className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                                onDuty
+                                  ? 'text-[#00E676] border-[#00E676]/40'
+                                  : shift.inAt
+                                    ? 'text-slate-400 border-slate-600/40'
+                                    : 'text-slate-500 border-slate-700/40'
+                              }`}
+                            >
+                              {label}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </button>
                   );
@@ -633,22 +800,21 @@ export const AttendanceKioskScreen: React.FC = () => {
                   <span className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
                     <Camera className="w-4 h-4" /> Tu foto de salida *
                   </span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="user"
-                    className="w-full text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-[#00E5FF] file:px-4 file:py-3 file:text-sm file:font-black file:text-black"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] || null;
+                  <FrontFaceCamera
+                    preview={facePreview}
+                    onCapture={(file, url) => {
                       if (facePreview) URL.revokeObjectURL(facePreview);
                       setFaceFile(file);
-                      setFacePreview(file ? URL.createObjectURL(file) : null);
+                      setFacePreview(url);
+                      setMsg('');
+                    }}
+                    onRetake={() => {
+                      if (facePreview) URL.revokeObjectURL(facePreview);
+                      setFaceFile(null);
+                      setFacePreview(null);
                     }}
                   />
                 </label>
-                {facePreview ? (
-                  <img src={facePreview} alt="Foto de salida" className="max-h-44 w-full rounded-xl object-cover" />
-                ) : null}
                 <label className="block">
                   <span className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase text-slate-400">
                     <Gauge className="w-4 h-4" /> Kilometraje del tablero *
@@ -700,32 +866,20 @@ export const AttendanceKioskScreen: React.FC = () => {
                   Tómate una foto de rostro clara.{' '}
                   <strong className="text-white">Sin esta foto no se revela el PIN</strong> del día.
                 </p>
-                <label className="block">
-                  <span className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
-                    <Camera className="w-4 h-4" />
-                    Cámara frontal
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="user"
-                    className="w-full text-sm text-slate-300 file:mr-3 file:py-3 file:px-4 file:rounded-xl file:border-0 file:bg-[#2B6CFF] file:text-white file:text-sm file:font-black"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] || null;
-                      if (facePreview) URL.revokeObjectURL(facePreview);
-                      setFaceFile(file);
-                      setFacePreview(file ? URL.createObjectURL(file) : null);
-                      setMsg('');
-                    }}
-                  />
-                </label>
-                {facePreview && (
-                  <img
-                    src={facePreview}
-                    alt="Vista previa rostro"
-                    className="w-full max-h-56 object-cover rounded-xl border border-[#1a2744]"
-                  />
-                )}
+                <FrontFaceCamera
+                  preview={facePreview}
+                  onCapture={(file, url) => {
+                    if (facePreview) URL.revokeObjectURL(facePreview);
+                    setFaceFile(file);
+                    setFacePreview(url);
+                    setMsg('');
+                  }}
+                  onRetake={() => {
+                    if (facePreview) URL.revokeObjectURL(facePreview);
+                    setFaceFile(null);
+                    setFacePreview(null);
+                  }}
+                />
                 <button
                   type="button"
                   disabled={busy || !faceFile}

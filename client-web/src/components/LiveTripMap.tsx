@@ -87,6 +87,21 @@ function FocusDriver({ driver, focusSeq }: { driver?: LatLng | null; focusSeq: n
   return null;
 }
 
+function FollowLive({ driver }: { driver?: LatLng | null }) {
+  const map = useMap();
+  const seen = useRef('');
+  useEffect(() => {
+    if (!map || !driver) return;
+    const key = `${driver.lat.toFixed(5)},${driver.lng.toFixed(5)}`;
+    if (seen.current === key) return;
+    const first = seen.current === '';
+    seen.current = key;
+    map.panTo(driver);
+    if (first) map.setZoom(16);
+  }, [map, driver]);
+  return null;
+}
+
 function FitBounds({ points, paused }: { points: LatLng[]; paused?: boolean }) {
   const map = useMap();
   useEffect(() => {
@@ -207,12 +222,16 @@ export function LiveTripMap({
     };
   }, [approachKey, pickupLat, pickupLng]);
 
+  const closed = status === 'delivered' || status === 'cancelled';
+
   const deliveryPath = useMemo(() => {
-    if (!pickup || !delivery) return [];
+    if (closed || !pickup || !delivery) return [];
     const full = street && street.length >= 2 ? street : [pickup, delivery];
     if (onDelivery && driver) return remainingRoute(full, driver);
+    if (goingToPickup) return full;
+    if (driver) return remainingRoute(full, driver);
     return full;
-  }, [pickup, delivery, driver, street, onDelivery]);
+  }, [closed, pickup, delivery, driver, street, onDelivery, goingToPickup]);
 
   const pickupPath = useMemo(() => {
     if (!goingToPickup || !driver || !pickup) return [];
@@ -247,7 +266,8 @@ export function LiveTripMap({
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
         >
           <StretchMap />
-          <FitBounds points={points} paused={focusSeq > 0} />
+          <FitBounds points={points} paused={focusSeq > 0 || Boolean(driver)} />
+          <FollowLive driver={driver} />
           <FocusDriver driver={driver} focusSeq={focusSeq} />
           <RoadLine path={deliveryPath} color="#00E5FF" />
           <RoadLine path={pickupPath} color="#7CB518" />
@@ -262,7 +282,11 @@ export function LiveTripMap({
             </AdvancedMarker>
           ) : null}
           {driver ? (
-            <AdvancedMarker position={driver} title="Repartidor">
+            <AdvancedMarker
+              key={`${driver.lat.toFixed(5)},${driver.lng.toFixed(5)}`}
+              position={driver}
+              title="Repartidor"
+            >
               <div className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-[#00E676] text-sm shadow-[0_0_12px_rgba(0,230,118,0.6)]">
                 🛵
               </div>

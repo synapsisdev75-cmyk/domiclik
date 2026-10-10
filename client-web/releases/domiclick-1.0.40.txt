@@ -1,0 +1,7 @@
+DomiClick 1.0.40 (versionCode 41)
+
+Novedades
+- La cabina del transportista tiene radio directo con la torre de control, siempre visible y en vivo.
+- La navegación de Google Maps abre la misma dirección guardada en DomiClick.
+- El seguimiento del cliente se mueve con el GPS del repartidor.
+- Confirmar recogida activa la entrega.

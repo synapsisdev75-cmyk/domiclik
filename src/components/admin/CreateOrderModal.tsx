@@ -25,6 +25,8 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [pickupCoords, setPickupCoords] = useState({ lat: 4.142, lng: -73.6266 });
   const [deliveryCoords, setDeliveryCoords] = useState({ lat: 4.142, lng: -73.6266 });
+  const [pickupPlaceId, setPickupPlaceId] = useState('');
+  const [deliveryPlaceId, setDeliveryPlaceId] = useState('');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -40,6 +42,8 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     setDescription('');
     setPickupCoords({ lat: 4.142, lng: -73.6266 });
     setDeliveryCoords({ lat: 4.142, lng: -73.6266 });
+    setPickupPlaceId('');
+    setDeliveryPlaceId('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -66,6 +70,8 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         status: 'pending',
         assignedDriverId: null,
         assignedDriverName: null,
+        pickupPlaceId: pickupPlaceId || undefined,
+        deliveryPlaceId: deliveryPlaceId || undefined,
         pickupCoords: {
           lat: pickupCoords.lat,
           lng: pickupCoords.lng,
@@ -185,10 +191,14 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
             required
             value={pickupAddress}
             placeholder="Restaurante, heladería, comercio…"
-            onQueryChange={setPickupAddress}
+            onQueryChange={(value) => {
+              setPickupAddress(value);
+              setPickupPlaceId('');
+            }}
             onPlacePicked={(hit) => {
               setPickupAddress(hit.label);
               setPickupCoords({ lat: hit.lat, lng: hit.lng });
+              setPickupPlaceId(hit.placeId || '');
             }}
           />
 
@@ -198,10 +208,14 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
             required
             value={deliveryAddress}
             placeholder="Negocio, barrio o dirección…"
-            onQueryChange={setDeliveryAddress}
+            onQueryChange={(value) => {
+              setDeliveryAddress(value);
+              setDeliveryPlaceId('');
+            }}
             onPlacePicked={(hit) => {
               setDeliveryAddress(hit.label);
               setDeliveryCoords({ lat: hit.lat, lng: hit.lng });
+              setDeliveryPlaceId(hit.placeId || '');
             }}
           />
 

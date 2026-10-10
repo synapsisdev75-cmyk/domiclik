@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Loader2, MapPin, Search } from 'lucide-react';
 import { VILLAVICENCIO_CENTER } from '../../data/villavicencio';
 
-export type OpsPlaceHit = { label: string; lat: number; lng: number };
+export type OpsPlaceHit = { label: string; lat: number; lng: number; placeId?: string };
 
 type Suggestion = {
   id: string;
@@ -139,7 +139,7 @@ async function resolvePlace(placeId: string, fallback: string): Promise<OpsPlace
   const host = document.createElement('div');
   const svc = new places.PlacesService(host);
   const details = await new Promise<google.maps.places.PlaceResult | null>((resolve) => {
-    svc.getDetails({ placeId, fields: ['geometry', 'formatted_address', 'name'] }, (place, status) => {
+    svc.getDetails({ placeId, fields: ['geometry', 'formatted_address', 'name', 'place_id'] }, (place, status) => {
       if (status !== places.PlacesServiceStatus.OK || !place?.geometry?.location) {
         resolve(null);
         return;
@@ -149,10 +149,14 @@ async function resolvePlace(placeId: string, fallback: string): Promise<OpsPlace
   });
   const loc = details?.geometry?.location;
   if (!loc) return null;
+  const label = (details.formatted_address || details.name || fallback)
+    .replace(/,?\s*colombia\s*$/i, '')
+    .trim();
   return {
     lat: loc.lat(),
     lng: loc.lng(),
-    label: details.formatted_address || details.name || fallback,
+    label,
+    placeId,
   };
 }
 
@@ -242,18 +246,20 @@ export function OpsPlaceSearch({
 
   async function pick(item: Suggestion) {
     setOpen(false);
-    if (item.lat != null && item.lng != null) {
-      skip.current = true;
-      onQueryChange(item.label);
-      onPlacePicked({ label: item.secondary ? `${item.label}, ${item.secondary}` : item.label, lat: item.lat, lng: item.lng });
-      return;
+    if (item.placeId) {
+      const hit = await resolvePlace(item.placeId, item.label);
+      if (hit) {
+        skip.current = true;
+        onQueryChange(hit.label);
+        onPlacePicked(hit);
+        return;
+      }
     }
-    if (!item.placeId) return;
-    const hit = await resolvePlace(item.placeId, item.label);
-    if (!hit) return;
+    if (item.lat == null || item.lng == null) return;
     skip.current = true;
-    onQueryChange(hit.label);
-    onPlacePicked(hit);
+    const label = item.secondary ? `${item.label}, ${item.secondary}` : item.label;
+    onQueryChange(label);
+    onPlacePicked({ label, lat: item.lat, lng: item.lng, placeId: item.placeId });
   }
 
   const dropdown =

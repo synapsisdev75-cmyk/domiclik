@@ -515,6 +515,33 @@ export async function toggleDriverActiveState(
   );
 }
 
+const openOrderIdsCache = new Map<string, { ids: string[]; at: number }>();
+
+/** Copia el GPS al pedido abierto para que el seguimiento del cliente se mueva con el mismo listener. */
+async function mirrorDriverLiveOntoOrders(
+  driverId: string,
+  live: { lat: number; lng: number; heading: number; updatedAt: string },
+) {
+  const now = Date.now();
+  let cached = openOrderIdsCache.get(driverId);
+  if (!cached || now - cached.at > 8000) {
+    const snap = await getDocs(
+      query(collection(db, 'orders'), where('assignedDriverId', '==', driverId)),
+    );
+    const ids: string[] = [];
+    snap.forEach((docSnap) => {
+      const status = String(docSnap.data().status || '');
+      if (status === 'delivered' || status === 'cancelled' || status === 'pending') return;
+      ids.push(docSnap.id);
+    });
+    cached = { ids, at: now };
+    openOrderIdsCache.set(driverId, cached);
+  }
+  await Promise.all(
+    cached.ids.map((id) => updateDoc(doc(db, 'orders', id), { driverLive: live })),
+  );
+}
+
 export async function updateDriverLocation(
   driverId: string,
   location: MotorizadoDriver['location'],
@@ -526,7 +553,16 @@ export async function updateDriverLocation(
     location,
     updatedAt: timestamp,
   });
-  await recordDriverLocationHistoryPoint({
+  const live = {
+    lat: location.lat,
+    lng: location.lng,
+    heading: location.heading || 0,
+    updatedAt: timestamp,
+  };
+  void mirrorDriverLiveOntoOrders(driverId, live).catch(() => {
+    openOrderIdsCache.delete(driverId);
+  });
+  void recordDriverLocationHistoryPoint({
     driverId,
     driverName: driverMeta?.fullName || 'Motorizado DomiClick',
     plateNumber: driverMeta?.plateNumber || '',
@@ -536,7 +572,7 @@ export async function updateDriverLocation(
     addressName: location.addressName || 'Villavicencio',
     timestamp,
     dateKey,
-  });
+  }).catch(() => undefined);
 }
 
 // ----------------- LOCATION HISTORY ----------------- //
@@ -1904,7 +1940,7 @@ export function subscribeAttendancePunches(
       const list: AttendancePunch[] = [];
       snapshot.forEach((docSnap) => {
         const data = { id: docSnap.id, ...docSnap.data() } as AttendancePunch;
-        if (!data.dateKey || data.dateKey === target) list.push(data);
+        if (toDateKey(data.at || '') === target || data.dateKey === target) list.push(data);
       });
       list.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
       callback(list);

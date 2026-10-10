@@ -167,6 +167,8 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
       customerUid: body.customerUid || '',
       customerPhotoURL: body.customerPhotoURL || '',
       pickupAddress: body.pickupAddress || 'Origen tienda / Bodega DomiClick',
+      pickupPlaceId: typeof body.pickupPlaceId === 'string' ? body.pickupPlaceId : '',
+      deliveryPlaceId: typeof body.deliveryPlaceId === 'string' ? body.deliveryPlaceId : '',
       pickupCoords: {
         lat: hasPickup ? pickupLat : 4.142,
         lng: hasPickup ? pickupLng : -73.6266,

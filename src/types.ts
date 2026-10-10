@@ -144,8 +144,11 @@ export interface DeliveryOrder {
   customerPhotoURL?: string;
   pickupAddress: string;
   pickupCoords: LocationCoords;
+  /** Place ID de Google. La navegación abre este mismo sitio. */
+  pickupPlaceId?: string;
   deliveryAddress: string;
   deliveryCoords: LocationCoords;
+  deliveryPlaceId?: string;
   description: string;
   itemType: 'documentos' | 'paquete_pequeno' | 'comida_medicamentos' | 'varios';
   declaredValue: number;

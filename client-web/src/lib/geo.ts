@@ -819,7 +819,7 @@ function formatPickedLabel(suggestion: PlaceSuggestion): string {
 export async function resolvePlaceSuggestion(
   suggestion: PlaceSuggestion,
   placesLib?: google.maps.PlacesLibrary,
-): Promise<(LatLng & { label: string }) | null> {
+): Promise<(LatLng & { label: string; placeId?: string }) | null> {
   // Siempre Place Details con placeId (coords de geocode/local pueden ser centroides).
   if (suggestion.placeId) {
     const places = placesFromLib(placesLib);
@@ -843,17 +843,19 @@ export async function resolvePlaceSuggestion(
         );
       });
       const loc = details?.geometry?.location;
-      if (loc) {
+        if (loc) {
         const lat = loc.lat();
         const lng = loc.lng();
         if (!isWithinServiceArea(lat, lng)) return null;
         const placePhoto = details.photos?.[0]?.getUrl?.({ maxWidth: 240, maxHeight: 240 });
+        const label = (details.formatted_address || details.name || suggestion.label)
+          .replace(/,?\s*colombia\s*$/i, '')
+          .trim();
         return {
           lat,
           lng,
-          label: formatMapsStyleAddress(
-            details.formatted_address || details.name || formatPickedLabel(suggestion),
-          ),
+          label,
+          placeId: suggestion.placeId,
           ...(placePhoto ? { photoUrl: placePhoto } : {}),
         };
       }
@@ -938,7 +940,7 @@ async function geocodeAddressNominatim(q: string): Promise<(LatLng & { label: st
 export async function geocodeAddress(
   query: string,
   placesLib?: google.maps.PlacesLibrary,
-): Promise<(LatLng & { label: string }) | null> {
+): Promise<(LatLng & { label: string; placeId?: string }) | null> {
   const typed = query.trim();
   const q = normalizeColombianQuery(typed);
   if (q.length < 3) return null;
@@ -1001,10 +1003,14 @@ export async function geocodeAddress(
           ranked.find((h) => h.lat != null) ||
           ranked[0];
     if (pick?.lat != null && pick.lng != null) {
+      const label = pick.placeId
+        ? pick.label.replace(/,?\s*colombia\s*$/i, '').trim()
+        : formatMapsStyleAddress(pick.label, pick.secondary);
       return {
         lat: pick.lat,
         lng: pick.lng,
-        label: formatMapsStyleAddress(pick.label, pick.secondary),
+        label,
+        placeId: pick.placeId,
       };
     }
   }
@@ -1030,7 +1036,10 @@ export async function geocodeAddress(
   return geocodeAddressNominatim(withCity);
 }
 
-export async function reverseGeocode(lat: number, lng: number): Promise<string> {
+export type LockedAddress = { label: string; placeId?: string };
+
+/** Dirección exacta de Google para el pin, con el place id que usa la navegación. */
+export async function reverseGeocodePlace(lat: number, lng: number): Promise<LockedAddress> {
   const g = (window as unknown as { google?: typeof google }).google?.maps;
   if (g?.Geocoder) {
     try {
@@ -1039,12 +1048,23 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string> 
       const ranked = [...(res.results || [])].sort(
         (a, b) => geocodeTypeRank(b.types) - geocodeTypeRank(a.types),
       );
-      const best = ranked[0]?.formatted_address || res.results?.[0]?.formatted_address;
-      if (best) return best;
+      const best = ranked[0] || res.results?.[0];
+      if (best?.formatted_address) {
+        return {
+          label: best.formatted_address.replace(/,?\s*colombia\s*$/i, '').trim(),
+          placeId: best.place_id,
+        };
+      }
     } catch {
       /* fallback nominatim */
     }
   }
+
+  const label = await reverseGeocodeNominatim(lat, lng);
+  return { label };
+}
+
+async function reverseGeocodeNominatim(lat: number, lng: number): Promise<string> {
 
   const url =
     'https://nominatim.openstreetmap.org/reverse?' +
@@ -1062,6 +1082,11 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string> 
   } catch {
     return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   }
+}
+
+export async function reverseGeocode(lat: number, lng: number): Promise<string> {
+  const hit = await reverseGeocodePlace(lat, lng);
+  return hit.label;
 }
 
 /** Distancia mínima entre recolección y entrega (~80 m). */

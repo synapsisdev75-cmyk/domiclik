@@ -38,6 +38,7 @@ import { parseOdometerKm, summarizeDriverShift } from '../../lib/workShift';
 import {
   buildGoogleMapsAbRouteUrl,
   buildGoogleMapsNavigateToUrl,
+  navStop,
   openGoogleMapsNav,
 } from '../../lib/googleMapsNav';
 
@@ -150,12 +151,16 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
         );
       },
       (err) => {
-        if (err.code === 1) setGpsPermission('denied');
-        setGpsLive(false);
+        if (err.code === 1) {
+          setGpsPermission('denied');
+          setGpsLive(false);
+          setGpsError(
+            'Ubicación bloqueada. En la barra de dirección → ícono de candado/info → Permisos → Ubicación → Permitir, y recarga.'
+          );
+          return;
+        }
         setGpsError(
-          err.code === 1
-            ? 'Ubicación bloqueada. En la barra de dirección → ícono de candado/info → Permisos → Ubicación → Permitir, y recarga.'
-            : 'No se pudo leer el GPS. Revisa señal o vuelve a pulsar «Activar ubicación».'
+          'GPS lento. Seguimos intentando para que la torre y el cliente vean el pin.'
         );
       },
       { enableHighAccuracy: true, maximumAge: 3000, timeout: 25000 }
@@ -185,7 +190,9 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
       return;
     }
 
-    // getCurrentPosition en respuesta al clic → dispara el popup de permiso
+    // El clic dispara el permiso. El watch publica el pin sin esperar el primer fix.
+    const safety = window.setTimeout(() => setIsUpdatingGps(false), 8000);
+    startGpsWatch();
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setGpsPermission('granted');
@@ -198,9 +205,11 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
           true
         );
         startGpsWatch();
+        window.clearTimeout(safety);
         setIsUpdatingGps(false);
       },
       (err) => {
+        window.clearTimeout(safety);
         setIsUpdatingGps(false);
         if (err.code === 1) {
           setGpsPermission('denied');
@@ -663,8 +672,16 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                     onClick={() =>
                       openGoogleMapsNav(
                         buildGoogleMapsAbRouteUrl(
-                          currentActiveOrder.pickupCoords,
-                          currentActiveOrder.deliveryCoords,
+                          navStop(
+                            currentActiveOrder.pickupCoords,
+                            currentActiveOrder.pickupAddress,
+                            currentActiveOrder.pickupPlaceId,
+                          ),
+                          navStop(
+                            currentActiveOrder.deliveryCoords,
+                            currentActiveOrder.deliveryAddress,
+                            currentActiveOrder.deliveryPlaceId,
+                          ),
                           true,
                         ),
                       )
@@ -683,8 +700,16 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                         'at_origin',
                       ].includes(currentActiveOrder.status);
                       const dest = goingToPickup
-                        ? currentActiveOrder.pickupCoords
-                        : currentActiveOrder.deliveryCoords;
+                        ? navStop(
+                            currentActiveOrder.pickupCoords,
+                            currentActiveOrder.pickupAddress,
+                            currentActiveOrder.pickupPlaceId,
+                          )
+                        : navStop(
+                            currentActiveOrder.deliveryCoords,
+                            currentActiveOrder.deliveryAddress,
+                            currentActiveOrder.deliveryPlaceId,
+                          );
                       openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest, liveCoords));
                     }}
                     className="border border-[#00E5FF]/40 bg-[#00E5FF]/10 text-[#00E5FF] font-extrabold px-3 py-3 rounded-xl text-xs flex items-center justify-center gap-1.5"
@@ -698,6 +723,39 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                   en el mapa para poder navegar.
                 </p>
               )}
+              {DRIVER_NEXT_ACTION[currentActiveOrder.status]?.label === 'Confirmar recogida' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const step = DRIVER_NEXT_ACTION[currentActiveOrder.status]!;
+                    void updateOrderStatus(
+                      currentActiveOrder.id,
+                      step.next,
+                      driver.id,
+                      driver.fullName
+                    ).then(() => {
+                      if (currentActiveOrder.deliveryCoords) {
+                        openGoogleMapsNav(
+                          buildGoogleMapsNavigateToUrl(
+                            navStop(
+                              currentActiveOrder.deliveryCoords,
+                              currentActiveOrder.deliveryAddress,
+                              currentActiveOrder.deliveryPlaceId,
+                            ),
+                            liveCoords,
+                          ),
+                        );
+                        setSelectedOrderIdForMap(currentActiveOrder.id);
+                        setActiveTab('map');
+                      }
+                    });
+                  }}
+                  className="w-full bg-emerald-500 text-black font-black px-5 py-4 rounded-2xl text-base flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-5 h-5" />
+                  Confirmar recogida
+                </button>
+              ) : null}
               <div className="flex flex-wrap justify-between gap-3 pt-2 border-t border-[#2d3139]">
                 <button
                   onClick={() => {
@@ -735,7 +793,8 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                 >
                   <AlertTriangle className="w-3.5 h-3.5" /> Reportar incidencia
                 </button>
-                {DRIVER_NEXT_ACTION[currentActiveOrder.status] && (
+                {DRIVER_NEXT_ACTION[currentActiveOrder.status] &&
+                  DRIVER_NEXT_ACTION[currentActiveOrder.status]!.label !== 'Confirmar recogida' && (
                   <button
                     onClick={() => {
                       const step = DRIVER_NEXT_ACTION[currentActiveOrder.status]!;
@@ -752,8 +811,16 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
                         ) {
                           const dest =
                             step.next === 'en_route_origin'
-                              ? currentActiveOrder.pickupCoords
-                              : currentActiveOrder.deliveryCoords;
+                              ? navStop(
+                                  currentActiveOrder.pickupCoords,
+                                  currentActiveOrder.pickupAddress,
+                                  currentActiveOrder.pickupPlaceId,
+                                )
+                              : navStop(
+                                  currentActiveOrder.deliveryCoords,
+                                  currentActiveOrder.deliveryAddress,
+                                  currentActiveOrder.deliveryPlaceId,
+                                );
                           openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest, liveCoords));
                           setSelectedOrderIdForMap(currentActiveOrder.id);
                           setActiveTab('map');
@@ -894,6 +961,37 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
               <X className="h-4 w-4" />
             </button>
           </div>
+          {currentActiveOrder &&
+          DRIVER_NEXT_ACTION[currentActiveOrder.status]?.label === 'Confirmar recogida' ? (
+            <button
+              type="button"
+              onClick={() => {
+                void updateOrderStatus(
+                  currentActiveOrder.id,
+                  'in_transit',
+                  driver.id,
+                  driver.fullName
+                ).then(() => {
+                  if (currentActiveOrder.deliveryCoords) {
+                    openGoogleMapsNav(
+                      buildGoogleMapsNavigateToUrl(
+                        navStop(
+                          currentActiveOrder.deliveryCoords,
+                          currentActiveOrder.deliveryAddress,
+                          currentActiveOrder.deliveryPlaceId,
+                        ),
+                        liveCoords,
+                      ),
+                    );
+                  }
+                });
+              }}
+              className="mx-3 mt-2 mb-1 inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-3.5 text-sm font-black text-black"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Confirmar recogida
+            </button>
+          ) : null}
           <div className="min-h-0 flex-1 md:min-h-[600px]">
             <MapComponent
               drivers={allDrivers}

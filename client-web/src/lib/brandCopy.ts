@@ -29,8 +29,8 @@ export const PUSH_MESSAGES = {
     body: 'Tu Domiclick está a pocos minutos de tu dirección. ¡Alístate para recibirlo!',
   },
   delivered: {
-    title: '¡Llegó Domiclick! 🎉',
-    body: 'Tu repartidor está afuera con tu pedido. ¡Gracias por confiar en nosotros y buen provecho!',
+    title: 'Pedido entregado',
+    body: 'Tu pedido ya se entregó. ¡Gracias por confiar en nosotros y buen provecho!',
   },
 } as const;
 

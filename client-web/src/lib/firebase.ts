@@ -761,6 +761,14 @@ function mapPublicOrder(docSnap: { id: string; data: () => Record<string, unknow
       data.paymentReviewStatus === 'pending_review'
         ? 'Central está revisando tu comprobante'
         : etaForStatus(status),
+    driverLocation: (() => {
+      const live = parseCoords(data.driverLive);
+      if (!live) return null;
+      const updatedAt = data.driverLive
+        ? String((data.driverLive as Record<string, unknown>).updatedAt || '') || undefined
+        : undefined;
+      return { ...live, updatedAt };
+    })(),
   };
 }
 
@@ -810,30 +818,42 @@ export function subscribeOrderTracking(
   let unsubOrder: Unsubscribe | null = null;
   let unsubDriver: Unsubscribe | null = null;
   let latest: PublicOrderTracking | null = null;
+  let listenedDriverId: string | null = null;
+
+  const fresher = (
+    current: PublicOrderTracking['driverLocation'],
+    incoming: PublicOrderTracking['driverLocation'],
+  ): PublicOrderTracking['driverLocation'] => {
+    if (!incoming) return current || null;
+    if (!current) return incoming;
+    const currentAt = Date.parse(current.updatedAt || '') || 0;
+    const incomingAt = Date.parse(incoming.updatedAt || '') || 0;
+    return incomingAt >= currentAt ? incoming : current;
+  };
 
   const stopDriver = () => {
     unsubDriver?.();
     unsubDriver = null;
+    listenedDriverId = null;
   };
 
   const attachDriver = (driverId: string | null) => {
-    stopDriver();
     if (!driverId) {
-      if (latest) {
+      stopDriver();
+      if (latest?.driverLocation) {
         latest = { ...latest, driverLocation: null };
         callback(latest);
       }
       return;
     }
+    if (listenedDriverId === driverId && unsubDriver) return;
+    stopDriver();
+    listenedDriverId = driverId;
     unsubDriver = onSnapshot(
       doc(db, 'drivers', driverId),
       (snap) => {
-        if (!latest) return;
-        if (!snap.exists()) {
-          latest = { ...latest, driverLocation: null };
-          callback(latest);
-          return;
-        }
+        if (!latest || listenedDriverId !== driverId) return;
+        if (!snap.exists()) return;
         const data = snap.data() as Record<string, unknown>;
         const loc = parseCoords(data.location);
         const updatedAt = data.location
@@ -841,7 +861,7 @@ export function subscribeOrderTracking(
           : undefined;
         latest = {
           ...latest,
-          driverLocation: loc ? { ...loc, updatedAt } : null,
+          driverLocation: fresher(latest.driverLocation, loc ? { ...loc, updatedAt } : null),
           assignedDriverName: data.fullName
             ? String(data.fullName)
             : latest.assignedDriverName,
@@ -865,10 +885,16 @@ export function subscribeOrderTracking(
         return;
       }
       const d = snap.docs[0];
-      latest = mapPublicOrder({
+      const mapped = mapPublicOrder({
         id: d.id,
         data: () => d.data() as Record<string, unknown>,
       });
+      const sameDriver = latest?.assignedDriverId === mapped.assignedDriverId;
+      mapped.driverLocation = fresher(
+        sameDriver ? latest?.driverLocation : null,
+        mapped.driverLocation,
+      );
+      latest = mapped;
       callback(latest);
       attachDriver(latest.assignedDriverId);
     },
@@ -962,7 +988,9 @@ export type ClientOrderInput = {
   pickupAddress: string;
   pickupLat: number;
   pickupLng: number;
+  pickupPlaceId?: string;
   deliveryAddress: string;
+  deliveryPlaceId?: string;
   deliveryLat: number;
   deliveryLng: number;
   description?: string;
@@ -1060,6 +1088,8 @@ export async function createClientOrder(input: ClientOrderInput) {
     customerUid: input.customerUid || '',
     customerPhotoURL: input.customerPhotoURL || '',
     pickupAddress: input.pickupAddress.trim() || 'Punto de recolección',
+    pickupPlaceId: input.pickupPlaceId || '',
+    deliveryPlaceId: input.deliveryPlaceId || '',
     pickupCoords: {
       lat: input.pickupLat,
       lng: input.pickupLng,

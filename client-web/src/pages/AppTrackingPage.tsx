@@ -202,10 +202,15 @@ export function AppTrackingPage() {
                 status={status || undefined}
                 heightClass="h-64"
               />
-              {status !== 'pending' && status !== 'delivered' && !data.driverLocation ? (
+              {status !== 'pending' && status !== 'delivered' ? (
                 <p className="text-[11px] text-[var(--domi-muted)]">
-                  Esperando ubicación del repartidor… debe tener el pedido abierto en la cabina con
-                  GPS activo.
+                  {data.driverLocation
+                    ? `En vivo${
+                        data.driverLocation.updatedAt
+                          ? ` · ${new Date(data.driverLocation.updatedAt).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                          : ''
+                      }`
+                    : 'Esperando ubicación del repartidor… debe tener el GPS activo en la cabina.'}
                 </p>
               ) : null}
             </div>

@@ -123,9 +123,10 @@ export function rankPosition(board: DriverRankRow[], driverId: string): number |
 export function subscribeCabinChat(
   chatId: string,
   callback: (msgs: CabinChatMessage[]) => void,
+  onLive?: (live: boolean) => void,
 ): Unsubscribe {
   return onSnapshot(
-    query(collection(db, 'messages'), where('chatId', '==', chatId), limit(80)),
+    query(collection(db, 'messages'), where('chatId', '==', chatId)),
     (snap) => {
       const list: CabinChatMessage[] = snap.docs.map((d) => {
         const data = d.data() as Record<string, unknown>;
@@ -140,9 +141,10 @@ export function subscribeCabinChat(
         };
       });
       list.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      onLive?.(true);
       callback(list);
     },
-    () => callback([]),
+    () => onLive?.(false),
   );
 }
 
@@ -180,7 +182,28 @@ export async function sendCabinChatMessage(params: {
   );
 }
 
+let radioUnread = 0;
+const radioListeners = new Set<(n: number) => void>();
+
+export function setRadioUnread(count: number) {
+  radioUnread = Math.max(0, count);
+  radioListeners.forEach((fn) => fn(radioUnread));
+}
+
+export function bumpRadioUnread() {
+  setRadioUnread(radioUnread + 1);
+}
+
+export function subscribeRadioUnread(fn: (n: number) => void) {
+  radioListeners.add(fn);
+  fn(radioUnread);
+  return () => {
+    radioListeners.delete(fn);
+  };
+}
+
 export const RADIO_QUICK = [
+  'Torre, ¿me copias?',
   'En camino al origen',
   'Llegué a recolección',
   'Pedido recogido, voy a entrega',

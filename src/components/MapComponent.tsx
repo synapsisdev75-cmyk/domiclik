@@ -41,6 +41,7 @@ import {
 import {
   buildGoogleMapsAbRouteUrl,
   buildGoogleMapsNavigateToUrl,
+  navStop,
   openGoogleMapsNav,
 } from '../lib/googleMapsNav';
 
@@ -1238,10 +1239,21 @@ export const MapComponent: React.FC<MapComponentProps> = ({
                     onClick={() => {
                       const start = activeRoute.coordinates[0];
                       const end = activeRoute.coordinates[activeRoute.coordinates.length - 1];
+                      const routeOrder =
+                        orders.find((o) => o.id === selectedOrderId) ||
+                        orders.find((o) => isLiveOrderStatus(o.status) && o.pickupCoords && o.deliveryCoords);
                       openGoogleMapsNav(
                         buildGoogleMapsAbRouteUrl(
-                          { lat: start[0], lng: start[1] },
-                          { lat: end[0], lng: end[1] },
+                          navStop(
+                            { lat: start[0], lng: start[1] },
+                            routeOrder?.pickupAddress,
+                            routeOrder?.pickupPlaceId,
+                          ),
+                          navStop(
+                            { lat: end[0], lng: end[1] },
+                            routeOrder?.deliveryAddress,
+                            routeOrder?.deliveryPlaceId,
+                          ),
                           true,
                         ),
                       );
@@ -1255,8 +1267,17 @@ export const MapComponent: React.FC<MapComponentProps> = ({
                     type="button"
                     onClick={() => {
                       const end = activeRoute.coordinates[activeRoute.coordinates.length - 1];
+                      const routeOrder =
+                        orders.find((o) => o.id === selectedOrderId) ||
+                        orders.find((o) => isLiveOrderStatus(o.status) && o.pickupCoords && o.deliveryCoords);
                       openGoogleMapsNav(
-                        buildGoogleMapsNavigateToUrl({ lat: end[0], lng: end[1] }),
+                        buildGoogleMapsNavigateToUrl(
+                          navStop(
+                            { lat: end[0], lng: end[1] },
+                            routeOrder?.deliveryAddress,
+                            routeOrder?.deliveryPlaceId,
+                          ),
+                        ),
                       );
                     }}
                     className="w-full py-2 rounded-xl border border-[#2B6CFF]/50 bg-[#2B6CFF]/10 text-[#7aa2ff] font-bold text-[11px] flex items-center justify-center gap-1.5"
@@ -1434,7 +1455,15 @@ export const MapComponent: React.FC<MapComponentProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => openGoogleMapsNav(buildGoogleMapsAbRouteUrl(a, b, true))}
+                  onClick={() =>
+                    openGoogleMapsNav(
+                      buildGoogleMapsAbRouteUrl(
+                        navStop(a, navOrder?.pickupAddress, navOrder?.pickupPlaceId),
+                        navStop(b, navOrder?.deliveryAddress, navOrder?.deliveryPlaceId),
+                        true,
+                      ),
+                    )
+                  }
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#2B6CFF] py-3 text-xs font-extrabold text-white"
                 >
                   <Navigation className="h-4 w-4" />
@@ -1443,14 +1472,26 @@ export const MapComponent: React.FC<MapComponentProps> = ({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => openGoogleMapsNav(buildGoogleMapsNavigateToUrl(a))}
+                    onClick={() =>
+                      openGoogleMapsNav(
+                        buildGoogleMapsNavigateToUrl(
+                          navStop(a, navOrder?.pickupAddress, navOrder?.pickupPlaceId),
+                        ),
+                      )
+                    }
                     className="rounded-xl border border-[#2B6CFF]/45 py-2 text-[10px] font-bold text-[#7aa2ff]"
                   >
                     GPS → A
                   </button>
                   <button
                     type="button"
-                    onClick={() => openGoogleMapsNav(buildGoogleMapsNavigateToUrl(b))}
+                    onClick={() =>
+                      openGoogleMapsNav(
+                        buildGoogleMapsNavigateToUrl(
+                          navStop(b, navOrder?.deliveryAddress, navOrder?.deliveryPlaceId),
+                        ),
+                      )
+                    }
                     className="rounded-xl border border-[#FF5722]/45 py-2 text-[10px] font-bold text-[#ff8a65]"
                   >
                     GPS → B

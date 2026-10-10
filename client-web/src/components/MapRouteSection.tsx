@@ -10,8 +10,8 @@ import { RouteMapPickerInner, type MapPickMode } from './RouteMapPicker';
 type MapRouteSectionProps = {
   pickMode: MapPickMode;
   onPickModeChange: (mode: MapPickMode) => void;
-  onPickupPicked: (hit: LatLng & { label: string }) => void;
-  onDeliveryPicked: (hit: LatLng & { label: string }) => void;
+  onPickupPicked: (hit: LatLng & { label: string; placeId?: string }) => void;
+  onDeliveryPicked: (hit: LatLng & { label: string; placeId?: string }) => void;
   pickup: LatLng | null;
   delivery: LatLng | null;
   path: LatLng[];

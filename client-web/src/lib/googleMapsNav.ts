@@ -1,6 +1,19 @@
-/** Deep links a Google Maps (navegación turn-by-turn / ruta optimizada). */
+/** Deep links a Google Maps. El destino es la dirección guardada en DomiClick, no un pin suelto. */
 
 export type LatLng = { lat: number; lng: number };
+
+export type NavPoint = LatLng & {
+  address?: string | null;
+  placeId?: string | null;
+};
+
+export function navStop(
+  coords: LatLng,
+  address?: string | null,
+  placeId?: string | null,
+): NavPoint {
+  return { lat: coords.lat, lng: coords.lng, address, placeId };
+}
 
 function fmt(p: LatLng): string {
   return `${p.lat},${p.lng}`;
@@ -15,29 +28,49 @@ function isValid(p?: LatLng | null): p is LatLng {
   );
 }
 
+function savedAddress(address?: string | null): string {
+  const text = (address || '').replace(/\s+/g, ' ').trim();
+  if (text.length < 8) return '';
+  if (/^punto de recolecci[oó]n$/i.test(text)) return '';
+  if (/^sin (recogida|entrega)$/i.test(text)) return '';
+  return text;
+}
+
+function endpoint(point: NavPoint): { query: string; placeId?: string } {
+  const placeId = point.placeId?.trim() || '';
+  const address = savedAddress(point.address);
+  if (placeId) return { query: address || fmt(point), placeId };
+  if (address) return { query: address };
+  return { query: fmt(point) };
+}
+
 export function buildGoogleMapsDirectionsUrl(opts: {
-  destination: LatLng;
-  origin?: LatLng | 'current';
-  waypoint?: LatLng;
+  destination: NavPoint;
+  origin?: NavPoint | 'current';
+  waypoint?: NavPoint;
   navigate?: boolean;
 }): string {
   const params = new URLSearchParams();
   params.set('api', '1');
   params.set('travelmode', 'driving');
   if (opts.origin && opts.origin !== 'current' && isValid(opts.origin)) {
-    params.set('origin', fmt(opts.origin));
+    const origin = endpoint(opts.origin);
+    params.set('origin', origin.query);
+    if (origin.placeId) params.set('origin_place_id', origin.placeId);
   }
-  params.set('destination', fmt(opts.destination));
+  const destination = endpoint(opts.destination);
+  params.set('destination', destination.query);
+  if (destination.placeId) params.set('destination_place_id', destination.placeId);
   if (opts.waypoint && isValid(opts.waypoint)) {
-    params.set('waypoints', fmt(opts.waypoint));
+    const waypoint = endpoint(opts.waypoint);
+    params.set('waypoints', waypoint.query);
+    if (waypoint.placeId) params.set('waypoint_place_ids', waypoint.placeId);
   }
-  if (opts.navigate) {
-    params.set('dir_action', 'navigate');
-  }
+  if (opts.navigate) params.set('dir_action', 'navigate');
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
-export function buildGoogleMapsAbRouteUrl(pickup: LatLng, delivery: LatLng, navigate = false): string {
+export function buildGoogleMapsAbRouteUrl(pickup: NavPoint, delivery: NavPoint, navigate = false): string {
   return buildGoogleMapsDirectionsUrl({
     origin: pickup,
     destination: delivery,
@@ -45,7 +78,7 @@ export function buildGoogleMapsAbRouteUrl(pickup: LatLng, delivery: LatLng, navi
   });
 }
 
-export function buildGoogleMapsNavigateToUrl(destination: LatLng, origin?: LatLng | null): string {
+export function buildGoogleMapsNavigateToUrl(destination: NavPoint, origin?: LatLng | null): string {
   return buildGoogleMapsDirectionsUrl({
     origin: origin && isValid(origin) ? origin : 'current',
     destination,
@@ -57,7 +90,6 @@ function isMapsUrl(url: string): boolean {
   return /google\.[^/]+\/maps/i.test(url);
 }
 
-/** Abre Maps en otra pestaña. Si esta pantalla se va a Maps, vuelve sola a DomiClick. */
 export function openGoogleMapsNav(url: string): void {
   if (typeof window === 'undefined') return;
   const home = window.location.href;

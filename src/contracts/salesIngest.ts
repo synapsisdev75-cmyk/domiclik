@@ -27,6 +27,8 @@ export type IngestOrderBody = {
   pickupAddress?: string;
   pickupLat?: number;
   pickupLng?: number;
+  pickupPlaceId?: string;
+  deliveryPlaceId?: string;
   description?: string;
   declaredValue?: number;
   notes?: string;
