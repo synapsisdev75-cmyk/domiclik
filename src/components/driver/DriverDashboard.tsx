@@ -167,6 +167,14 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({
     );
   };
 
+  useEffect(() => {
+    if (!driver?.id || !('geolocation' in navigator)) return;
+    startGpsWatch();
+    return () => stopGpsWatch();
+    // El id basta: el watch publica aunque no haya pedido abierto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driver?.id]);
+
   /**
    * Debe llamarse desde un clic del usuario: así el navegador muestra el diálogo de permiso.
    */

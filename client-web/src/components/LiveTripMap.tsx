@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { APIProvider, Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
 import { GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_MAP_ID } from '../lib/config';
 import { estimateRoute, VILLAVICENCIO_CENTER } from '../lib/geo';
+import { pointAtAlong, projectOnPath, roadSignature } from '../lib/roadFollow';
 
 type LatLng = { lat: number; lng: number };
 
@@ -16,6 +17,8 @@ type LiveTripMapProps = {
   focusSeq?: number;
   /** Estado del pedido: la recogida y la entrega no se recortan entre sí. */
   status?: string;
+  /** Ruta ya ordenada (moto → paradas). Si viene, el mapa de DomiClick la dibuja unida. */
+  tour?: LatLng[];
 };
 
 /** Parte de la ruta que falta. Lo ya recorrido se oculta. Si el moto está lejos de la vía, se deja completa. */
@@ -58,7 +61,7 @@ function remainingRoute(path: LatLng[], driver: LatLng): LatLng[] {
   return ahead.length ? [snap, ...ahead] : [snap, b];
 }
 
-const PICKUP_LEG = new Set(['assigned', 'accepted', 'en_route_origin']);
+const PICKUP_LEG = new Set(['assigned', 'accepted', 'en_route_origin', 'at_origin']);
 const DELIVERY_LEG = new Set(['picked_up', 'in_transit', 'at_destination']);
 
 function StretchMap() {
@@ -160,6 +163,56 @@ function Pin({ label, color }: { label: string; color: string }) {
   );
 }
 
+function useRoadPin(driver: LatLng | null | undefined, path: LatLng[] | null | undefined) {
+  const alongRef = useRef<number | null>(null);
+  const roadRef = useRef('');
+  const [pos, setPos] = useState<LatLng | null>(null);
+  const pathKey = path && path.length >= 2 ? roadSignature(path) : '';
+  const driverKey = driver ? `${driver.lat.toFixed(5)},${driver.lng.toFixed(5)}` : '';
+
+  useEffect(() => {
+    if (!driver) return;
+    if (!path || path.length < 2) {
+      setPos(driver);
+      return;
+    }
+    if (pathKey !== roadRef.current) {
+      roadRef.current = pathKey;
+      alongRef.current = null;
+    }
+    const proj = projectOnPath(path, driver);
+    if (!proj || proj.metersOff > 450) {
+      alongRef.current = null;
+      setPos(driver);
+      return;
+    }
+    const from = alongRef.current ?? proj.along;
+    const to = proj.along;
+    const started = performance.now();
+    const dur = Math.min(8000, Math.max(900, Math.abs(to - from) * 55));
+    let raf = 0;
+    let alive = true;
+    const tick = (now: number) => {
+      if (!alive) return;
+      const t = Math.min(1, (now - started) / dur);
+      const eased = t * t * (3 - 2 * t);
+      const along = from + (to - from) * eased;
+      alongRef.current = along;
+      setPos(pointAtAlong(path, along));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+    };
+    // driverKey y pathKey cubren el GPS y la calle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driverKey, pathKey]);
+
+  return pos || driver || null;
+}
+
 export function LiveTripMap({
   pickup,
   delivery,
@@ -168,6 +221,7 @@ export function LiveTripMap({
   fill = false,
   focusSeq = 0,
   status,
+  tour,
 }: LiveTripMapProps) {
   const points = useMemo(() => {
     const list: LatLng[] = [];
@@ -179,6 +233,7 @@ export function LiveTripMap({
 
   const [street, setStreet] = useState<LatLng[] | null>(null);
   const [approach, setApproach] = useState<LatLng[] | null>(null);
+  const [liveNav, setLiveNav] = useState<LatLng[] | null>(null);
   const goingToPickup = Boolean(status && PICKUP_LEG.has(status));
   const onDelivery = Boolean(status && DELIVERY_LEG.has(status));
 
@@ -204,7 +259,9 @@ export function LiveTripMap({
   }, [pickupLat, pickupLng, deliveryLat, deliveryLng]);
 
   const approachKey =
-    goingToPickup && driver ? `${driver.lat.toFixed(2)},${driver.lng.toFixed(2)}` : '';
+    goingToPickup && driver ? `${driver.lat.toFixed(3)},${driver.lng.toFixed(3)}` : '';
+  const deliveryNavKey =
+    onDelivery && driver ? `${driver.lat.toFixed(3)},${driver.lng.toFixed(3)}` : '';
 
   useEffect(() => {
     if (!approachKey || pickupLat == null || pickupLng == null) {
@@ -222,18 +279,84 @@ export function LiveTripMap({
     };
   }, [approachKey, pickupLat, pickupLng]);
 
+  useEffect(() => {
+    if (!deliveryNavKey || deliveryLat == null || deliveryLng == null) {
+      setLiveNav(null);
+      return;
+    }
+    const [lat, lng] = deliveryNavKey.split(',').map(Number);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    let cancel = false;
+    void estimateRoute({ lat, lng }, { lat: deliveryLat, lng: deliveryLng }).then((route) => {
+      if (!cancel) setLiveNav(route.path);
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [deliveryNavKey, deliveryLat, deliveryLng]);
+
+  const tourKey = (tour || []).map((point) => `${point.lat.toFixed(3)},${point.lng.toFixed(3)}`).join('|');
+  const [tourPath, setTourPath] = useState<LatLng[] | null>(null);
+
+  useEffect(() => {
+    const points = (tour || []).filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+    if (points.length < 2) {
+      setTourPath(null);
+      return;
+    }
+    let cancel = false;
+    void (async () => {
+      const joined: LatLng[] = [];
+      for (let i = 0; i < points.length - 1; i++) {
+        try {
+          const route = await estimateRoute(points[i], points[i + 1]);
+          const segment = route.path.length >= 2 ? route.path : [points[i], points[i + 1]];
+          joined.push(...(joined.length ? segment.slice(1) : segment));
+        } catch {
+          joined.push(...(joined.length ? [points[i + 1]] : [points[i], points[i + 1]]));
+        }
+        if (cancel) return;
+      }
+      if (!cancel) setTourPath(joined);
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [tourKey]);
+
   const closed = status === 'delivered' || status === 'cancelled';
 
+  const joined = Boolean(tour && tour.length >= 2);
   const deliveryPath = useMemo(() => {
+    if (joined) {
+      const full = tourPath && tourPath.length >= 2 ? tourPath : tour || [];
+      return driver ? remainingRoute(full, driver) : full;
+    }
     if (closed || !pickup || !delivery) return [];
+    if (onDelivery && driver) {
+      const full = liveNav && liveNav.length >= 2 ? liveNav : [driver, delivery];
+      return remainingRoute(full, driver);
+    }
     const full = street && street.length >= 2 ? street : [pickup, delivery];
-    if (onDelivery && driver) return remainingRoute(full, driver);
     if (goingToPickup) return full;
     if (driver) return remainingRoute(full, driver);
     return full;
-  }, [closed, pickup, delivery, driver, street, onDelivery, goingToPickup]);
+  }, [joined, tour, tourPath, driver, closed, pickup, delivery, street, liveNav, onDelivery, goingToPickup]);
+
+  const stickPath =
+    joined && ((tourPath && tourPath.length >= 2) || (tour && tour.length >= 2))
+      ? tourPath && tourPath.length >= 2
+        ? tourPath
+        : tour || null
+      : onDelivery && liveNav && liveNav.length >= 2
+        ? liveNav
+        : street && street.length >= 2
+          ? street
+          : null;
+  const roadDriver = useRoadPin(driver, stickPath);
 
   const pickupPath = useMemo(() => {
+    if (joined) return [];
     if (!goingToPickup || !driver || !pickup) return [];
     const full = approach && approach.length >= 2 ? approach : [driver, pickup];
     return remainingRoute(full, driver);
@@ -271,22 +394,29 @@ export function LiveTripMap({
           <FocusDriver driver={driver} focusSeq={focusSeq} />
           <RoadLine path={deliveryPath} color="#00E5FF" />
           <RoadLine path={pickupPath} color="#7CB518" />
-          {pickup ? (
+          {!joined && pickup ? (
             <AdvancedMarker position={pickup} title="Recogida">
               <Pin label="Recogida" color="#2B6CFF" />
             </AdvancedMarker>
           ) : null}
-          {delivery ? (
+          {joined && tour
+            ? tour.slice(driver ? 1 : 0).map((point, index) => (
+                <AdvancedMarker
+                  key={`tour-${index}-${point.lat.toFixed(4)}`}
+                  position={point}
+                  title={`Parada ${index + 1}`}
+                >
+                  <Pin label={String(index + 1)} color={index === 0 ? '#C8F542' : '#00E5FF'} />
+                </AdvancedMarker>
+              ))
+            : null}
+          {!joined && delivery ? (
             <AdvancedMarker position={delivery} title="Entrega">
               <Pin label="Entrega" color="#FF5722" />
             </AdvancedMarker>
           ) : null}
-          {driver ? (
-            <AdvancedMarker
-              key={`${driver.lat.toFixed(5)},${driver.lng.toFixed(5)}`}
-              position={driver}
-              title="Repartidor"
-            >
+          {roadDriver ? (
+            <AdvancedMarker position={roadDriver} title="Repartidor">
               <div className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-[#00E676] text-sm shadow-[0_0_12px_rgba(0,230,118,0.6)]">
                 🛵
               </div>

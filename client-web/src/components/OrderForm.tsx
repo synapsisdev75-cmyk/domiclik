@@ -3,7 +3,7 @@ import { CalendarClock, Loader2, Package } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { submitOrder } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { uploadInvoicePhoto, uploadPaymentProof } from '../lib/firebase';
+import { uploadPaymentProof } from '../lib/firebase';
 import { rememberRecentOrder } from '../lib/recentOrders';
 import {
   estimateRoute,
@@ -117,7 +117,6 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [acceptedMarketing, setAcceptedMarketing] = useState(false);
-  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
   /** now = entrega inmediata (ETA por ruta). later = fecha/hora elegida por el usuario. */
   const [scheduleMode, setScheduleMode] = useState<'now' | 'later'>('now');
@@ -423,14 +422,6 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       }
       await setPhone(phone);
 
-      let invoicePhotoUrl: string | undefined;
-      if (invoiceFile) {
-        if (invoiceFile.size > 25 * 1024 * 1024) {
-          throw new Error('La foto de factura no puede superar 25 MB');
-        }
-        invoicePhotoUrl = await uploadInvoicePhoto(invoiceFile);
-      }
-
       let paymentProofUrl: string | undefined;
       if (values.paymentMethod === 'transferencia' && proofFile) {
         paymentProofUrl = await uploadPaymentProof(proofFile);
@@ -449,7 +440,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
         deliveryLng: delivery.lng,
         deliveryPlaceId: deliveryPlaceId || undefined,
         description: values.description.trim() || undefined,
-        notes: values.notes.trim() || undefined,
+        notes: values.description.trim() || undefined,
         declaredValue: declared,
         customerUid: profile.uid,
         customerPhotoURL: profile.photoURL || undefined,
@@ -460,8 +451,8 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
         pricePerKm: quote.pricePerKm,
         peakMultiplier: quote.multiplier,
         scheduledFor: scheduled.toISOString(),
-        invoiceNumber: values.invoiceNumber.trim() || undefined,
-        invoicePhotoUrl,
+        invoiceNumber: undefined,
+        invoicePhotoUrl: undefined,
         paymentMethod: values.paymentMethod,
         transferChannel:
           values.paymentMethod === 'transferencia' &&
@@ -470,7 +461,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
             : undefined,
         paymentProofUrl,
         paymentNote: values.paymentNote.trim() || undefined,
-        couponCode: values.couponCode.trim() || undefined,
+        couponCode: undefined,
       });
 
       if (!result.trackingCode) {
@@ -490,7 +481,6 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
         paymentNote: '',
         couponCode: '',
       });
-      setInvoiceFile(null);
       setProofFile(null);
       setPickup(null);
       setDelivery(null);
@@ -789,32 +779,6 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
 
           <label className="block sm:col-span-2">
             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-              Factura / orden *
-            </span>
-            <input
-              className="field-input"
-              required
-              value={values.invoiceNumber}
-              onChange={(e) => update('invoiceNumber', e.target.value)}
-              placeholder="Número de factura o pedido"
-            />
-          </label>
-
-          <label className="block sm:col-span-2">
-            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-              Foto (opcional)
-            </span>
-            <input
-              className="field-input file:mr-3 file:rounded-md file:border-0 file:bg-[rgba(0,229,255,0.15)] file:px-3 file:py-1 file:text-xs file:font-semibold file:text-[var(--domi-text)]"
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={(e) => setInvoiceFile(e.target.files?.[0] || null)}
-            />
-          </label>
-
-          <label className="block sm:col-span-2">
-            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
               Forma de pago *
             </span>
             <select
@@ -831,21 +795,6 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
               <option value="otro">Otro</option>
             </select>
           </label>
-
-          {!wizard ? (
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-                Cupón (opcional)
-              </span>
-              <input
-                className="field-input uppercase"
-                value={values.couponCode}
-                onChange={(e) => update('couponCode', e.target.value.toUpperCase())}
-                placeholder="Código promocional"
-                autoComplete="off"
-              />
-            </label>
-          ) : null}
 
           {values.paymentMethod === 'transferencia' ? (
             <div className="block space-y-3 sm:col-span-2 rounded-xl border border-[rgba(0,229,255,0.25)] bg-[rgba(0,229,255,0.05)] p-3">
@@ -922,30 +871,16 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
 
           <label className="block sm:col-span-2">
             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-              Qué enviamos *
+              Qué enviamos y notas *
             </span>
             <textarea
-              className="field-input min-h-[72px] resize-y"
+              className="field-input min-h-[88px] resize-y"
               required
               value={values.description}
               onChange={(e) => update('description', e.target.value)}
-              placeholder="Comida, paquete, compras…"
+              placeholder="Comida, paquete, compras… portería o referencia"
             />
           </label>
-
-          {!wizard ? (
-            <label className="block sm:col-span-2">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-                Notas
-              </span>
-              <input
-                className="field-input"
-                value={values.notes}
-                onChange={(e) => update('notes', e.target.value)}
-                placeholder="Portería, referencia…"
-              />
-            </label>
-          ) : null}
         </div>
       )}
 

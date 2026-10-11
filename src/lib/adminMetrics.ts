@@ -61,10 +61,11 @@ export function startOfDayISO(date = new Date()) {
   return d;
 }
 
+/** Día operativo en Villavicencio, no el día UTC (cambia a las 7 p. m.). */
 export function toDateKey(iso: string | Date) {
   const d = typeof iso === 'string' ? new Date(iso) : iso;
   if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString().split('T')[0];
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(d);
 }
 
 export function inRange(iso: string | undefined, from: Date, to: Date) {

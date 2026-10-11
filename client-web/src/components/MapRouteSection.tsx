@@ -78,36 +78,30 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
   const deliveryLabel =
     structured && deliveryParts ? composeFullAddress(deliveryParts) : deliveryAddress;
 
-  const modeBar = (
-    <div className="flex flex-wrap items-center gap-2">
-      <MapPinned className="h-4 w-4 text-[var(--domi-cyan)]" aria-hidden />
-      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-        {mapFirst ? 'Arrastra recogida y entrega en el mapa' : 'Ruta en el mapa'}
-      </p>
-      <div className="ml-auto flex flex-wrap gap-2">
-        <button
-          type="button"
-          className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
-            pickMode === 'pickup'
-              ? 'bg-[var(--domi-blue)] text-white'
-              : 'bg-white/5 text-[var(--domi-muted)]'
-          }`}
-          onClick={() => onPickModeChange('pickup')}
-        >
-          Recogida
-        </button>
-        <button
-          type="button"
-          className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
-            pickMode === 'delivery'
-              ? 'bg-[var(--domi-orange)] text-white'
-              : 'bg-white/5 text-[var(--domi-muted)]'
-          }`}
-          onClick={() => onPickModeChange('delivery')}
-        >
-          Entrega
-        </button>
-      </div>
+  const modeButtons = (
+    <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-black/10 bg-white/95 p-1 shadow-lg">
+      <button
+        type="button"
+        className={`rounded-xl px-4 py-2 text-xs font-bold ${
+          pickMode === 'pickup'
+            ? 'bg-[var(--domi-blue)] text-white'
+            : 'text-[var(--domi-muted)]'
+        }`}
+        onClick={() => onPickModeChange('pickup')}
+      >
+        Recogida
+      </button>
+      <button
+        type="button"
+        className={`rounded-xl px-4 py-2 text-xs font-bold ${
+          pickMode === 'delivery'
+            ? 'bg-[var(--domi-orange)] text-white'
+            : 'text-[var(--domi-muted)]'
+        }`}
+        onClick={() => onPickModeChange('delivery')}
+      >
+        Entrega
+      </button>
     </div>
   );
 
@@ -211,9 +205,17 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
   // Web PC: mapa protagonista + campos al lado. Móvil / app: apilado.
   return (
     <div className="map-route-section space-y-3 overflow-visible">
-      {modeBar}
+      <div className="flex items-center gap-2 px-1">
+        <MapPinned className="h-4 w-4 text-[var(--domi-cyan)]" aria-hidden />
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
+          {mapFirst ? 'Arrastra recogida y entrega en el mapa' : 'Ruta en el mapa'}
+        </p>
+      </div>
       <div className="map-route-body">
-        <div className="map-route-map min-w-0">{map}</div>
+        <div className="map-route-map flex min-w-0 flex-col gap-2">
+          {map}
+          <div className="map-mode-bar flex justify-center">{modeButtons}</div>
+        </div>
         <div className="map-route-fields min-w-0">{fields}</div>
       </div>
       {summary}

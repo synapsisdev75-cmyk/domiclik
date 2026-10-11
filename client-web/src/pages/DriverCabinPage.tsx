@@ -27,11 +27,13 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
+import { nativeLocatorAvailable, startLiveLocator, stopLiveLocator } from '../lib/liveLocator';
 import { useAuth } from '../lib/auth';
 import { isNativeApp } from '../lib/appNav';
 import { opsTowerUrl, WHATSAPP } from '../lib/config';
 import { EmailAuthForm } from '../components/EmailAuthForm';
 import { LiveTripMap } from '../components/LiveTripMap';
+import { planJoinedTour } from '../lib/tour';
 import {
   buildGoogleMapsAbRouteUrl,
   buildGoogleMapsNavigateToUrl,
@@ -221,11 +223,11 @@ export function DriverCabinPage() {
     shiftClosing && remainingMin != null
       ? shiftCloseMessage(remainingMin, openOrders.length > 0)
       : null;
-  const canClockOut = Boolean(driver?.isActive || shift.open);
+  const onShift = punches.length > 0 ? shift.open : Boolean(driver?.isActive);
 
   async function onPunchShift() {
     if (!driver) return;
-    const type = canClockOut ? 'out' : 'in';
+    const type = onShift ? 'out' : 'in';
     if (type === 'out') {
       setTab('turno');
       setMsg(
@@ -258,6 +260,9 @@ export function DriverCabinPage() {
     lat: number;
     lng: number;
     heading?: number;
+    speedMps?: number;
+    accuracyM?: number;
+    moving?: boolean;
   } | null>(null);
   const didFocusGps = useRef(false);
   const shiftWarnedRef = useRef(false);
@@ -269,6 +274,10 @@ export function DriverCabinPage() {
 
   const activeOrder =
     openOrders.find((o) => o.id === selectedOrderId) || openOrders[0] || null;
+  const joinedTour = useMemo(
+    () => planJoinedTour(openOrders.slice(0, 3), liveCoords),
+    [openOrders, liveCoords],
+  );
 
   // Desbloquear audio del navegador (requiere gesto del usuario)
   useEffect(() => {
@@ -465,48 +474,109 @@ export function DriverCabinPage() {
   }, [shiftClosing]);
 
   useEffect(() => {
-    if (!driver?.id || !('geolocation' in navigator)) return;
+    if (!driver?.id) return;
+    if (!nativeLocatorAvailable() && !('geolocation' in navigator)) return;
     const driverId = driver.id;
+    const driverName = driver.fullName;
+    const plateNumber = driver.plateNumber;
+    let lastPoint: { lat: number; lng: number } | null = null;
+    let cancelled = false;
+    let removeNative: (() => void) | undefined;
 
-    function applyFix(pos: GeolocationPosition, publish: boolean) {
-      const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    function publishPoint(point: {
+      lat: number;
+      lng: number;
+      heading?: number;
+      speedMps?: number;
+      accuracyM?: number;
+    }) {
+      const coords = { lat: point.lat, lng: point.lng };
       setLiveCoords(coords);
       setGpsLiveOk(true);
       if (!didFocusGps.current) {
         didFocusGps.current = true;
         setFocusSeq((n) => n + 1);
       }
-      if (!publish) return;
+      const moved =
+        lastPoint == null
+          ? Infinity
+          : Math.hypot(
+              (coords.lat - lastPoint.lat) * 111_320,
+              (coords.lng - lastPoint.lng) * 111_320 * Math.cos((lastPoint.lat * Math.PI) / 180),
+            );
       const now = Date.now();
-      if (now - lastGpsSent.current < 2500) return;
+      const waited = now - lastGpsSent.current;
+      const speedKnown = point.speedMps != null && point.speedMps >= 0;
+      const moving = speedKnown ? (point.speedMps as number) >= 0.8 : moved >= 4;
+      if (moving) {
+        if (moved < 4 && waited < 2000) return;
+      } else if (moved < 4 && waited < 5000) {
+        return;
+      }
       lastGpsSent.current = now;
+      lastPoint = coords;
       const fix = {
         driverId,
+        driverName,
+        plateNumber,
         lat: coords.lat,
         lng: coords.lng,
-        heading: pos.coords.heading || undefined,
+        heading: point.heading,
+        speedMps: point.speedMps,
+        accuracyM: point.accuracyM,
+        moving,
       };
       void publishDriverLiveLocation(fix).then((ok) => {
         pendingGpsRef.current = ok ? null : fix;
       });
     }
 
-    // Primera marca rápida (caché o red) para que el mapa no espere al GPS fino.
-    navigator.geolocation.getCurrentPosition(
-      (pos) => applyFix(pos, true),
-      () => {
-        /* el watch preciso sigue */
-      },
-      { enableHighAccuracy: false, maximumAge: 120000, timeout: 4000 },
-    );
+    function applyFix(pos: GeolocationPosition) {
+      const speed = pos.coords.speed;
+      publishPoint({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        heading: pos.coords.heading || undefined,
+        speedMps: speed != null && speed >= 0 ? speed : undefined,
+        accuracyM: pos.coords.accuracy,
+      });
+    }
 
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => applyFix(pos, true),
-      (err) => {
-        if (err.code === 1) setGpsLiveOk(false);
-      },
-      { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 },
-    );
+    if (nativeLocatorAvailable()) {
+      void startLiveLocator((fix) => {
+        if (cancelled) return;
+        publishPoint({
+          lat: fix.lat,
+          lng: fix.lng,
+          heading: fix.heading || undefined,
+          speedMps: fix.speed >= 0 ? fix.speed : undefined,
+          accuracyM: fix.accuracy,
+        });
+      }).then((remove) => {
+        if (cancelled) {
+          remove();
+          void stopLiveLocator();
+          return;
+        }
+        removeNative = remove;
+      });
+    }
+
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => applyFix(pos),
+        () => undefined,
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 },
+      );
+
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (pos) => applyFix(pos),
+        (err) => {
+          if (err.code === 1 && !nativeLocatorAvailable()) setGpsLiveOk(false);
+        },
+        { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 },
+      );
+    }
 
     const retryId = window.setInterval(() => {
       const pending = pendingGpsRef.current;
@@ -518,8 +588,32 @@ export function DriverCabinPage() {
       });
     }, 12000);
 
+    const beatId = window.setInterval(() => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => applyFix(pos),
+        () => undefined,
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 },
+      );
+    }, 8000);
+
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!('geolocation' in navigator)) return;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => applyFix(pos),
+        () => undefined,
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 8000 },
+      );
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
+      cancelled = true;
+      removeNative?.();
+      void stopLiveLocator();
       window.clearInterval(retryId);
+      window.clearInterval(beatId);
+      document.removeEventListener('visibilitychange', onVisible);
       if (watchIdRef.current != null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
@@ -550,6 +644,8 @@ export function DriverCabinPage() {
         setMsg('Ubicación precisa marcada en el mapa.');
         void publishDriverLiveLocation({
           driverId: driver.id,
+          driverName: driver.fullName,
+          plateNumber: driver.plateNumber,
           lat: coords.lat,
           lng: coords.lng,
           heading: pos.coords.heading || undefined,
@@ -575,6 +671,13 @@ export function DriverCabinPage() {
   }
 
   function navigateOrder(order: DriverOrder) {
+    const joined = openOrders.filter((item) => item.pickupCoords && item.deliveryCoords);
+    setTab('mapa');
+    setFocusSeq((n) => n + 1);
+    if (joined.length > 1) {
+      setMsg('Ruta unida en el mapa de DomiClick. Google solo abre una parada.');
+      return;
+    }
     if (!order.pickupCoords || !order.deliveryCoords) {
       setErr('Sin coordenadas de recogida y entrega. Central debe marcarlas en el mapa.');
       return;
@@ -620,12 +723,17 @@ export function DriverCabinPage() {
         order.pickupCoords &&
         order.deliveryCoords
       ) {
-        const dest =
-          next === 'en_route_origin'
-            ? navStop(order.pickupCoords, order.pickupAddress, order.pickupPlaceId)
-            : navStop(order.deliveryCoords, order.deliveryAddress, order.deliveryPlaceId);
-        openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest, liveCoords));
+        const joined = openOrders.filter((item) => item.pickupCoords && item.deliveryCoords);
         setTab('mapa');
+        if (joined.length > 1) {
+          setMsg('Ruta unida en el mapa de DomiClick. Google solo abre una parada.');
+        } else {
+          const dest =
+            next === 'en_route_origin'
+              ? navStop(order.pickupCoords, order.pickupAddress, order.pickupPlaceId)
+              : navStop(order.deliveryCoords, order.deliveryAddress, order.deliveryPlaceId);
+          openGoogleMapsNav(buildGoogleMapsNavigateToUrl(dest, liveCoords));
+        }
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'No se pudo actualizar');
@@ -1016,9 +1124,9 @@ export function DriverCabinPage() {
               {driver.isActive ? 'Disponible para Central' : 'No disponible'}
             </span>
             <span className="block text-[11px] text-[var(--domi-muted)]">
-              {canClockOut
-                ? 'La salida se marca en la tablet de sede.'
-                : 'Marca entrada para quedar disponible.'}
+              {onShift
+                ? 'La salida del turno se marca en la tablet de sede.'
+                : 'Marca la entrada al turno para quedar disponible.'}
             </span>
           </span>
         </span>
@@ -1029,9 +1137,9 @@ export function DriverCabinPage() {
         onClick={() => void onPunchShift()}
         className={`mb-4 w-full rounded-2xl py-3.5 text-sm font-black text-white disabled:opacity-60 ${
           tab === 'mapa' ? 'hidden' : ''
-        } ${canClockOut ? 'bg-amber-600' : 'bg-emerald-600'}`}
+        } ${onShift ? 'bg-amber-600' : 'bg-emerald-600'}`}
       >
-        {punchBusy ? 'Marcando…' : canClockOut ? 'Salida en la tablet' : 'Marcar entrada'}
+        {punchBusy ? 'Marcando…' : onShift ? 'Salida del turno' : 'Entrada al turno'}
       </button>
 
       {/* Escritorio: mismo menú de 4. En el celular vive abajo. */}
@@ -1270,9 +1378,11 @@ export function DriverCabinPage() {
                         className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#2B6CFF] py-3 text-xs font-extrabold text-white"
                       >
                         <Navigation className="h-4 w-4" />
-                        {goingToPickup(activeOrder.status)
-                          ? 'Navegar a la recogida'
-                          : 'Navegar a la entrega'}
+                        {openOrders.length > 1
+                          ? 'Ver ruta unida en DomiClick'
+                          : goingToPickup(activeOrder.status)
+                            ? 'Navegar a la recogida'
+                            : 'Navegar a la entrega'}
                       </button>
                       <button
                         type="button"
@@ -1420,6 +1530,7 @@ export function DriverCabinPage() {
             driver={liveCoords}
             status={activeOrder?.status}
             focusSeq={focusSeq}
+            tour={joinedTour.length >= 2 ? joinedTour : undefined}
           />
           <button
             type="button"
@@ -1452,10 +1563,10 @@ export function DriverCabinPage() {
                     disabled={punchBusy}
                     onClick={() => void onPunchShift()}
                     className={`mt-3 w-full rounded-2xl py-3.5 text-sm font-black text-white disabled:opacity-60 ${
-                      canClockOut ? 'bg-amber-600' : 'bg-emerald-600'
+                      onShift ? 'bg-amber-600' : 'bg-emerald-600'
                     }`}
                   >
-                    {punchBusy ? 'Marcando…' : canClockOut ? 'Salida en la tablet' : 'Marcar entrada'}
+                    {punchBusy ? 'Marcando…' : onShift ? 'Salida del turno' : 'Entrada al turno'}
                   </button>
                 </>
               ) : (
@@ -1499,7 +1610,7 @@ export function DriverCabinPage() {
                         className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF5722] py-3.5 text-sm font-black text-white"
                       >
                         <Navigation className="h-4 w-4" />
-                        Navegar ahora
+                        {openOrders.length > 1 ? 'Ver ruta unida' : 'Navegar ahora'}
                       </button>
                     ) : (
                       <p className="text-xs text-amber-300">
@@ -1521,10 +1632,10 @@ export function DriverCabinPage() {
                       disabled={punchBusy}
                       onClick={() => void onPunchShift()}
                       className={`w-full rounded-2xl py-3 text-xs font-black text-white disabled:opacity-60 ${
-                        canClockOut ? 'bg-amber-600' : 'bg-emerald-600'
+                        onShift ? 'bg-amber-600' : 'bg-emerald-600'
                       }`}
                     >
-                      {punchBusy ? 'Marcando…' : canClockOut ? 'Salida en la tablet' : 'Marcar entrada'}
+                      {punchBusy ? 'Marcando…' : onShift ? 'Salida del turno' : 'Entrada al turno'}
                     </button>
                   </div>
                 </>
@@ -1820,10 +1931,10 @@ export function DriverCabinPage() {
               disabled={punchBusy}
               onClick={() => void onPunchShift()}
               className={`mt-4 w-full rounded-2xl py-3.5 text-sm font-black text-white disabled:opacity-60 ${
-                canClockOut ? 'bg-amber-600' : 'bg-emerald-600'
+                onShift ? 'bg-amber-600' : 'bg-emerald-600'
               }`}
             >
-              {punchBusy ? 'Marcando…' : canClockOut ? 'Salida en la tablet' : 'Marcar entrada'}
+              {punchBusy ? 'Marcando…' : onShift ? 'Salida del turno' : 'Entrada al turno'}
             </button>
             <button
               type="button"
@@ -2045,10 +2156,10 @@ export function DriverCabinPage() {
               disabled={punchBusy}
               onClick={() => void onPunchShift()}
               className={`w-full rounded-xl py-3.5 text-sm font-black text-white disabled:opacity-60 ${
-                canClockOut ? 'bg-amber-600' : 'bg-emerald-600'
+                onShift ? 'bg-amber-600' : 'bg-emerald-600'
               }`}
             >
-              {punchBusy ? 'Marcando…' : canClockOut ? 'Salida en la tablet' : 'Marcar entrada'}
+              {punchBusy ? 'Marcando…' : onShift ? 'Salida del turno' : 'Entrada al turno'}
             </button>
             <button
               type="button"

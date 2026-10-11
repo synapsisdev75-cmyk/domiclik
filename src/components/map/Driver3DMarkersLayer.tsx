@@ -6,7 +6,8 @@ import type { MotorizadoDriver } from '../../types';
 
 const MODEL_URL = '/models/motorizado.glb';
 /** Tamaño objetivo de la moto en metros (escena del mapa). */
-const MODEL_TARGET_SIZE_M = 2.4;
+/** Más grande que la moto real para que se lea en el zoom del radar. */
+const MODEL_TARGET_SIZE_M = 22;
 /** Rotación base del GLB si no apunta al norte (+Z). Ajustar según export. */
 const MODEL_YAW_OFFSET_DEG = 90;
 

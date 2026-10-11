@@ -259,7 +259,7 @@
   }
 
   .domi-web .map-route-map .map-route-map-frame,
-  .domi-web .map-route-map > div {
+  .domi-web .map-route-map > div:not(.map-mode-bar) {
     height: min(68vh, 580px) !important;
     min-height: 420px !important;
   }

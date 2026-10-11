@@ -1391,7 +1391,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           </div>
 
           <div className="bg-[#0A1020] border border-[#162748] rounded-2xl p-5">
-            <AttendancePanel drivers={drivers} />
+            <AttendancePanel drivers={drivers} canForceExit={staffRole === 'admin'} />
           </div>
 
           <div className="bg-[#0A1020] border border-[#162748] rounded-2xl p-5">

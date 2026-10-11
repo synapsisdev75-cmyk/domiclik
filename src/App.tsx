@@ -215,7 +215,7 @@ function MainApp() {
 
   // Torre: asigna automáticamente al conductor activo + libre más cercano
   useEffect(() => {
-    if (currentRole !== 'admin') return;
+    if (currentRole !== 'admin' && currentRole !== 'secretary') return;
     if (!dispatchSettings.autoAssignEnabled) return;
 
     const pending = orders.filter(

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AttendancePunch, MotorizadoDriver } from '../../types';
-import { importVtaAttendanceRows, subscribeAttendancePunches } from '../../lib/firebase';
-import { DEFAULT_FUEL_COP_PER_KM, formatCOP } from '../../lib/adminMetrics';
+import { importVtaAttendanceRows, recordAttendancePunch, subscribeAttendancePunches } from '../../lib/firebase';
+import { DEFAULT_FUEL_COP_PER_KM, formatCOP, toDateKey } from '../../lib/adminMetrics';
 import { summarizeDriverShift } from '../../lib/workShift';
 import { ATTENDANCE_PIN_RESET_HOUR } from '../../lib/attendance';
 import { formatGallons, formatLiters } from '../../lib/motoFuel';
@@ -22,10 +22,13 @@ import { attendanceKioskUrl, openAttendanceKioskWindow } from '../driver/Attenda
 
 interface AttendancePanelProps {
   drivers: MotorizadoDriver[];
+  /** Solo el administrador puede cerrar el turno sin la tablet de sede. */
+  canForceExit?: boolean;
 }
 
 function methodLabel(method: AttendancePunch['method']): string {
   if (method === 'cabin') return 'App transportista';
+  if (method === 'admin_force') return 'Salida forzada por administrador';
   if (method === 'biometric_vta') return 'Huella VTA';
   if (method === 'pin_kiosk') return 'PIN tablet';
   if (method === 'webauthn_kiosk') return 'WebAuthn tablet';
@@ -33,12 +36,14 @@ function methodLabel(method: AttendancePunch['method']): string {
   return method || '—';
 }
 
-export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => {
+export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers, canForceExit = false }) => {
   const [punches, setPunches] = useState<AttendancePunch[]>([]);
   const [importBusy, setImportBusy] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [forcingId, setForcingId] = useState<string | null>(null);
+  const [forceMsg, setForceMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const todayKey = new Date().toISOString().split('T')[0];
+  const todayKey = toDateKey(new Date());
 
   useEffect(() => {
     return subscribeAttendancePunches(setPunches, todayKey);
@@ -63,6 +68,34 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
 
   const fleetKm = shifts.reduce((s, x) => s + x.kmDriven, 0);
   const fleetFuel = shifts.reduce((s, x) => s + x.fuelEstimateCop, 0);
+
+  async function forceSedeExit(driverId: string, driverName: string, kmIn?: number) {
+    if (!canForceExit || forcingId) return;
+    const ok = window.confirm(
+      `Forzar salida de sede de ${driverName}? Cierra el turno sin tablet ni foto. El motorizado queda fuera de servicio.`,
+    );
+    if (!ok) return;
+    setForcingId(driverId);
+    setForceMsg(null);
+    try {
+      const km = kmIn != null && kmIn > 0 ? kmIn : undefined;
+      await recordAttendancePunch({
+        driverId,
+        driverName,
+        type: 'out',
+        method: 'admin_force',
+        odometerKm: km,
+        entryOdometerKm: km,
+        lat: 4.142,
+        lng: -73.6266,
+      });
+      setForceMsg(`Salida de sede forzada · ${driverName}`);
+    } catch (err) {
+      setForceMsg(err instanceof Error ? err.message : 'No se pudo forzar la salida');
+    } finally {
+      setForcingId(null);
+    }
+  }
 
   async function onImportCsv(file: File) {
     setImportBusy(true);
@@ -191,9 +224,17 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
       {shifts.some((s) => s.inAt || s.outAt) && (
         <div className="space-y-2">
           <div className="text-[10px] text-slate-500 font-tech uppercase">Turnos del día</div>
+          {forceMsg ? <p className="text-[11px] text-[#00E5FF]">{forceMsg}</p> : null}
           {shifts
             .filter((s) => s.inAt || s.outAt)
-            .map((s) => (
+            .map((s) => {
+              const driver = approved.find((d) => d.id === s.driverId);
+              const punchedOut =
+                driver?.lastPunchType === 'out' &&
+                Boolean(driver.lastPunchAt) &&
+                (!s.inAt || new Date(driver.lastPunchAt).getTime() >= new Date(s.inAt).getTime());
+              const open = s.open && !punchedOut;
+              return (
               <div
                 key={s.driverId}
                 className="bg-[#0A1020] border border-[#162748] rounded-xl p-3 space-y-2"
@@ -202,14 +243,25 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
                   <div className="text-xs font-bold text-white truncate">{s.driverName}</div>
                   <span
                     className={`text-[10px] font-tech font-bold px-2 py-0.5 rounded-lg border ${
-                      s.open
+                      open
                         ? 'text-amber-300 border-amber-500/40'
                         : 'text-emerald-300 border-emerald-500/40'
                     }`}
                   >
-                    {s.open ? 'EN TURNO' : 'CERRADO'}
+                    {open ? 'EN TURNO' : 'CERRADO'}
                   </span>
                 </div>
+                {canForceExit && open ? (
+                  <button
+                    type="button"
+                    disabled={forcingId === s.driverId}
+                    onClick={() => void forceSedeExit(s.driverId, s.driverName, s.kmIn ?? undefined)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#FF5722]/50 bg-[#FF5722]/15 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide text-[#FF5722] disabled:opacity-50"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    {forcingId === s.driverId ? 'Cerrando turno…' : 'Forzar salida de sede'}
+                  </button>
+                ) : null}
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-400 font-tech">
                   <span>
                     {s.kmIn != null ? `${s.kmIn.toLocaleString('es-CO')} km` : '—'} →{' '}
@@ -252,7 +304,8 @@ export const AttendancePanel: React.FC<AttendancePanelProps> = ({ drivers }) => 
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
         </div>
       )}
 

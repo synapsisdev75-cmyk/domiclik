@@ -351,6 +351,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   orders={displayOrders}
                   height="h-full"
                   apiKey={googleMapsKey}
+                  tower={{ role: staffRole, email: currentAdminEmail }}
                 />
               ) : (
                 <MapComponent

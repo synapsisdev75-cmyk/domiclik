@@ -173,7 +173,7 @@ export async function punchCabinShift(params: {
     driverName: params.driverName || '',
     type: params.type,
     at,
-    dateKey: at.slice(0, 10),
+    dateKey: bogotaDay(at),
     method: 'cabin',
     ...(Number.isFinite(lat) ? { lat } : {}),
     ...(Number.isFinite(lng) ? { lng } : {}),
@@ -340,12 +340,21 @@ export async function publishDriverLiveLocation(params: {
   lat: number;
   lng: number;
   heading?: number;
+  speedMps?: number;
+  accuracyM?: number;
+  moving?: boolean;
+  driverName?: string;
+  plateNumber?: string;
 }): Promise<boolean> {
   const updatedAt = new Date().toISOString();
+  const moving = params.moving;
+  const state = moving === true ? 'En movimiento' : moving === false ? 'Detenido' : 'GPS en vivo';
   const live = {
     lat: params.lat,
     lng: params.lng,
     heading: params.heading || 0,
+    speedMps: params.speedMps,
+    moving,
     updatedAt,
   };
   try {
@@ -355,8 +364,11 @@ export async function publishDriverLiveLocation(params: {
           lat: params.lat,
           lng: params.lng,
           heading: params.heading || 0,
-          addressName: 'GPS en vivo',
-          neighborhood: 'En trayecto',
+          speedMps: params.speedMps ?? null,
+          accuracyM: params.accuracyM ?? null,
+          moving: moving ?? null,
+          addressName: state,
+          neighborhood: 'Villavicencio',
           updatedAt,
         },
         updatedAt,
@@ -365,6 +377,26 @@ export async function publishDriverLiveLocation(params: {
     void mirrorDriverLiveOntoOrders(params.driverId, live).catch(() => {
       openOrderIdsCache.delete(params.driverId);
     });
+    const pointId = `loc_${params.driverId}_${updatedAt.replace(/[^\d]/g, '')}`;
+    const speed =
+      params.speedMps != null && params.speedMps >= 0 ? Math.round(params.speedMps * 3.6) : undefined;
+    void setDoc(
+      doc(db, 'location_history', pointId),
+      {
+        id: pointId,
+        driverId: params.driverId,
+        driverName: params.driverName || '',
+        plateNumber: params.plateNumber || '',
+        lat: params.lat,
+        lng: params.lng,
+        heading: params.heading || 0,
+        ...(speed != null ? { speed } : {}),
+        addressName: state,
+        timestamp: updatedAt,
+        dateKey: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date(updatedAt)),
+      },
+      { merge: true },
+    ).catch(() => undefined);
     noteNetworkResult(true);
     return true;
   } catch {
@@ -716,7 +748,13 @@ export function shiftCloseMessage(remainingMin: number, hasOpenOrder: boolean): 
 }
 
 export function todayDateKey(): string {
-  return new Date().toISOString().split('T')[0];
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+}
+
+function bogotaDay(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(d);
 }
 
 export function summarizeCabinShift(
@@ -726,18 +764,18 @@ export function summarizeCabinShift(
   const mine = punches
     .filter((p) => p.driverId === driverId)
     .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
-  const firstIn = mine.find((p) => p.type === 'in');
-  const outs = mine.filter((p) => p.type === 'out');
-  const lastOut = outs.length ? outs[outs.length - 1] : undefined;
-  const kmIn = firstIn?.odometerKm;
+  const last = mine[mine.length - 1];
+  const open = last?.type === 'in';
+  const lastIn = [...mine].reverse().find((p) => p.type === 'in');
+  const lastOut = [...mine].reverse().find((p) => p.type === 'out');
+  const kmIn = lastIn?.odometerKm;
   const kmOut = lastOut?.odometerKm;
   const kmDriven =
     typeof kmIn === 'number' && typeof kmOut === 'number' && kmOut >= kmIn
       ? Math.round((kmOut - kmIn) * 10) / 10
       : 0;
-  const inAt = firstIn?.at;
-  const outAt = lastOut?.at;
-  const open = Boolean(inAt) && !outAt;
+  const inAt = lastIn?.at;
+  const outAt = open ? undefined : lastOut?.at;
   return {
     hoursWorked: hoursBetween(inAt, open ? undefined : outAt),
     open,
@@ -783,12 +821,10 @@ export function subscribeDriverTodayPunches(
       snap.forEach((d) => {
         const data = d.data() as Record<string, unknown>;
         if (String(data.driverId || '') !== driverId) return;
+        const at = String(data.at || '');
         const dateKey = data.dateKey ? String(data.dateKey) : '';
-        if (dateKey && dateKey !== dayKey) return;
-        if (!dateKey) {
-          const at = String(data.at || '');
-          if (at && !at.startsWith(dayKey)) return;
-        }
+        const dayOfPunch = at ? bogotaDay(at) : dateKey;
+        if (dayOfPunch !== dayKey && dateKey !== dayKey) return;
         const type = String(data.type || '') === 'out' ? 'out' : 'in';
         rows.push({
           id: d.id,

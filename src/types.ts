@@ -49,6 +49,11 @@ export interface LocationCoords {
   addressName?: string;
   neighborhood?: string;
   heading?: number;
+  /** Metros por segundo reportados por el GPS. */
+  speedMps?: number;
+  accuracyM?: number;
+  /** false = el moto está quieto. true = se está moviendo. */
+  moving?: boolean;
   updatedAt?: string;
 }
 
@@ -149,6 +154,13 @@ export interface DeliveryOrder {
   deliveryAddress: string;
   deliveryCoords: LocationCoords;
   deliveryPlaceId?: string;
+  /** GPS del repartidor copiado en el pedido. El radar usa el más reciente. */
+  driverLive?: {
+    lat: number;
+    lng: number;
+    heading?: number;
+    updatedAt?: string;
+  };
   description: string;
   itemType: 'documentos' | 'paquete_pequeno' | 'comida_medicamentos' | 'varios';
   declaredValue: number;
@@ -240,7 +252,8 @@ export type AttendancePunchMethod =
   | 'webauthn_kiosk'
   | 'pin_kiosk'
   | 'biometric_vta'
-  | 'cabin';
+  | 'cabin'
+  | 'admin_force';
 
 /** PIN diario del kiosco (rota a la 01:00, jornada sede). */
 export interface AttendanceDailyPin {

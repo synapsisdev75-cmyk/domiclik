@@ -1,7 +1,9 @@
 package com.domiclick.app;
 
 import android.content.Intent;
+import android.os.Bundle;
 import android.util.Log;
+import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginHandle;
@@ -11,6 +13,33 @@ import ee.forgr.capacitor.social.login.SocialLoginPlugin;
 
 /** Required by @capgo/capacitor-social-login when requesting Google scopes. */
 public class MainActivity extends BridgeActivity implements ModifiedMainActivityForSocialLoginPlugin {
+
+  @Override
+  protected void onCreate(Bundle savedInstanceState) {
+    registerPlugin(LiveLocatorPlugin.class);
+    super.onCreate(savedInstanceState);
+  }
+
+  /** Con el localizador activo, el WebView no se pausa al bloquear la pantalla. */
+  private void keepLocatorAlive() {
+    if (!LiveLocatorService.running || getBridge() == null) return;
+    WebView view = getBridge().getWebView();
+    if (view == null) return;
+    view.onResume();
+    view.resumeTimers();
+  }
+
+  @Override
+  public void onPause() {
+    super.onPause();
+    keepLocatorAlive();
+  }
+
+  @Override
+  public void onStop() {
+    super.onStop();
+    keepLocatorAlive();
+  }
 
   @Override
   public void onActivityResult(int requestCode, int resultCode, Intent data) {

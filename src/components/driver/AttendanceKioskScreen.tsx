@@ -17,7 +17,7 @@ import {
   ATTENDANCE_PIN_RESET_HOUR,
   getAttendancePinDayKey,
 } from '../../lib/attendance';
-import { EXPECTED_SHIFT_HOURS, formatCOP } from '../../lib/adminMetrics';
+import { EXPECTED_SHIFT_HOURS, formatCOP, toDateKey } from '../../lib/adminMetrics';
 import { parseOdometerKm, summarizeDriverShift } from '../../lib/workShift';
 import { formatFuelFormulaSummary, formatGallons, formatLiters, formatFuelRateSummary } from '../../lib/motoFuel';
 import {
@@ -247,7 +247,7 @@ export const AttendanceKioskScreen: React.FC = () => {
   const [lastPunchFuel, setLastPunchFuel] = useState<AttendancePunch | null>(null);
   const [now, setNow] = useState(() => new Date());
 
-  const calendarToday = now.toISOString().split('T')[0];
+  const calendarToday = toDateKey(now);
   const activePinDay = getAttendancePinDayKey(now);
 
   useEffect(() => {

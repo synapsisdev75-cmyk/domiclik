@@ -6,7 +6,7 @@ import {
   useMap,
 } from '@vis.gl/react-google-maps';
 import { MotorizadoDriver, DriverLocationHistoryPoint } from '../../types';
-import { subscribeDriverLocationHistory } from '../../lib/firebase';
+import { toDateKey } from '../../lib/adminMetrics';
 import { VILLAVICENCIO_CENTER } from '../../data/villavicencio';
 import { getGoogleMapsApiKey } from '../GoogleMapRadar';
 import {
@@ -202,7 +202,7 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
     initialSelectedDriverId || approvedDrivers[0]?.id || '',
   );
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = toDateKey(new Date());
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
 
   const [historyPoints, setHistoryPoints] = useState<DriverLocationHistoryPoint[]>([]);

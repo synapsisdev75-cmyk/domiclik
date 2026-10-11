@@ -15,6 +15,7 @@ interface ChatWindowProps {
   driver: MotorizadoDriver;
   currentRole: 'admin' | 'driver' | 'secretary';
   senderName: string;
+  heightClass?: string;
 }
 
 const QUICK_PRESETS = [
@@ -30,6 +31,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   driver,
   currentRole,
   senderName,
+  heightClass = 'h-[520px]',
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [textInput, setTextInput] = useState('');
@@ -110,7 +112,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[520px] bg-[#070A12] border border-[#00F0FF]/30 rounded-2xl overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.8)]">
+    <div className={`flex flex-col ${heightClass} bg-[#070A12] border border-[#00F0FF]/30 rounded-2xl overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.8)]`}>
       <div className="bg-[#0D1322] p-3.5 border-b border-[#1E293B] flex items-center justify-between font-mono">
         <div className="flex items-center gap-3">
           <div className="relative">

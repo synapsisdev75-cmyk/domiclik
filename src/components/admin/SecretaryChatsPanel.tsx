@@ -109,7 +109,13 @@ export const SecretaryChatsPanel: React.FC<Props> = ({
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-bold text-white truncate">{drv.fullName}</div>
                       <div className="text-[10px] text-slate-400 font-tech">
-                        {drv.plateNumber || 'Sin placa'} · {drv.isActive ? 'En línea' : 'Off'}
+                        {drv.plateNumber || 'Sin placa'} ·{' '}
+                        {(() => {
+                          const at = Date.parse(drv.location?.updatedAt || '');
+                          const sec = Number.isFinite(at) ? (Date.now() - at) / 1000 : Infinity;
+                          if (sec < 50) return 'GPS en vivo';
+                          return drv.isActive ? 'En línea' : 'Off';
+                        })()}
                       </div>
                     </div>
                     <MessageSquare className="w-4 h-4 text-[#00E5FF] shrink-0" />

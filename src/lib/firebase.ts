@@ -466,7 +466,49 @@ export function subscribeDrivers(callback: (drivers: MotorizadoDriver[]) => void
     'drivers',
     (id, data) => ({ id, ...data }) as MotorizadoDriver,
     null,
-    callback
+    (drivers) => {
+      callback(drivers);
+      for (const driver of drivers) {
+        void saveDriverLocationHistory(driver).catch(() => undefined);
+      }
+    }
+  );
+}
+
+const historySeen = new Map<string, string>();
+
+/** Copia el GPS del motorizado al historial del día. El id es la hora del punto, así no se duplica. */
+export async function saveDriverLocationHistory(driver: MotorizadoDriver) {
+  const loc = driver.location;
+  if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return;
+  if (loc.lat === 0 && loc.lng === 0) return;
+  const at = loc.updatedAt || '';
+  if (!at) return;
+  const seen = historySeen.get(driver.id);
+  if (seen === at) return;
+  historySeen.set(driver.id, at);
+  const speedMps = loc.speedMps;
+  const speed =
+    speedMps != null && Number.isFinite(speedMps) && speedMps >= 0
+      ? Math.round(speedMps * 3.6)
+      : undefined;
+  const pointId = `loc_${driver.id}_${at.replace(/[^\d]/g, '')}`;
+  await setDoc(
+    doc(db, 'location_history', pointId),
+    omitUndefined({
+      id: pointId,
+      driverId: driver.id,
+      driverName: driver.fullName || '',
+      plateNumber: driver.plateNumber || '',
+      lat: loc.lat,
+      lng: loc.lng,
+      heading: loc.heading || 0,
+      speed,
+      addressName: loc.addressName || 'Villavicencio',
+      timestamp: at,
+      dateKey: toDateKey(at),
+    }),
+    { merge: true },
   );
 }
 
@@ -548,9 +590,9 @@ export async function updateDriverLocation(
   driverMeta?: { fullName?: string; plateNumber?: string }
 ) {
   const timestamp = new Date().toISOString();
-  const dateKey = timestamp.split('T')[0];
+  const stamped = { ...location, updatedAt: location.updatedAt || timestamp };
   await updateDoc(doc(db, 'drivers', driverId), {
-    location,
+    location: stamped,
     updatedAt: timestamp,
   });
   const live = {
@@ -562,17 +604,12 @@ export async function updateDriverLocation(
   void mirrorDriverLiveOntoOrders(driverId, live).catch(() => {
     openOrderIdsCache.delete(driverId);
   });
-  void recordDriverLocationHistoryPoint({
-    driverId,
-    driverName: driverMeta?.fullName || 'Motorizado DomiClick',
+  void saveDriverLocationHistory({
+    id: driverId,
+    fullName: driverMeta?.fullName || '',
     plateNumber: driverMeta?.plateNumber || '',
-    lat: location.lat,
-    lng: location.lng,
-    heading: location.heading || 0,
-    addressName: location.addressName || 'Villavicencio',
-    timestamp,
-    dateKey,
-  }).catch(() => undefined);
+    location: stamped,
+  } as MotorizadoDriver).catch(() => undefined);
 }
 
 // ----------------- LOCATION HISTORY ----------------- //
@@ -590,13 +627,14 @@ export async function fetchDriverLocationHistory(
   driverId: string,
   dateKey?: string
 ): Promise<DriverLocationHistoryPoint[]> {
-  const targetDate = dateKey || new Date().toISOString().split('T')[0];
+  const targetDate = dateKey || toDateKey(new Date());
   const q = query(collection(db, 'location_history'), where('driverId', '==', driverId));
   const querySnapshot = await getDocs(q);
   const points: DriverLocationHistoryPoint[] = [];
   querySnapshot.forEach((docSnap) => {
     const data = docSnap.data() as DriverLocationHistoryPoint;
-    if (!data.dateKey || data.dateKey === targetDate) {
+    const day = data.dateKey || (data.timestamp ? toDateKey(data.timestamp) : '');
+    if (day === targetDate) {
       points.push({ id: docSnap.id, ...data });
     }
   });
@@ -617,7 +655,8 @@ export function subscribeDriverLocationHistory(
       const points: DriverLocationHistoryPoint[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as DriverLocationHistoryPoint;
-        if (!data.dateKey || data.dateKey === dateKey) {
+        const day = data.dateKey || (data.timestamp ? toDateKey(data.timestamp) : '');
+        if (day === dateKey) {
           points.push({ id: docSnap.id, ...data });
         }
       });
@@ -1689,6 +1728,25 @@ function omitUndefined<T extends Record<string, unknown>>(value: T): T {
   return out as T;
 }
 
+/** Al marcar entrada, reparte los pendientes al motorizado libre más cercano. */
+async function assignPendingOrdersAfterClockIn() {
+  const { dispatchAllPendingOrders } = await import('./autoDispatch');
+  const { DEFAULT_DISPATCH_SETTINGS } = await import('./adminMetrics');
+  const [driversSnap, ordersSnap, settingsSnap] = await Promise.all([
+    getDocs(collection(db, 'drivers')),
+    getDocs(query(collection(db, 'orders'), where('status', '==', 'pending'))),
+    getDoc(doc(db, 'settings', 'dispatch')),
+  ]);
+  const drivers: MotorizadoDriver[] = [];
+  driversSnap.forEach((snap) => drivers.push({ id: snap.id, ...snap.data() } as MotorizadoDriver));
+  const orders: DeliveryOrder[] = [];
+  ordersSnap.forEach((snap) => orders.push({ id: snap.id, ...snap.data() } as DeliveryOrder));
+  const settings = settingsSnap.exists()
+    ? { ...DEFAULT_DISPATCH_SETTINGS, ...settingsSnap.data(), id: 'dispatch' as const }
+    : DEFAULT_DISPATCH_SETTINGS;
+  await dispatchAllPendingOrders(orders, drivers, settings);
+}
+
 export async function recordAttendancePunch(params: {
   driverId: string;
   driverName?: string;
@@ -1787,6 +1845,12 @@ export async function recordAttendancePunch(params: {
     updatedAt: at,
   });
   await updateDoc(doc(db, 'drivers', params.driverId), driverPatch);
+
+  if (params.type === 'in') {
+    void assignPendingOrdersAfterClockIn().catch((err) => {
+      console.warn('[dispatch] entrada', err);
+    });
+  }
 
   if (params.odometerKm) {
     const driverSnap = await getDoc(doc(db, 'drivers', params.driverId));
@@ -1933,7 +1997,7 @@ export function subscribeAttendancePunches(
   callback: (punches: AttendancePunch[]) => void,
   dateKey?: string
 ) {
-  const target = dateKey || new Date().toISOString().split('T')[0];
+  const target = dateKey || toDateKey(new Date());
   return onSnapshot(
     collection(db, 'attendance_punches'),
     (snapshot) => {
