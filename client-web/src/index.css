@@ -36,11 +36,11 @@
     --domi-blue: #1e5aef;
     --domi-green: #00a85a;
     --domi-text: #0f1a2b;
-    --domi-muted: #5a6b84;
+    --domi-muted: #4a5b74;
     --domi-drop: #ffffff;
     --domi-drop-border: #cfd9e8;
     --domi-field-bg: #ffffff;
-    --domi-placeholder: #8a97ab;
+    --domi-placeholder: #5c6b82;
     --domi-header-bg: rgba(255, 255, 255, 0.82);
     --domi-header-bg-scrolled: rgba(255, 255, 255, 0.92);
     --domi-body-grad-a: rgba(255, 87, 34, 0.1);
@@ -136,6 +136,64 @@
   to {
     stroke-dashoffset: -120;
   }
+}
+
+@keyframes pay-choice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pay-border-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 87, 34, 0.65);
+    border-color: rgba(255, 87, 34, 0.35);
+  }
+  40% {
+    box-shadow: 0 0 0 8px rgba(255, 87, 34, 0.12);
+    border-color: #ff5722;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 87, 34, 0);
+  }
+}
+
+@keyframes pay-border-glow-cyan {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.55);
+    border-color: rgba(0, 229, 255, 0.3);
+  }
+  40% {
+    box-shadow: 0 0 0 8px rgba(0, 229, 255, 0.12);
+    border-color: #00e5ff;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 229, 255, 0);
+  }
+}
+
+.pay-choice-grid {
+  animation: pay-choice-in 0.28s ease-out;
+}
+
+.pay-choice-btn {
+  transition:
+    border-color 0.25s ease,
+    background 0.25s ease,
+    transform 0.2s ease;
+}
+
+.pay-choice-btn.is-on {
+  animation: pay-border-glow 0.75s ease-out;
+}
+
+.pay-choice-btn.is-on-cyan {
+  animation: pay-border-glow-cyan 0.75s ease-out;
 }
 
 @keyframes pulse-soft {
@@ -993,6 +1051,94 @@ body:not(.domi-web) .map-route-body {
   display: none;
 }
 
+.theme-switch {
+  position: relative;
+  width: 58px;
+  height: 30px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  cursor: grab;
+  touch-action: none;
+  background: #1c1c1e;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 6px 14px rgba(0, 0, 0, 0.22);
+  transition: background 0.35s ease, box-shadow 0.35s ease;
+}
+
+.theme-switch--light {
+  background: #f3f4f6;
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, 0.06),
+    0 6px 14px rgba(15, 23, 42, 0.1);
+}
+
+.theme-switch:active {
+  cursor: grabbing;
+}
+
+.theme-switch__icon {
+  position: absolute;
+  top: 50%;
+  display: flex;
+  color: #b7bcc6;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.theme-switch--dark .theme-switch__icon--moon {
+  color: #d5d8e0;
+  animation: theme-moon-glow 1.8s ease-in-out infinite;
+}
+
+.theme-switch__icon--moon {
+  left: 7px;
+}
+
+.theme-switch__icon--sun {
+  right: 6px;
+}
+
+.theme-switch__knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #3a3a3c;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: transform 0.38s cubic-bezier(0.34, 1.45, 0.64, 1), background 0.3s ease, box-shadow 0.3s ease;
+  pointer-events: none;
+}
+
+.theme-switch--light .theme-switch__knob {
+  background: #ffffff;
+  box-shadow: 0 2px 7px rgba(15, 23, 42, 0.18);
+}
+
+.theme-switch.is-dragging .theme-switch__knob {
+  transition: none;
+  scale: 1.04;
+}
+
+@keyframes theme-moon-glow {
+  0%,
+  100% { opacity: 0.72; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-switch,
+  .theme-switch__knob,
+  .theme-switch__icon {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -1045,12 +1191,150 @@ body:not(.domi-web) .map-route-body {
 
 /* Safe area + margen generoso: iconos por encima de la barra de gestos Android */
 .safe-bottom {
-  padding-bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 22px));
+  padding-bottom: max(20px, calc(env(safe-area-inset-bottom, 0px) + 14px));
 }
 
 /* Bajo la barra de estado / notch en Android e iOS */
 .safe-top {
   padding-top: max(20px, calc(env(safe-area-inset-top, 0px) + 14px));
+}
+
+/*
+ * Pantallas de la app (cliente + cabina): no bajo el notch,
+ * ancho usable en móvil y tablet, sin desborde horizontal.
+ */
+.app-screen {
+  width: 100%;
+  max-width: 36rem !important;
+  box-sizing: border-box;
+  overflow-x: clip;
+}
+
+.app-screen:not([class*='pt-[']):not([class*='pt-']) {
+  padding-top: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.75rem));
+}
+
+html.native-app {
+  --domi-status-pad: 28px;
+  --domi-nav-clear: 5.75rem;
+}
+
+html.native-app.plt-android {
+  /* Status bar + punch-hole: reserva fija aunque env(safe-area) llegue en 0 */
+  --domi-status-pad: 52px;
+  --domi-nav-clear: 6.25rem;
+}
+
+html.native-app .app-screen:not([class*='pt-[']) {
+  padding-top: calc(var(--domi-status-pad) + env(safe-area-inset-top, 0px) + 10px) !important;
+}
+
+html.native-app.plt-android .app-screen:not([class*='pt-[']) {
+  padding-top: calc(var(--domi-status-pad) + env(safe-area-inset-top, 0px) + 12px) !important;
+}
+
+/* Menú inferior cliente: 5 iconos visibles en pantallas angostas */
+.app-bottom-nav__row {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0;
+  width: 100%;
+  padding: 0.35rem 0.15rem 0.2rem;
+}
+
+.app-bottom-nav__item {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 20%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  min-height: 3.1rem;
+  padding: 0.15rem 0.1rem;
+  overflow: visible;
+}
+
+.app-bottom-nav__item span {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-size: 0.62rem;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 360px) {
+  .app-bottom-nav__item span {
+    font-size: 0.55rem;
+  }
+  .app-bottom-nav__item svg {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+}
+
+/* Categorías inicio: no se aplastan ni se cortan */
+.app-home-cats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.app-home-cats button {
+  min-width: 0;
+}
+
+.app-home-cats__icon {
+  width: clamp(2.75rem, 14vw, 3.75rem);
+  height: clamp(2.75rem, 14vw, 3.75rem);
+}
+
+@media (min-width: 768px) {
+  .app-screen {
+    max-width: 44rem !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-screen {
+    max-width: 52rem !important;
+  }
+}
+
+html.native-app,
+html.native-app body {
+  overflow-x: hidden;
+}
+
+/* Mapa cabina: menú inferior oculto → más área útil */
+html.map-nav-hidden .driver-map-stage {
+  bottom: 0;
+}
+
+/* Mapa cabina: contenedor a pantalla completa; no forzar touch-action en .gm-style
+   (en algunos Android eso deja el mapa en verde vacío). */
+.driver-map-stage {
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.driver-map-stage .domi-live-map {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100%;
+}
+
+html.driver-map-gestures,
+html.driver-map-gestures body {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .site-footer-banner {
@@ -1138,4 +1422,88 @@ body:not(.domi-web) .map-route-body {
 
 [data-theme='light'] .on-dark [class*='text-[var(--domi-cyan)]'] {
   color: #00e5ff;
+}
+
+[data-theme='light'] .text-slate-100,
+[data-theme='light'] .text-slate-200,
+[data-theme='light'] .text-slate-400,
+[data-theme='light'] .text-slate-500 {
+  color: var(--domi-muted);
+}
+
+[data-theme='light'] .text-red-200,
+[data-theme='light'] .text-red-300 {
+  color: #b42318;
+}
+
+[data-theme='light'] .text-amber-200,
+[data-theme='light'] .text-amber-300 {
+  color: #9a5b00;
+}
+
+[data-theme='light'] .text-emerald-200,
+[data-theme='light'] .text-emerald-300 {
+  color: #067647;
+}
+
+[data-theme='light'] .placeholder-white::placeholder,
+[data-theme='light'] input::placeholder,
+[data-theme='light'] textarea::placeholder {
+  color: var(--domi-placeholder);
+}
+
+[data-theme='light'] .bg-white\/5,
+[data-theme='light'] .bg-white\/10 {
+  background-color: rgba(15, 26, 43, 0.06);
+}
+
+[data-theme='light'] header,
+[data-theme='light'] .glass-panel,
+[data-theme='light'] .field-input {
+  color: var(--domi-text);
+}
+
+[data-theme='light'] .text-emerald-100,
+[data-theme='light'] .text-cyan-100,
+[data-theme='light'] .text-red-100 {
+  color: var(--domi-text);
+}
+
+/* Cabina: alto contraste. Fondo claro = letra negra. Fondo oscuro = letra blanca. */
+[data-theme='light'] [class*='text-white'] {
+  color: #111827;
+  -webkit-text-fill-color: #111827;
+}
+
+[data-theme='dark'] [class*='text-white'] {
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+}
+
+[data-theme='light'] .on-dark,
+[data-theme='light'] .on-dark [class*='text-white'],
+[data-theme='light'] .cta-primary,
+[data-theme='light'] .cta-primary *,
+[data-theme='light'] [class*='bg-[#0'] [class*='text-white'],
+[data-theme='light'] [class*='bg-[#1'] [class*='text-white'],
+[data-theme='light'] [class*='bg-black'] [class*='text-white'],
+[data-theme='light'] [class*='bg-[#FF5722]'],
+[data-theme='light'] [class*='bg-[#2B6CFF]'],
+[data-theme='light'] [class*='bg-[#00E676]'] {
+  color: #ffffff;
+  -webkit-text-fill-color: #ffffff;
+}
+
+[data-theme='light'] input:not([type='file']):not([type='checkbox']):not([type='radio']),
+[data-theme='light'] textarea {
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;
+  caret-color: #111827;
+}
+
+[data-theme='dark'] input:not([type='file']):not([type='checkbox']):not([type='radio']),
+[data-theme='dark'] textarea {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: #ffffff;
 }

@@ -60,9 +60,12 @@ async function predict(q: string): Promise<Suggestion[]> {
       {
         input,
         componentRestrictions: { country: 'co' },
+        // LatLngBoundsLiteral (no {lat,lng}): evita InvalidValueError en Places.
         locationBias: {
-          center: { lat: VILLAVICENCIO_CENTER.lat, lng: VILLAVICENCIO_CENTER.lng },
-          radius: 35000,
+          south: VILLAVICENCIO_CENTER.lat - 0.18,
+          west: VILLAVICENCIO_CENTER.lng - 0.18,
+          north: VILLAVICENCIO_CENTER.lat + 0.18,
+          east: VILLAVICENCIO_CENTER.lng + 0.18,
         },
       },
       (res, status) => {

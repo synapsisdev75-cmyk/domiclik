@@ -7,11 +7,13 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import com.google.android.gms.location.FusedLocationProviderClient;
@@ -23,10 +25,11 @@ import com.google.android.gms.location.Priority;
 
 /**
  * GPS de alta precisión con servicio en primer plano.
- * Sigue marcando cada tramo aunque la pantalla esté bloqueada.
+ * No arranca FGS tipo location sin permiso runtime (Android 14+ / targetSdk 36).
  */
 public class LiveLocatorService extends Service {
   static volatile boolean running = false;
+  private static final String TAG = "DomiClickLocator";
   private static final int NOTIFICATION_ID = 4101;
   private static final String CHANNEL_ID = "domiclick_locator";
 
@@ -34,12 +37,29 @@ public class LiveLocatorService extends Service {
   private LocationCallback callback;
   private PowerManager.WakeLock wakeLock;
 
+  static boolean hasLocationPermission(Context context) {
+    if (context == null) return false;
+    boolean fine =
+        ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED;
+    boolean coarse =
+        ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED;
+    return fine || coarse;
+  }
+
   static void start(Context context) {
+    if (context == null) return;
+    if (!hasLocationPermission(context)) {
+      Log.w(TAG, "No se inicia LiveLocatorService: falta permiso de ubicación");
+      return;
+    }
     Intent intent = new Intent(context, LiveLocatorService.class);
     ContextCompat.startForegroundService(context, intent);
   }
 
   static void stop(Context context) {
+    if (context == null) return;
     context.stopService(new Intent(context, LiveLocatorService.class));
   }
 
@@ -50,12 +70,33 @@ public class LiveLocatorService extends Service {
 
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
-    Notification notification = buildNotification("Buscando GPS preciso…");
-    if (Build.VERSION.SDK_INT >= 29) {
-      startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
-    } else {
-      startForeground(NOTIFICATION_ID, notification);
+    // Crítico: sin FINE/COARSE, startForeground(TYPE_LOCATION) tumba la app (SecurityException).
+    if (!hasLocationPermission(this)) {
+      Log.w(TAG, "onStartCommand sin permiso de ubicación → stopSelf");
+      running = false;
+      stopSelf();
+      return START_NOT_STICKY;
     }
+
+    Notification notification = buildNotification("Buscando GPS preciso…");
+    try {
+      if (Build.VERSION.SDK_INT >= 29) {
+        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+      } else {
+        startForeground(NOTIFICATION_ID, notification);
+      }
+    } catch (SecurityException e) {
+      Log.e(TAG, "startForeground location rechazado", e);
+      running = false;
+      stopSelf();
+      return START_NOT_STICKY;
+    } catch (IllegalArgumentException e) {
+      Log.e(TAG, "startForeground inválido", e);
+      running = false;
+      stopSelf();
+      return START_NOT_STICKY;
+    }
+
     running = true;
     acquireWakeLock();
     requestUpdates();
@@ -66,7 +107,11 @@ public class LiveLocatorService extends Service {
   public void onDestroy() {
     running = false;
     if (client != null && callback != null) {
-      client.removeLocationUpdates(callback);
+      try {
+        client.removeLocationUpdates(callback);
+      } catch (RuntimeException ignored) {
+        // ignore
+      }
     }
     if (wakeLock != null && wakeLock.isHeld()) {
       wakeLock.release();
@@ -84,8 +129,7 @@ public class LiveLocatorService extends Service {
 
   @SuppressLint("MissingPermission")
   private void requestUpdates() {
-    if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
-        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+    if (!hasLocationPermission(this)) {
       stopSelf();
       return;
     }
@@ -112,10 +156,16 @@ public class LiveLocatorService extends Service {
             if (nm != null) {
               nm.notify(NOTIFICATION_ID, buildNotification(state));
             }
-            LiveLocatorPlugin.emitFix(loc.getLatitude(), loc.getLongitude(), loc.getAccuracy(), speed, heading);
+            LiveLocatorPlugin.emitFix(
+                loc.getLatitude(), loc.getLongitude(), loc.getAccuracy(), speed, heading);
           }
         };
-    client.requestLocationUpdates(request, callback, Looper.getMainLooper());
+    try {
+      client.requestLocationUpdates(request, callback, Looper.getMainLooper());
+    } catch (SecurityException e) {
+      Log.e(TAG, "requestLocationUpdates sin permiso", e);
+      stopSelf();
+    }
   }
 
   private Notification buildNotification(String state) {

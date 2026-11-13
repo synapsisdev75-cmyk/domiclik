@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { ChevronDown, MessageCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { WHATSAPP_URL } from '../lib/config';
-import { OFFICE_CITY } from '../lib/companyInfo';
+import { COMMERCIAL_WHATSAPP_URL, WHATSAPP_URL } from '../lib/config';
+import { COMMERCIAL_PHONE_DISPLAY, OFFICE_CITY, SUPPORT_PHONE_DISPLAY } from '../lib/companyInfo';
 
 const FAQS = [
   {
@@ -18,7 +18,7 @@ const FAQS = [
   {
     id: 'pago',
     title: 'Problemas con el pago',
-    body: 'Puedes pagar en efectivo, transferencia o indicar que ya pagaste. Si hubo un cobro incorrecto, escríbenos por WhatsApp con tu código de seguimiento.',
+    body: 'Puedes pagar contraentrega o por transferencia en la pasarela. Si eliges transferencia, Wompi te devuelve a seguimiento cuando el pago quede exitoso o rechazado. Si fue rechazado, puedes intentar de nuevo.',
   },
   {
     id: 'direccion',
@@ -77,7 +77,15 @@ export function HelpPage() {
         className="cta-primary mt-8 flex w-full items-center justify-center gap-2"
       >
         <MessageCircle className="h-5 w-5" />
-        Contactar soporte
+        Soporte y PQR · {SUPPORT_PHONE_DISPLAY}
+      </a>
+      <a
+        href={COMMERCIAL_WHATSAPP_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="cta-ghost mt-3 flex w-full items-center justify-center gap-2"
+      >
+        Comercial · {COMMERCIAL_PHONE_DISPLAY}
       </a>
     </div>
   );

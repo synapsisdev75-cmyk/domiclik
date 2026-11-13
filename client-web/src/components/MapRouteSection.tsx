@@ -226,7 +226,7 @@ function MapRouteSectionInner(props: MapRouteSectionProps) {
 export function MapRouteSection(props: MapRouteSectionProps) {
   if (!GOOGLE_MAPS_API_KEY) {
     return (
-      <div className="rounded-xl border border-[var(--domi-border)] bg-[#0a0e16] px-4 py-8 text-center text-sm text-[var(--domi-muted)]">
+      <div className="rounded-xl border border-[var(--domi-border)] bg-[var(--domi-panel)] px-4 py-8 text-center text-sm text-[var(--domi-muted)]">
         Falta <code className="text-[var(--domi-cyan)]">VITE_GOOGLE_MAPS_PLATFORM_KEY</code> en
         client-web/.env para el buscador y el mapa.
       </div>

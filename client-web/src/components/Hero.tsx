@@ -72,7 +72,7 @@ export function Hero({ onCtaClick }: HeroProps) {
           loop
           playsInline
           preload="metadata"
-          poster="/brand/logo-optimized-transparent.png"
+          poster="/brand/logo-domiclick.png"
           onError={() => setShowVideo(false)}
         />
       ) : (

@@ -1,0 +1,1 @@
+En el mapa, el botón + ahora permite confirmar recogida y entrega. Con hasta 3 pedidos se ven todas las R y todas las E. Puedes ocultar el menú para ver mejor la ruta. Las alertas se callan al asignar el pedido.

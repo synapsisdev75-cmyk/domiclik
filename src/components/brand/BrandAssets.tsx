@@ -1,6 +1,6 @@
 /** DomiClick brand assets — cropped + transparent PNGs */
 export const BRAND = {
-  logoMark: '/brand/logo-mark.png',
+  logoMark: '/brand/logo-mark.png?v=clear',
   logoWordmark: '/brand/logo-wordmark.png',
   logoNeon: '/brand/logo-neon.png',
   logo192: '/brand/logo-192.png',

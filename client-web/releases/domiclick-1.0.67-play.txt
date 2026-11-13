@@ -1,0 +1,1 @@
+En el mapa puedes ocultar el menú blanco para ver mejor la ruta. Las alertas de pedido nuevo se callan solas al asignarse automáticamente. El inicio ya no se mete bajo la hora del teléfono y en modo claro se lee bien.

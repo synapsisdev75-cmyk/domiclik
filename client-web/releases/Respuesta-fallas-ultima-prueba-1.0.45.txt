@@ -1,0 +1,110 @@
+DomiClick
+Respuesta a “Fallas y Correcciones última prueba”
+Versión 1.0.45  ·  versionCode 46  ·  26 de octubre de 2026
+
+Este documento responde, en lenguaje sencillo, cada hallazgo de la última prueba.
+Las correcciones ya están publicadas en la torre y en la web. En el teléfono del
+repartidor se ven al instalar el AAB 1.0.45.
+
+
+Qué se corrigió
+
+
+1. Cancelación sin aviso al cliente
+Antes: al cancelar, el cliente no se enteraba.
+Ahora: al confirmar la cancelación, el pedido pasa a Cancelado y el cliente
+recibe un aviso. Al abrir el detalle ve el estado Cancelado. El mismo aviso
+no se envía dos veces.
+
+
+2. Sin sonido al recoger el pedido
+Antes: el cliente no oía nada cuando se marcaba Recogido.
+Ahora: al registrar la recogida suena una alerta y llega la notificación,
+con la app abierta o en segundo plano (si el permiso de sonido está activo).
+
+
+3. Sin sonido al llegar al destino
+Antes: el cliente no oía nada cuando el repartidor llegaba.
+Ahora: al marcar la llegada suena una alerta y llega la notificación,
+igual que en la recogida.
+
+
+4. PIN de entrega que se desaparecía
+Antes: el código se perdía de vista con facilidad.
+Ahora: el PIN se queda visible en el pedido activo (detalle y lista).
+Si se sale y se vuelve a entrar, es el mismo código. Se apaga solo
+cuando el pedido se entrega o se cancela.
+
+
+5. Alarma de pedido nuevo al repartidor
+Antes: el motorizado podía no notar un pedido nuevo.
+Ahora: al asignarle un pedido suena una alarma repetida en el teléfono.
+No para hasta que acepte la orden.
+
+
+6. Foto de entrega no habilitada
+Antes: no se podía tomar la evidencia al entregar.
+Ahora: en el flujo de entrega se abre la cámara, se pide el permiso,
+se toma la foto y se guarda en ese pedido. Si la carga falla, se avisa
+y se puede reintentar.
+
+
+7. Error al abrir el historial
+Antes: el botón de historial en la torre fallaba.
+Ahora: el historial abre sin error. Se pueden ver los pedidos
+del alcance autorizado y el detalle de uno ya finalizado.
+
+
+8. Kilómetros bloqueados
+Antes: por el error del historial no se podían revisar los km.
+Ahora: cada pedido muestra la distancia registrada en kilómetros
+y el dato queda disponible después del cierre.
+
+
+9. Comparación de kilómetros
+Antes: no se podía comparar la distancia de la app con el recorrido real.
+Ahora: en el historial se ve la distancia de la app, la del GPS
+y la diferencia. La tolerancia de aceptación es del 15 %.
+
+
+10. Pedidos duplicados
+Antes: se podían crear dos veces el mismo pedido sin aviso.
+Ahora: si el mismo cliente pide otra vez la misma recogida y la misma
+entrega mientras el pedido sigue activo, el sistema advierte y pide
+confirmación antes de crear otro.
+
+
+11. Estrellas sin relleno
+Antes: las estrellas no se pintaban y solo se veía un porcentaje.
+Ahora: se elige de 1 a 5 estrellas y se rellenan al toque.
+La puntuación queda guardada en el pedido. Las estrellas se ven
+aparte del porcentaje de efectividad.
+
+
+12. Sin confirmación de la calificación
+Antes: el cliente no sabía si su nota quedó enviada.
+Ahora: al guardar bien se muestra la confirmación y el valor.
+Al reabrir el pedido, la calificación sigue visible. Si falla
+el guardado, se informa el error y se puede reintentar.
+
+
+13. Pedidos sin asignar, sin alerta en la torre
+Antes: la central no sonaba cuando un pedido quedaba pendiente.
+Ahora: suena una alerta y se ve un aviso con el código del pedido.
+Se mantiene hasta que se asigne o se cancele.
+
+
+14. Asignación sin mirar quién está más cerca
+Antes: un pedido del norte podía ir a un repartidor del sur.
+Ahora: se mira quién está en turno, con GPS vigente y cupo.
+Se asigna al más cercano al punto de recogida. El criterio
+queda registrado en el pedido.
+
+
+Cómo probarlo
+- Torre y web: recargar la página.
+- App del transportista: instalar el AAB 1.0.45 (versionCode 46).
+  Archivo: client-web/releases/domiclick-1.0.45.aab
+
+En resumen: las 14 fallas de la última prueba quedaron atendidas
+en esta versión.

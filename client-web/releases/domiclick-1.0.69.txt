@@ -1,0 +1,9 @@
+DomiClick 1.0.69 (versionCode 70) — APK de prueba
+
+Incluye:
+- Preferencia de pago del cliente (contraentrega / en línea) hasta borrar caché
+- Menú + del mapa: confirmar recogida y entrega
+- R1–R3 y E1–E3 con hasta 3 pedidos
+- Menú del mapa ocultable
+- Silencio de alerta al asignar
+- Safe area / contraste modo claro

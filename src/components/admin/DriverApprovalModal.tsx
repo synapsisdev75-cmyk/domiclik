@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MotorizadoDriver } from '../../types';
 import { updateDriverApprovalStatus } from '../../lib/firebase';
+import { isPendingDriverStatus } from '../../lib/driverStatus';
 import { CheckCircle2, XCircle, X } from 'lucide-react';
 
 interface DriverApprovalModalProps {
@@ -19,21 +20,34 @@ export const DriverApprovalModal: React.FC<DriverApprovalModalProps> = ({
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   if (!isOpen || !driver) return null;
 
   const handleApprove = async () => {
     setLoading(true);
-    await updateDriverApprovalStatus(driver.id, 'approved', adminName);
-    setLoading(false);
-    onClose();
+    setActionError(null);
+    try {
+      await updateDriverApprovalStatus(driver.id, 'approved', adminName);
+      onClose();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'No se pudo aprobar');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleReject = async () => {
     setLoading(true);
-    await updateDriverApprovalStatus(driver.id, 'rejected', adminName, rejectReason);
-    setLoading(false);
-    onClose();
+    setActionError(null);
+    try {
+      await updateDriverApprovalStatus(driver.id, 'rejected', adminName, rejectReason);
+      onClose();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'No se pudo rechazar');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const birthLabel = driver.birthDate
@@ -133,6 +147,10 @@ export const DriverApprovalModal: React.FC<DriverApprovalModalProps> = ({
             </div>
           )}
 
+          {actionError ? (
+            <p className="text-xs text-red-300">{actionError}</p>
+          ) : null}
+
           {!showRejectInput && (
             <div className="flex flex-col sm:flex-row gap-3 pt-3">
               <button
@@ -159,3 +177,138 @@ export const DriverApprovalModal: React.FC<DriverApprovalModalProps> = ({
     </div>
   );
 };
+
+export function PendingDriverQueue({
+  drivers,
+  adminName,
+  onReview,
+}: {
+  drivers: MotorizadoDriver[];
+  adminName: string;
+  onReview?: (driver: MotorizadoDriver) => void;
+}) {
+  const pending = drivers
+    .filter((d) => isPendingDriverStatus(d.status))
+    .sort((a, b) =>
+      String(b.updatedAt || b.createdAt || '').localeCompare(
+        String(a.updatedAt || a.createdAt || ''),
+      ),
+    );
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function approveNow(driver: MotorizadoDriver) {
+    setBusyId(driver.id);
+    setErr(null);
+    try {
+      await updateDriverApprovalStatus(driver.id, 'approved', adminName);
+      setErr(null);
+    } catch (e) {
+      console.error('[PendingDriverQueue] approve', e);
+      setErr(e instanceof Error ? e.message : 'No se pudo aprobar');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function rejectNow(driver: MotorizadoDriver) {
+    setBusyId(driver.id);
+    setErr(null);
+    try {
+      await updateDriverApprovalStatus(
+        driver.id,
+        'rejected',
+        adminName,
+        'Rechazado desde cola de solicitudes',
+      );
+    } catch (e) {
+      console.error('[PendingDriverQueue] reject', e);
+      setErr(e instanceof Error ? e.message : 'No se pudo rechazar');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div
+      className={`space-y-2.5 rounded-2xl border-2 p-3 ${
+        pending.length
+          ? 'border-amber-400/60 bg-amber-950/35'
+          : 'border-[#1a2744] bg-[#0A1020]/80'
+      }`}
+    >
+      <p
+        className={`text-[11px] font-black uppercase tracking-wide ${
+          pending.length ? 'text-amber-100' : 'text-slate-300'
+        }`}
+      >
+        Transportistas por aprobar · {pending.length}
+        <span className="ml-2 font-tech normal-case tracking-normal text-[10px] opacity-80">
+          · en vivo
+        </span>
+      </p>
+      {pending.length === 0 ? (
+        <p className="text-[11px] text-slate-400">
+          Escuchando solicitudes nuevas de la app. Cuando un transportista se registre, aparece
+          aquí al instante para aprobar o rechazar.
+        </p>
+      ) : (
+        <p className="text-[11px] text-amber-100/80">
+          Pulsa Aprobar para que entren a la cabina, o Rechazar. La moto se vincula después en
+          Flota.
+        </p>
+      )}
+      {err ? <p className="text-xs text-red-300">{err}</p> : null}
+      {pending.map((drv) => (
+        <div
+          key={drv.id}
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-[#0A1020] p-3"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            {drv.photoUrl ? (
+              <img src={drv.photoUrl} alt="" className="h-10 w-10 rounded-xl object-cover" />
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20 text-lg">
+                🛵
+              </div>
+            )}
+            <div className="min-w-0">
+              <div className="truncate text-sm font-bold text-white">{drv.fullName}</div>
+              <div className="truncate text-[10px] text-slate-400">
+                {drv.email}
+                {drv.documentId ? ` · CC ${drv.documentId}` : ''}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {onReview ? (
+              <button
+                type="button"
+                onClick={() => onReview(drv)}
+                className="rounded-xl border border-amber-500/40 px-3 py-2 text-[10px] font-black text-amber-200"
+              >
+                Revisar
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={busyId === drv.id}
+              onClick={() => void rejectNow(drv)}
+              className="rounded-xl border border-red-500/40 px-3 py-2 text-[10px] font-black text-red-300"
+            >
+              Rechazar
+            </button>
+            <button
+              type="button"
+              disabled={busyId === drv.id}
+              onClick={() => void approveNow(drv)}
+              className="rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-black text-slate-950"
+            >
+              {busyId === drv.id ? '…' : 'Aprobar'}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -13,15 +13,38 @@ import {
   connectFirestore,
   subscribeDispatchSettings,
   subscribeIncidents,
+  subscribeChatRooms,
+  purgeExpiredStaffRequests,
   RealtimeSyncMeta,
 } from './lib/firebase';
-import { dispatchAllPendingOrders } from './lib/autoDispatch';
+import { isPendingDriverStatus } from './lib/driverStatus';
+import { dispatchAllPendingOrders, MAX_AUTO_ORDERS } from './lib/autoDispatch';
 import { isDriverAssignable } from './lib/workShift';
-import { alertDeliveryComplete, alertNewClientOrder, alertOrderAssigned, alertPanic } from './lib/alerts';
+import {
+  alertDeliveryComplete,
+  alertNewClientOrder,
+  alertOrderAssigned,
+  alertOrderCancelled,
+  alertPaymentEvent,
+  alertPaymentPaid,
+  alertPanic,
+  pruneUnpaidMutes,
+  pushTowerOpsToast,
+  startPendingOrderAlarm,
+  startRadioAlarm,
+  stopPendingOrderAlarm,
+  stopUnpaidPaymentAlarm,
+  stopRadioAlarm,
+  subscribeTowerOpsToasts,
+  subscribeUnpaidMute,
+  unlockAlertAudio,
+  type TowerOpsToast,
+} from './lib/alerts';
 import { isLiveOrderStatus } from './lib/orderFlow';
 import { DEFAULT_DISPATCH_SETTINGS } from './lib/adminMetrics';
 import type { DispatchSettings } from './types';
 import { HeaderBar } from './components/HeaderBar';
+import { OpsNotificationBell } from './components/admin/OpsNotificationBell';
 import { Sidebar } from './components/Sidebar';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { DriverDashboard } from './components/driver/DriverDashboard';
@@ -69,6 +92,10 @@ function PendingAdminPanel({ email }: { email?: string }) {
         <span className="text-amber-300">otro administrador activo</span> debe activarte en{' '}
         <span className="text-white">Usuarios → Administradores</span>.
       </p>
+      <p className="text-xs text-amber-200/90 mb-2">
+        Tienes 20 minutos. Si nadie te activa, esta solicitud se elimina por completo y deberás
+        pedir acceso de nuevo.
+      </p>
       <p className="text-xs text-slate-500">
         El primer administrador del sistema se activa automáticamente. A partir de ahí, solo un admin
         activo puede autorizar a otro.
@@ -85,6 +112,10 @@ function PendingSecretaryPanel({ email }: { email?: string }) {
         Tu cuenta <span className="text-white font-semibold">{email}</span> ya está autenticada, pero{' '}
         <span className="text-violet-300">un administrador activo</span> debe activarte en{' '}
         <span className="text-white">Usuarios → Administradores</span>.
+      </p>
+      <p className="text-xs text-amber-200/90 mb-2">
+        Tienes 20 minutos. Si nadie te activa, esta solicitud se elimina por completo y deberás
+        pedir acceso de nuevo.
       </p>
       <p className="text-xs text-slate-500">
         Cuando estés activa podrás registrar pedidos, atender radios con transportistas y
@@ -124,11 +155,30 @@ function MainApp() {
     DEFAULT_DISPATCH_SETTINGS
   );
   const [opsDataReady, setOpsDataReady] = useState(false);
+  const [opsToasts, setOpsToasts] = useState<TowerOpsToast[]>([]);
   const prevOrdersRef = useRef<Map<string, string>>(new Map());
+  const prevPaymentRef = useRef<
+    Map<
+      string,
+      {
+        review: string;
+        gateway: string;
+        paid: number;
+        status: string;
+        channel: string;
+        cancelReason: string;
+      }
+    >
+  >(new Map());
   const prevIncidentsRef = useRef<Set<string>>(new Set());
+  const adminAccountsRef = useRef<AdminAccount[]>([]);
+  const prevPendingDriversRef = useRef<Set<string> | null>(null);
+  const pendingDriverApps = drivers.filter((d) => isPendingDriverStatus(d.status));
   const incidentsPrimedRef = useRef(false);
   const alertsReadyRef = useRef(false);
+  const paymentAlertsReadyRef = useRef(false);
   const autoDispatchingRef = useRef(false);
+  const pendingAlarmOpenedAtRef = useRef(0);
 
   // Limpia caches locales/SW que podían mostrar demos borrados en Firebase
   useEffect(() => {
@@ -170,14 +220,25 @@ function MainApp() {
       });
       unsubOrders = subscribeOrders(setOrders);
       unsubAdmins = subscribeAdmins((list) => {
+        adminAccountsRef.current = list;
         setAdminAccounts(list);
         markReady();
+        // Solicitudes admin/secretaría sin respuesta → borrar a los 20 min
+        void purgeExpiredStaffRequests(list).catch((err) =>
+          console.warn('[admin] purgeExpiredStaffRequests', err),
+        );
       });
     })();
+
+    // Revisa caducidad cada minuto aunque no llegue snapshot
+    const purgeTimer = window.setInterval(() => {
+      void purgeExpiredStaffRequests(adminAccountsRef.current).catch(() => undefined);
+    }, 60_000);
 
     return () => {
       cancelled = true;
       window.clearTimeout(readyTimer);
+      window.clearInterval(purgeTimer);
       unsubDrivers?.();
       unsubOrders?.();
       unsubAdmins?.();
@@ -193,6 +254,63 @@ function MainApp() {
 
   // Config de despacho (radio, auto-asignar, tarifas)
   useEffect(() => subscribeDispatchSettings(setDispatchSettings), []);
+
+  // El radio suena solo si llega un mensaje nuevo y la torre aún no lo vio.
+  useEffect(() => {
+    if (currentRole !== 'admin' && currentRole !== 'secretary') {
+      stopRadioAlarm();
+      return;
+    }
+    const openedAt = Date.now();
+    return subscribeChatRooms((rooms) => {
+      const unread = rooms.some((room) => {
+        const at = Date.parse(room.lastMessageTime || '');
+        if (!Number.isFinite(at) || at <= openedAt) return false;
+        return Boolean(room.unreadByAdmin || (room.unreadCountAdmin || 0) > 0);
+      });
+      if (unread) startRadioAlarm();
+      else stopRadioAlarm();
+    });
+  }, [currentRole]);
+
+  const [unpaidMuteTick, setUnpaidMuteTick] = useState(0);
+  useEffect(() => subscribeUnpaidMute(setUnpaidMuteTick), []);
+
+  // Pedidos sin asignar: alarma en loop (sin holds de pago).
+  // Se apaga sola al asignar (auto o manual). Si nadie libre, sigue hasta que haya cupo.
+  // Holds de pago: alarma distinta (sonido 1) hasta que paguen o se silencie.
+  useEffect(() => {
+    if (currentRole !== 'admin' && currentRole !== 'secretary') {
+      stopPendingOrderAlarm();
+      stopUnpaidPaymentAlarm();
+      pendingAlarmOpenedAtRef.current = 0;
+      return () => {
+        stopPendingOrderAlarm();
+        stopUnpaidPaymentAlarm();
+      };
+    }
+    const unpaidIds = orders
+      .filter((o) => o.paymentReviewStatus === 'pending_review')
+      .map((o) => o.id);
+    pruneUnpaidMutes(unpaidIds);
+
+    // Esperando pago: no loop continuo (el cliente solo oye un ping corto al crear).
+    // El loop de torre empieza cuando el pago queda listo y el pedido puede asignarse.
+    stopUnpaidPaymentAlarm();
+
+    const ringing = orders.filter((o) => {
+      if (o.status !== 'pending' || o.assignedDriverId) return false;
+      if (o.paymentReviewStatus === 'pending_review') return false;
+      return true;
+    });
+    // Sigue sonando mientras haya pendientes listos sin asignar (VIP u otros).
+    if (ringing.length > 0) startPendingOrderAlarm();
+    else stopPendingOrderAlarm();
+    return () => {
+      stopPendingOrderAlarm();
+      stopUnpaidPaymentAlarm();
+    };
+  }, [orders, currentRole, unpaidMuteTick]);
 
   // Alerta sonora cuando un transportista activa pánico (torre admin y secretaría)
   useEffect(() => {
@@ -223,18 +341,20 @@ function MainApp() {
     );
     if (pending.length === 0) return;
 
-    const hasFreeActive = drivers.some(
+    const openCount = new Map<string, number>();
+    for (const order of orders) {
+      if (isLiveOrderStatus(order.status) && order.assignedDriverId) {
+        openCount.set(order.assignedDriverId, (openCount.get(order.assignedDriverId) || 0) + 1);
+      }
+    }
+    const hasRoom = drivers.some(
       (d) =>
         isDriverAssignable(d) &&
         d.location?.lat &&
         d.location?.lng &&
-        !orders.some(
-          (o) =>
-            isLiveOrderStatus(o.status) &&
-            o.assignedDriverId === d.id
-        )
+        (openCount.get(d.id) || 0) < MAX_AUTO_ORDERS,
     );
-    if (!hasFreeActive || autoDispatchingRef.current) return;
+    if (!hasRoom || autoDispatchingRef.current) return;
 
     let cancelled = false;
     const t = window.setTimeout(async () => {
@@ -244,6 +364,8 @@ function MainApp() {
         const results = await dispatchAllPendingOrders(orders, drivers, dispatchSettings);
         const assigned = results.filter((r) => r.assigned);
         if (assigned.length > 0) {
+          // Silencio inmediato; el efecto de pendientes reabre solo si queda otro sin asignar.
+          stopPendingOrderAlarm();
           console.info(
             `[torre] auto-asignados ${assigned.length}:`,
             assigned.map((r) => `${r.orderId}→${r.driverName}`).join(', ')
@@ -262,7 +384,48 @@ function MainApp() {
     };
   }, [orders, drivers, dispatchSettings, currentRole]);
 
-  // Alertas: entrega finalizada / asignación (salta la primera carga)
+  // Banners visibles de cierre de encargos
+  useEffect(() => {
+    return subscribeTowerOpsToasts((toast) => {
+      setOpsToasts((list) => [...list.slice(-4), toast]);
+      window.setTimeout(() => {
+        setOpsToasts((list) => list.filter((t) => t.id !== toast.id));
+      }, 9000);
+    });
+  }, []);
+
+  // Torre: solicitud nueva de transportista en tiempo real
+  useEffect(() => {
+    const towerRole = currentRole === 'admin' || currentRole === 'secretary';
+    if (!towerRole) return;
+    const ids = new Set(
+      drivers.filter((d) => isPendingDriverStatus(d.status)).map((d) => d.id),
+    );
+    const prev = prevPendingDriversRef.current;
+    if (prev == null) {
+      prevPendingDriversRef.current = ids;
+      return;
+    }
+    let arrived = 0;
+    for (const id of ids) {
+      if (!prev.has(id)) arrived += 1;
+    }
+    if (arrived > 0) {
+      unlockAlertAudio();
+      alertNewClientOrder();
+      pushTowerOpsToast({
+        kind: 'cancelled',
+        title: 'Solicitud de transportista',
+        body:
+          arrived === 1
+            ? 'Llegó 1 prerregistro pendiente de aprobación.'
+            : `Llegaron ${arrived} prerregistros pendientes de aprobación.`,
+      });
+    }
+    prevPendingDriversRef.current = ids;
+  }, [drivers, currentRole]);
+
+  // Alertas: entrega / cancelación / asignación (salta la primera carga)
   useEffect(() => {
     const prev = prevOrdersRef.current;
     if (!alertsReadyRef.current) {
@@ -271,6 +434,7 @@ function MainApp() {
       return;
     }
 
+    const towerRole = currentRole === 'admin' || currentRole === 'secretary';
     const myDriverId =
       currentRole === 'driver'
         ? drivers.find(
@@ -283,17 +447,53 @@ function MainApp() {
 
     for (const order of orders) {
       const was = prev.get(order.id);
-      // Torre: pedido nuevo del cliente (aunque auto-despacho ya lo asigne)
-      if (
-        was === undefined &&
-        order.status !== 'cancelled' &&
-        (currentRole === 'admin' || currentRole === 'secretary')
-      ) {
+      const code = order.trackingCode || order.id;
+      const driverName = order.assignedDriverName || 'Transportista';
+      const cancelReason = String(
+        (order as DeliveryOrder & { cancelReason?: string }).cancelReason || '',
+      );
+      const paymentGatewayCancel =
+        cancelReason === 'unpaid_timeout' ||
+        (order.transferChannel === 'pasarela' && order.paymentReviewStatus === 'pending_review');
+      // Torre: pedido nuevo → sonido corto (se corta). Loop de asignación solo si ya puede despacharse.
+      if (was === undefined && order.status === 'pending' && towerRole) {
         alertNewClientOrder();
       }
       if (was !== order.status) {
+        // Al asignar (auto o manual): apagar alarma de pendientes; el efecto la reabre si queda otro
+        if (
+          towerRole &&
+          order.assignedDriverId &&
+          (order.status === 'assigned' || was === 'pending') &&
+          was === 'pending'
+        ) {
+          // Silencio inmediato al asignar; el efecto de pendientes reabre solo si queda otro sin asignar.
+          stopPendingOrderAlarm();
+        }
         if (order.status === 'delivered' && was && was !== 'delivered') {
           alertDeliveryComplete();
+          if (towerRole) {
+            pushTowerOpsToast({
+              kind: 'delivered',
+              title: 'Entrega exitosa',
+              body: `${code} · ${driverName} finalizó el encargo.`,
+            });
+          }
+        }
+        if (order.status === 'cancelled' && was && was !== 'cancelled') {
+          if (towerRole) {
+            // Cancelación por pasarela: suena alertPaymentEvent (efecto aparte), no el tono genérico
+            if (!paymentGatewayCancel) {
+              alertOrderCancelled();
+            }
+            pushTowerOpsToast({
+              kind: 'cancelled',
+              title: paymentGatewayCancel ? 'Pago no confirmado' : 'Encargo sin éxito',
+              body: paymentGatewayCancel
+                ? `${code} · pasarela canceló o expiró el pago.`
+                : `${code} · cancelado${order.assignedDriverName ? ` · ${driverName}` : ''}.`,
+            });
+          }
         }
         if (
           order.status === 'assigned' &&
@@ -308,6 +508,71 @@ function MainApp() {
       prev.set(order.id, order.status);
     }
   }, [orders, currentRole, currentUserEmail, drivers]);
+
+  // Torre: alerta one-shot cuando el pago se confirma o se cancela/rechaza en la pasarela
+  useEffect(() => {
+    const prev = prevPaymentRef.current;
+    const snap = (o: DeliveryOrder) => ({
+      review: String(o.paymentReviewStatus || ''),
+      gateway: String(o.paymentGatewayStatus || '').toUpperCase(),
+      paid: Number(o.amountPaid || 0),
+      status: o.status,
+      channel: String(o.transferChannel || ''),
+      cancelReason: String(
+        (o as DeliveryOrder & { cancelReason?: string }).cancelReason || '',
+      ),
+    });
+
+    if (!paymentAlertsReadyRef.current) {
+      orders.forEach((o) => prev.set(o.id, snap(o)));
+      paymentAlertsReadyRef.current = true;
+      return;
+    }
+
+    const towerRole = currentRole === 'admin' || currentRole === 'secretary';
+    if (!towerRole) {
+      orders.forEach((o) => prev.set(o.id, snap(o)));
+      return;
+    }
+
+    const gatewayFail = new Set(['DECLINED', 'ERROR', 'VOIDED']);
+
+    for (const order of orders) {
+      const before = prev.get(order.id);
+      const now = snap(order);
+      if (before) {
+        const completed =
+          (before.review === 'pending_review' && now.review === 'approved') ||
+          (before.paid <= 0 && now.paid > 0) ||
+          (before.gateway !== 'APPROVED' && now.gateway === 'APPROVED');
+        const cancelledOnGateway =
+          (!gatewayFail.has(before.gateway) && gatewayFail.has(now.gateway)) ||
+          (before.status !== 'cancelled' &&
+            now.status === 'cancelled' &&
+            (now.cancelReason === 'unpaid_timeout' ||
+              before.channel === 'pasarela' ||
+              before.review === 'pending_review'));
+        if (completed) {
+          // Pago OK: aviso + loop hasta asignar (auto-dispatch o manual).
+          alertPaymentPaid();
+          stopUnpaidPaymentAlarm();
+          if (order.status === 'pending' && !order.assignedDriverId) {
+            startPendingOrderAlarm();
+          }
+          pushTowerOpsToast({
+            kind: 'delivered',
+            title: order.isVip ? 'Pago VIP confirmado' : 'Pago confirmado',
+            body: `${order.trackingCode || order.id} · ${
+              order.isVip ? 'prioridad 1 · ' : ''
+            }auto-asignación.`,
+          });
+        } else if (cancelledOnGateway) {
+          alertPaymentEvent();
+        }
+      }
+      prev.set(order.id, now);
+    }
+  }, [orders, currentRole]);
 
   // Auth state listener (incluye retorno de Google en la misma pestaña)
   useEffect(() => {
@@ -480,12 +745,16 @@ function MainApp() {
   }, [myAdmin?.status, myAdmin?.role, currentUserEmail, requestedRole, currentRole, isSecretary]);
 
   /** Perfil de motorizado vinculado al email autenticado (sin fallback a otro). */
+  const myDriverMatches = drivers.filter(
+    (d) =>
+      Boolean(currentUserEmail) &&
+      d.email?.toLowerCase() === currentUserEmail!.toLowerCase(),
+  );
   const myDriverProfile =
-    drivers.find(
-      (d) =>
-        Boolean(currentUserEmail) &&
-        d.email?.toLowerCase() === currentUserEmail!.toLowerCase()
-    ) || null;
+    myDriverMatches.find((d) => d.status === 'approved') ||
+    myDriverMatches.find((d) => d.status === 'pending') ||
+    myDriverMatches[0] ||
+    null;
 
   const activeApprovedDriver =
     myDriverProfile?.status === 'approved' ? myDriverProfile : null;
@@ -632,9 +901,38 @@ function MainApp() {
   const isTowerActive = isActiveStaff;
 
   return (
-    <div className="min-h-screen bg-[#05080f] text-[#e8eef9] flex flex-col font-sans selection:bg-[#FF5722] selection:text-white">
+    <div className="ops-shell min-h-screen min-h-dvh overflow-x-hidden bg-[#05080f] text-[#e8eef9] flex flex-col font-sans selection:bg-[#FF5722] selection:text-white">
+      {opsToasts.length > 0 ? (
+        <div className="pointer-events-none fixed inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[90] mx-auto flex max-w-lg flex-col gap-2 sm:inset-x-auto sm:left-auto sm:right-4">
+          {opsToasts.map((t) => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md ${
+                t.kind === 'delivered'
+                  ? 'border-emerald-400/50 bg-emerald-950/95 text-emerald-50'
+                  : 'border-amber-400/50 bg-amber-950/95 text-amber-50'
+              }`}
+              role="status"
+            >
+              <p className="text-[11px] font-black uppercase tracking-wide opacity-90">{t.title}</p>
+              <p className="mt-0.5 text-sm font-semibold leading-snug">{t.body}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {isTowerActive && pendingDriverApps.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setActiveSidebarTab('solicitudes')}
+          className="w-full border-b border-amber-400/50 bg-amber-500 px-4 py-2.5 text-left text-sm font-black text-black"
+        >
+          Transportistas por aprobar · {pendingDriverApps.length} · pulsa para gestionar en
+          Solicitudes
+        </button>
+      ) : null}
       <HeaderBar
         currentUserEmail={currentUserEmail}
+        photoUrl={auth.currentUser?.photoURL}
         onOpenBrandModal={
           currentRole === 'admin' && isActiveStaff && !isSecretary
             ? () => setIsBrandModalOpen(true)
@@ -662,6 +960,16 @@ function MainApp() {
         }
         compact={isDriverCabin}
         hideRoleMenu
+        notificationSlot={
+          isTowerActive ? (
+            <OpsNotificationBell
+              role={staffRole}
+              orders={orders}
+              drivers={drivers}
+              onOpen={(section) => setActiveSidebarTab(section)}
+            />
+          ) : null
+        }
         realtimeLive={realtimeMeta?.live}
         realtimeLabel={
           isDriverCabin

@@ -15,7 +15,7 @@ import {
   savePayrollRun,
   setDriverSuspended,
 } from '../../lib/firebase';
-import { isLiveOrderStatus } from '../../lib/orderFlow';
+import { isLiveOrderStatus, ORDER_STATUS_LABEL, paymentMethodLabel } from '../../lib/orderFlow';
 import {
   DEFAULT_PAYROLL_SETTINGS,
   buildDriverStats,
@@ -455,8 +455,12 @@ export const AdminControlCenter: React.FC<Props> = ({
     const rows = scopedOrders.map((o) => ({
       Tracking: o.trackingCode || o.id,
       Cliente: o.customerName,
-      Destino: o.deliveryAddress,
-      Estado: o.status,
+      Origen: o.pickupAddress || '',
+      Destino: o.deliveryAddress || '',
+      Estado: ORDER_STATUS_LABEL[o.status] || o.status,
+      VIP: o.isVip ? 'Sí' : 'No',
+      Recargo_VIP_COP: o.isVip ? o.vipSurchargeCop || 0 : 0,
+      Forma_de_pago: paymentMethodLabel(o),
       Motorizado: o.assignedDriverName || '',
       Flete_COP: o.shippingFee || 0,
       Calificacion: o.serviceRating || '',

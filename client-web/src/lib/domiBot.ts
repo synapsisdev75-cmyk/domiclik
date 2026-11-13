@@ -1,4 +1,17 @@
-import { WHATSAPP_URL, PHONE } from './config';
+import { COMMERCIAL_WHATSAPP_URL, WHATSAPP_URL } from './config';
+import { COMMERCIAL_PHONE_DISPLAY, SUPPORT_PHONE_DISPLAY } from './companyInfo';
+
+const CONTACT_REPLY = [
+  'Te conecto con Central humana.',
+  '',
+  `Soporte y atención: ${SUPPORT_PHONE_DISPLAY}`,
+  WHATSAPP_URL,
+  '',
+  `Soporte comercial: ${COMMERCIAL_PHONE_DISPLAY}`,
+  COMMERCIAL_WHATSAPP_URL,
+  '',
+  'Ellos ven tu pedido en tiempo real y te ayudan con cobertura, tarifas o incidencias.',
+].join('\n');
 
 export type BotReply = {
   text: string;
@@ -304,7 +317,7 @@ const INTENTS: Intent[] = [
   {
     id: 'humano',
     weight: 4,
-    phrases: ['hablar con central', 'hablar con alguien', 'atencion humana'],
+    phrases: ['hablar con central', 'hablar con alguien', 'atencion humana', 'soporte comercial'],
     keywords: [
       'humano',
       'persona',
@@ -312,13 +325,17 @@ const INTENTS: Intent[] = [
       'whatsapp',
       'llamar',
       'telefono',
+      'numero',
+      'contacto',
+      'pqr',
       'asesor',
       'ayuda real',
       'hablar',
       'soporte',
+      'comercial',
     ],
     reply: () => ({
-      text: `Te conecto con Central humana.\n\nWhatsApp: ${WHATSAPP_URL}\nTeléfono: ${PHONE}\n\nEllos ven tu pedido en tiempo real y te ayudan con cobertura, tarifas o incidencias.`,
+      text: CONTACT_REPLY,
       suggestions: ['Seguimiento', '¿Cómo solicito?'],
     }),
   },

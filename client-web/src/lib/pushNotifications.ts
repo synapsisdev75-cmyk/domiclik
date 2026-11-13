@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
-import { findApprovedDriverByEmail } from './driverCabin';
+import { findDriverProfileByEmail } from './driverCabin';
 
 let listenersReady = false;
 let saveToken: ((token: string) => void) | null = null;
@@ -11,17 +11,18 @@ async function persistPushToken(uid: string, email: string | null | undefined, t
   const updatedAt = new Date().toISOString();
   await setDoc(
     doc(db, 'customers', uid),
-    { fcmToken: token, fcmTokenUpdatedAt: updatedAt },
+    { fcmToken: token, fcmTokenUpdatedAt: updatedAt, userId: uid },
     { merge: true },
   );
   const normalized = (email || '').trim().toLowerCase();
   if (!normalized) return;
   try {
-    const driver = await findApprovedDriverByEmail(normalized);
+    // Incluye pendientes: así reciben el push al ser aprobados
+    const driver = await findDriverProfileByEmail(normalized);
     if (!driver) return;
     await setDoc(
       doc(db, 'drivers', driver.id),
-      { fcmToken: token, fcmTokenUpdatedAt: updatedAt },
+      { fcmToken: token, fcmTokenUpdatedAt: updatedAt, userId: uid, email: normalized },
       { merge: true },
     );
   } catch (err) {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, Mail } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Mail } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 
 type Mode = 'login' | 'register';
@@ -19,6 +19,7 @@ export function EmailAuthForm({
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -141,17 +142,28 @@ export function EmailAuthForm({
         <span className="mb-1 block text-[11px] font-semibold text-[var(--domi-muted)]">
           Contraseña *
         </span>
-        <input
-          className="field-input"
-          type="password"
-          required
-          minLength={6}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder={mode === 'register' ? 'Mínimo 6 caracteres' : '••••••••'}
-          autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-          disabled={busy}
-        />
+        <span className="relative block">
+          <input
+            className="field-input"
+            style={{ paddingRight: '2.75rem' }}
+            type={showPassword ? 'text' : 'password'}
+            required
+            minLength={6}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={mode === 'register' ? 'Mínimo 6 caracteres' : '••••••••'}
+            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+            disabled={busy}
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((value) => !value)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--domi-text)]"
+            aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+          >
+            {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </span>
       </label>
 
       <button type="submit" className="cta-primary w-full !py-2.5 text-sm" disabled={busy}>

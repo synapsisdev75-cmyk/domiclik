@@ -20,11 +20,11 @@ export function SiteHeader() {
         scrolled ? 'site-header--scrolled' : 'site-header--top'
       }`}
     >
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-4 py-3 sm:gap-3 sm:px-8 sm:py-4">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:gap-6 sm:px-6 sm:py-4">
         <Link
           to="/"
           aria-label="DomiClick inicio"
-          className="inline-flex min-w-0 shrink items-center gap-2 sm:gap-2.5"
+          className="inline-flex shrink-0 items-center gap-2 sm:gap-2.5"
         >
           <BrandLogo variant="optimized" height={40} className="shrink-0 sm:h-11" />
           <span className="font-display whitespace-nowrap text-base font-extrabold tracking-tight sm:text-xl">
@@ -32,8 +32,8 @@ export function SiteHeader() {
             <span className="text-[#FF5722]">Click</span>
           </span>
         </Link>
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3 lg:gap-5">
-          <nav className="hidden items-center gap-4 lg:flex">
+        <div className="flex min-w-0 shrink items-center justify-end gap-2 sm:gap-3 xl:gap-5">
+          <nav className="hidden items-center gap-4 xl:flex">
             <a
               href="#quienes-somos"
               className="text-sm font-semibold text-[var(--domi-muted)] transition-colors hover:text-[var(--domi-cyan)]"

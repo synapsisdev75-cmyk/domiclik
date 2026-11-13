@@ -5,10 +5,12 @@ import {
   AdvancedMarker,
   useMap,
 } from '@vis.gl/react-google-maps';
-import { MotorizadoDriver, DriverLocationHistoryPoint } from '../../types';
+import { MotorizadoDriver, DriverLocationHistoryPoint, DeliveryOrder } from '../../types';
 import { toDateKey } from '../../lib/adminMetrics';
+import { subscribeDriverLocationHistory } from '../../lib/firebase';
 import { VILLAVICENCIO_CENTER } from '../../data/villavicencio';
 import { getGoogleMapsApiKey } from '../GoogleMapRadar';
+import { getCurrentTheme, THEME_CHANGE_EVENT, type ThemeMode } from '../../lib/theme';
 import {
   Calendar,
   Clock,
@@ -27,8 +29,12 @@ const MAP_ID =
   process.env.VITE_GOOGLE_MAPS_MAP_ID ||
   '7959bb6afa37dd5e9db669a8';
 
+/** Tolerancia para comparar km de la app vs el GPS del día. */
+export const KM_ACCEPT_TOLERANCE_PCT = 15;
+
 interface DriverRouteHistoryViewProps {
   drivers: MotorizadoDriver[];
+  orders?: DeliveryOrder[];
   initialSelectedDriverId?: string | null;
   onClose?: () => void;
 }
@@ -38,7 +44,7 @@ type WaypointKind = 'start' | 'end' | 'stop';
 function waypointKind(index: number, total: number, speed?: number): WaypointKind | null {
   if (index === 0) return 'start';
   if (index === total - 1) return 'end';
-  if ((speed || 0) === 0) return 'stop';
+  if (typeof speed === 'number' && speed === 0) return 'stop';
   return null;
 }
 
@@ -120,9 +126,21 @@ function HistoryMapLayers({
     const fitKey = `${points.length}:${points[0]?.id || ''}:${points[points.length - 1]?.id || ''}`;
     if (fitKey !== fittedKeyRef.current) {
       fittedKeyRef.current = fitKey;
-      const bounds = new google.maps.LatLngBounds();
-      path.forEach((p) => bounds.extend(p));
-      map.fitBounds(bounds, 56);
+      try {
+        const valid = path.filter(
+          (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng),
+        );
+        if (valid.length === 1) {
+          map.panTo(valid[0]);
+          map.setZoom(14);
+        } else if (valid.length > 1) {
+          const bounds = new google.maps.LatLngBounds();
+          valid.forEach((p) => bounds.extend(p));
+          if (!bounds.isEmpty()) map.fitBounds(bounds, 56);
+        }
+      } catch (err) {
+        console.warn('[route-history] fitBounds omitido', err);
+      }
     }
 
     return () => {
@@ -194,6 +212,7 @@ function HistoryMapLayers({
 
 export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
   drivers,
+  orders = [],
   initialSelectedDriverId,
   onClose,
 }) => {
@@ -207,6 +226,7 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
 
   const [historyPoints, setHistoryPoints] = useState<DriverLocationHistoryPoint[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackIndex, setPlaybackIndex] = useState<number>(0);
@@ -219,13 +239,22 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
     if (!selectedDriverId) return;
 
     setLoading(true);
+    setHistoryError(null);
     setIsPlaying(false);
     setPlaybackIndex(0);
 
-    const unsub = subscribeDriverLocationHistory(selectedDriverId, selectedDate, (pts) => {
-      setHistoryPoints(pts);
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = subscribeDriverLocationHistory(selectedDriverId, selectedDate, (pts) => {
+        setHistoryPoints(pts);
+        setLoading(false);
+        setHistoryError(null);
+      });
+    } catch (err) {
+      setHistoryPoints([]);
       setLoading(false);
-    });
+      setHistoryError(err instanceof Error ? err.message : 'No se pudo abrir el historial.');
+    }
 
     return () => {
       if (typeof unsub === 'function') unsub();
@@ -251,6 +280,20 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
   }, [isPlaying, playbackSpeed, historyPoints]);
 
   const totalKm = calculateTotalDistanceKm(historyPoints);
+  const appKmForDay = orders
+    .filter(
+      (o) =>
+        o.assignedDriverId === selectedDriverId &&
+        (o.status === 'delivered' || o.status === 'cancelled') &&
+        toDateKey(new Date(o.updatedAt || o.createdAt || 0)) === selectedDate &&
+        typeof o.routeDistanceKm === 'number',
+    )
+    .reduce((sum, o) => sum + (Number(o.routeDistanceKm) || 0), 0);
+  const appKmRounded = Math.round(appKmForDay * 100) / 100;
+  const kmDeltaPct =
+    appKmRounded > 0 ? Math.round((Math.abs(totalKm - appKmRounded) / appKmRounded) * 100) : null;
+  const kmWithinTolerance =
+    kmDeltaPct == null ? null : kmDeltaPct <= KM_ACCEPT_TOLERANCE_PCT;
   const avgSpeed =
     historyPoints.length > 0
       ? Math.round(
@@ -262,6 +305,13 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
     historyPoints[playbackIndex] ||
     historyPoints[historyPoints.length - 1] ||
     VILLAVICENCIO_CENTER;
+  const [mapTheme, setMapTheme] = useState<ThemeMode>(() => getCurrentTheme());
+
+  useEffect(() => {
+    const sync = () => setMapTheme(getCurrentTheme());
+    window.addEventListener(THEME_CHANGE_EVENT, sync);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, sync);
+  }, []);
 
   return (
     <div className="space-y-6 overflow-hidden rounded-2xl border border-[#2d3139] bg-[#161920] p-6 shadow-2xl">
@@ -279,6 +329,9 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
             Mapa Google · telemetría y trayectoria de la jornada
             {loading ? ' · cargando…' : ''}
           </p>
+          {historyError ? (
+            <p className="mt-2 text-xs text-red-300">{historyError}</p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -345,9 +398,11 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
                 {totalKm} km
               </span>
             </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-lg text-[#f59e0b]">
-              📏
-            </div>
+            <img
+              src="/brand/replay-route.jpg"
+              alt=""
+              className="h-12 w-12 shrink-0 rounded-xl object-cover"
+            />
           </div>
 
           <div className="flex items-center justify-between rounded-2xl border border-[#2d3139] bg-[#11141a] p-4">
@@ -359,9 +414,11 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
                 {avgSpeed} <span className="text-xs font-normal text-slate-400">km/h</span>
               </span>
             </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-lg text-emerald-400">
-              ⚡
-            </div>
+            <img
+              src="/brand/replay-speed.jpg"
+              alt=""
+              className="h-12 w-12 shrink-0 rounded-xl object-cover"
+            />
           </div>
 
           <div className="flex items-center justify-between rounded-2xl border border-[#2d3139] bg-[#11141a] p-4">
@@ -374,10 +431,39 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
                 <span className="text-xs font-normal text-slate-400">puntos</span>
               </span>
             </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-lg text-indigo-400">
-              🛰️
-            </div>
+            <img
+              src="/brand/replay-gps.jpg"
+              alt=""
+              className="h-12 w-12 shrink-0 rounded-xl object-cover"
+            />
           </div>
+        </div>
+      ) : null}
+
+      {currentDriver && appKmRounded > 0 ? (
+        <div className="rounded-2xl border border-[#2d3139] bg-[#11141a] p-4 text-xs text-slate-300">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            Comparación de kilómetros · tolerancia {KM_ACCEPT_TOLERANCE_PCT}%
+          </p>
+          <p className="mt-2">
+            App (pedidos cerrados del día):{' '}
+            <span className="font-mono font-bold text-white">{appKmRounded.toFixed(2)} km</span>
+            {' · '}
+            GPS recorrido:{' '}
+            <span className="font-mono font-bold text-amber-300">{totalKm.toFixed(2)} km</span>
+            {kmDeltaPct != null ? (
+              <>
+                {' · '}diferencia {kmDeltaPct}%
+                <span
+                  className={`ml-2 font-bold ${
+                    kmWithinTolerance ? 'text-emerald-300' : 'text-amber-200'
+                  }`}
+                >
+                  {kmWithinTolerance ? 'Dentro de tolerancia' : 'Fuera de tolerancia'}
+                </span>
+              </>
+            ) : null}
+          </p>
         </div>
       ) : null}
 
@@ -387,8 +473,9 @@ export const DriverRouteHistoryView: React.FC<DriverRouteHistoryViewProps> = ({
             {apiKey ? (
               <APIProvider apiKey={apiKey} libraries={['marker', 'geometry']}>
                 <Map
+                  key={mapTheme}
                   mapId={MAP_ID}
-                  colorScheme="DARK"
+                  colorScheme={mapTheme === 'light' ? 'LIGHT' : 'DARK'}
                   defaultCenter={{
                     lat: mapCenter.lat,
                     lng: mapCenter.lng,

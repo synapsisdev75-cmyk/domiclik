@@ -190,6 +190,10 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
       pricingBand: body.pricingBand === 'peak' ? 'peak' : body.pricingBand === 'normal' ? 'normal' : undefined,
       pricePerKm: Number(body.pricePerKm) || undefined,
       peakMultiplier: Number(body.peakMultiplier) || undefined,
+      isVip: Boolean(body.isVip),
+      vipSurchargeCop: body.isVip
+        ? Math.max(0, Math.round(Number(body.vipSurchargeCop) || 0))
+        : 0,
       clientQuoted,
       scheduledFor: scheduledFor || undefined,
       status: 'pending',
@@ -200,11 +204,20 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
       invoicePhotoUrl: body.invoicePhotoUrl || '',
       paymentMethod: body.paymentMethod || 'efectivo',
       paymentNote: body.paymentNote || '',
-      ...(body.paymentMethod === 'transferencia' && body.paymentProofUrl
+      ...(body.paymentMethod === 'transferencia' &&
+      (body.paymentProofUrl || body.transferChannel === 'pasarela')
         ? {
-            transferChannel: body.transferChannel === 'qr' ? 'qr' : 'breb',
+            transferChannel:
+              body.transferChannel === 'pasarela'
+                ? 'pasarela'
+                : body.transferChannel === 'qr'
+                  ? 'qr'
+                  : 'breb',
             paymentProofUrl: body.paymentProofUrl,
             paymentReviewStatus: 'pending_review' as const,
+            ...(body.transferChannel === 'pasarela'
+              ? { paymentGateway: 'wompi', paymentGatewayStatus: 'pending' }
+              : {}),
           }
         : {}),
       sourceSiteId,
@@ -222,26 +235,26 @@ app.post('/api/v1/inbound/orders', authIngest, async (req, res) => {
 
     try {
       if (!deferAssign) {
-        const { dispatchPendingOrder, getBusyDriverIds } = await import('../src/lib/autoDispatch');
+        const { dispatchPendingOrder, driverAutoLoad } = await import('../src/lib/autoDispatch');
         const { LIVE_ORDER_STATUSES } = await import('../src/lib/orderFlow');
         const { DEFAULT_DISPATCH_SETTINGS } = await import('../src/lib/adminMetrics');
         const driversSnap = await getDocs(collection(db, 'drivers'));
         const drivers: any[] = [];
         driversSnap.forEach((d) => drivers.push({ id: d.id, ...d.data() }));
-        // Todos los estados vivos (no solo assigned/in_transit): si no, al Aceptar
-        // el motorizado queda "libre" y un segundo pedido le tapa el primero.
+        // Hasta 3 pedidos vivos si el nuevo va cerca o por la misma ruta.
         const activeOrdersSnap = await getDocs(
           query(collection(db, 'orders'), where('status', 'in', [...LIVE_ORDER_STATUSES]))
         );
         const activeOrders: any[] = [];
         activeOrdersSnap.forEach((d) => activeOrders.push({ id: d.id, ...d.data() }));
-        const busyDriverIds = getBusyDriverIds(activeOrders);
+        const load = driverAutoLoad(activeOrders);
         const settingsSnap = await getDoc(doc(db, 'settings', 'dispatch'));
         const settings = settingsSnap.exists()
           ? { ...DEFAULT_DISPATCH_SETTINGS, ...settingsSnap.data(), id: 'dispatch' as const }
           : DEFAULT_DISPATCH_SETTINGS;
         const result = await dispatchPendingOrder(order as any, drivers, settings, {
-          busyDriverIds,
+          busyDriverIds: load.full,
+          liveByDriver: load.liveByDriver,
         });
         return res.status(201).json({
           ok: true,

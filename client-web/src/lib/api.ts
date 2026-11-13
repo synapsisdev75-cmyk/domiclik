@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import {
   INGEST_PATH,
   TRACKING_PATH,
@@ -10,57 +11,39 @@ import {
 import { API_URL, INGEST_TOKEN, SITE_ID } from './config';
 import { createClientOrder, findOrderByTrackingCode } from './firebase';
 
-function shouldUseIngestApi() {
-  if (!API_URL) return false;
-  if (typeof window === 'undefined') return true;
-  const host = window.location.hostname;
-  const isLocalHost = host === 'localhost' || host === '127.0.0.1';
-  const apiIsLocal = /localhost|127\.0\.0\.1/.test(API_URL);
-  if (!isLocalHost && apiIsLocal) return false;
-  return true;
+const INGEST_TIMEOUT_MS = 4000;
+
+function isLocalUrl(urlOrHost: string): boolean {
+  return /localhost|127\.0\.0\.1|::1/i.test(urlOrHost);
 }
 
 /**
- * Envía la solicitud a DomiClick.
- * 1) Intenta API tubo (:8787)
- * 2) Si falla, escribe directo en Firestore → la torre de control lo recibe en vivo
+ * Solo usa el tubo :8787 en desarrollo real (página local + API local).
+ * En producción / Capacitor (hostname "localhost" en WebView) NUNCA: el fetch
+ * a localhost:8787 se cuelga y el pedido no llega a la torre.
  */
-export async function submitOrder(
+function shouldUseIngestApi() {
+  if (!API_URL) return false;
+  const apiIsLocal = isLocalUrl(API_URL);
+
+  let native = false;
+  try {
+    native = Capacitor.isNativePlatform();
+  } catch {
+    native = false;
+  }
+  if (native) return false;
+
+  if (typeof window === 'undefined') return !apiIsLocal;
+
+  const pageIsLocal = isLocalUrl(window.location.hostname);
+  if (apiIsLocal) return pageIsLocal;
+  return true;
+}
+
+async function createOrderInFirestore(
   payload: Omit<IngestOrderBody, 'sourceSiteId'>,
 ): Promise<IngestOrderResponse> {
-  const body: IngestOrderBody = {
-    ...payload,
-    sourceSiteId: SITE_ID,
-  };
-
-  if (!shouldUseIngestApi()) {
-    console.info('[DomiClick] Producción: guardando pedido directo en Firestore');
-  }
-
-  try {
-    if (!shouldUseIngestApi()) throw new Error('skip-local-ingest-api');
-    const res = await fetch(`${API_URL}${INGEST_PATH}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${INGEST_TOKEN}`,
-        'X-DomiClick-Site': SITE_ID,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const data = (await res.json()) as IngestOrderResponse | IngestErrorResponse;
-
-    if (res.ok && data.ok) {
-      return data;
-    }
-
-    console.warn('[DomiClick] API ingest falló, usando Firestore directo', data);
-  } catch (err) {
-    console.warn('[DomiClick] API no disponible, usando Firestore directo', err);
-  }
-
-  // Respaldo: misma colección `orders` que escucha la torre de control
   if (
     payload.pickupLat == null ||
     payload.pickupLng == null ||
@@ -93,6 +76,8 @@ export async function submitOrder(
     pricingBand: payload.pricingBand,
     pricePerKm: payload.pricePerKm,
     peakMultiplier: payload.peakMultiplier,
+    isVip: payload.isVip,
+    vipSurchargeCop: payload.vipSurchargeCop,
     scheduledFor: payload.scheduledFor,
     invoiceNumber: payload.invoiceNumber,
     invoicePhotoUrl: payload.invoicePhotoUrl,
@@ -105,15 +90,63 @@ export async function submitOrder(
   });
 }
 
+/**
+ * Envía la solicitud a DomiClick.
+ * Producción/app: Firestore directo (torre en vivo).
+ * Dev local: intenta API tubo (:8787) con timeout, luego Firestore.
+ */
+export async function submitOrder(
+  payload: Omit<IngestOrderBody, 'sourceSiteId'>,
+): Promise<IngestOrderResponse> {
+  const body: IngestOrderBody = {
+    ...payload,
+    sourceSiteId: SITE_ID,
+  };
+
+  if (!shouldUseIngestApi()) {
+    console.info('[DomiClick] Pedido → Firestore (torre en vivo)');
+    return createOrderInFirestore(payload);
+  }
+
+  try {
+    const res = await fetch(`${API_URL}${INGEST_PATH}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${INGEST_TOKEN}`,
+        'X-DomiClick-Site': SITE_ID,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(INGEST_TIMEOUT_MS),
+    });
+
+    const data = (await res.json()) as IngestOrderResponse | IngestErrorResponse;
+
+    if (res.ok && data.ok) {
+      return data;
+    }
+
+    console.warn('[DomiClick] API ingest falló, usando Firestore directo', data);
+  } catch (err) {
+    console.warn('[DomiClick] API no disponible, usando Firestore directo', err);
+  }
+
+  return createOrderInFirestore(payload);
+}
+
 export async function fetchTracking(code: string): Promise<TrackingResponse> {
   const encoded = encodeURIComponent(code.trim().toUpperCase());
 
-  try {
-    const res = await fetch(`${API_URL}${TRACKING_PATH}/${encoded}`);
-    const data = (await res.json()) as TrackingResponse | TrackingErrorResponse;
-    if (res.ok && data.ok) return data;
-  } catch {
-    /* fallback Firestore abajo */
+  if (shouldUseIngestApi()) {
+    try {
+      const res = await fetch(`${API_URL}${TRACKING_PATH}/${encoded}`, {
+        signal: AbortSignal.timeout(INGEST_TIMEOUT_MS),
+      });
+      const data = (await res.json()) as TrackingResponse | TrackingErrorResponse;
+      if (res.ok && data.ok) return data;
+    } catch {
+      /* fallback Firestore abajo */
+    }
   }
 
   const local = await findOrderByTrackingCode(code);

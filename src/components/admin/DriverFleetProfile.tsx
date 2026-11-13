@@ -94,7 +94,7 @@ export const DriverFleetProfile: React.FC<DriverFleetProfileProps> = ({
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <img
-            src={driver.photoUrl || '/brand/logo-mark.png'}
+            src={driver.photoUrl || '/brand/logo-mark.png?v=clear'}
             alt={driver.fullName}
             className="w-14 h-14 rounded-2xl object-cover border-2 border-[#FF5722]"
           />

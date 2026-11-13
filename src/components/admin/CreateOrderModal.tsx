@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { X, Plus, Phone, User } from 'lucide-react';
+import { X, Plus, Phone, User, Zap } from 'lucide-react';
 import { createOrder, fetchAllDrivers, fetchDispatchSettings } from '../../lib/firebase';
-import { dispatchPendingOrder, getBusyDriverIds } from '../../lib/autoDispatch';
+import { dispatchPendingOrder, driverAutoLoad } from '../../lib/autoDispatch';
 import { DomiCargoIcon } from '../ui/CustomIcons';
+import { VipBadge } from '../ui/VipBadge';
 import { OpsPlaceSearch } from './OpsPlaceSearch';
+import { DEFAULT_DISPATCH_SETTINGS, formatCOP } from '../../lib/adminMetrics';
 import type { DeliveryOrder, MotorizadoDriver } from '../../types';
 
 interface CreateOrderModalProps {
@@ -28,6 +30,10 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   const [pickupPlaceId, setPickupPlaceId] = useState('');
   const [deliveryPlaceId, setDeliveryPlaceId] = useState('');
   const [description, setDescription] = useState('');
+  const [isVip, setIsVip] = useState(false);
+  const [vipSurchargeCop, setVipSurchargeCop] = useState(
+    DEFAULT_DISPATCH_SETTINGS.vipSurchargeCop,
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [statusTone, setStatusTone] = useState<'info' | 'ok' | 'err'>('info');
@@ -40,6 +46,8 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     setPickupAddress('');
     setDeliveryAddress('');
     setDescription('');
+    setIsVip(false);
+    setVipSurchargeCop(DEFAULT_DISPATCH_SETTINGS.vipSurchargeCop);
     setPickupCoords({ lat: 4.142, lng: -73.6266 });
     setDeliveryCoords({ lat: 4.142, lng: -73.6266 });
     setPickupPlaceId('');
@@ -54,10 +62,36 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       return;
     }
 
+    const phoneKey = customerPhone.trim();
+    const pickupKey = pickupAddress.trim().toLowerCase();
+    const deliveryKey = deliveryAddress.trim().toLowerCase();
+    const duplicate = orders.find(
+      (o) =>
+        o.status !== 'delivered' &&
+        o.status !== 'cancelled' &&
+        (phoneKey
+          ? o.customerPhone?.replace(/\D/g, '') === phoneKey.replace(/\D/g, '')
+          : o.customerName.trim().toLowerCase() === customerName.trim().toLowerCase()) &&
+        o.pickupAddress.trim().toLowerCase() === pickupKey &&
+        o.deliveryAddress.trim().toLowerCase() === deliveryKey,
+    );
+    if (duplicate) {
+      const ok = window.confirm(
+        `Ya hay un pedido activo (${duplicate.trackingCode}) con el mismo cliente, recogida y entrega. ¿Crear otro?`,
+      );
+      if (!ok) return;
+    }
+
     setIsSubmitting(true);
     setStatusTone('info');
     setStatusMsg('Guardando solicitud en Firestore…');
     try {
+      const settings = await fetchDispatchSettings();
+      const vipFee = Math.round(
+        Number(settings.vipSurchargeCop) || DEFAULT_DISPATCH_SETTINGS.vipSurchargeCop,
+      );
+      setVipSurchargeCop(vipFee);
+
       const order = await createOrder({
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim() || 'Sin teléfono',
@@ -66,10 +100,12 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         description: description.trim() || 'Envío de paquete urgente',
         itemType: 'paquete_pequeno',
         declaredValue: 20000,
-        shippingFee: 0,
+        shippingFee: isVip ? vipFee : 0,
         status: 'pending',
         assignedDriverId: null,
         assignedDriverName: null,
+        isVip,
+        vipSurchargeCop: isVip ? vipFee : 0,
         pickupPlaceId: pickupPlaceId || undefined,
         deliveryPlaceId: deliveryPlaceId || undefined,
         pickupCoords: {
@@ -87,16 +123,19 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
 
       setStatusTone('ok');
       setStatusMsg(
-        `Solicitud ${order.trackingCode} creada. Ya aparece en Solicitudes y en el radar.`
+        isVip
+          ? `VIP ${order.trackingCode} creada · prioridad 1. Ya aparece en Solicitudes.`
+          : `Solicitud ${order.trackingCode} creada. Ya aparece en Solicitudes y en el radar.`,
       );
 
-      const settings = await fetchDispatchSettings();
       if (settings.autoAssignEnabled) {
         setStatusMsg((prev) => `${prev} Buscando conductor activo…`);
         const drivers = driversProp?.length ? driversProp : await fetchAllDrivers();
         const mergedOrders = [...orders, order];
+        const load = driverAutoLoad(mergedOrders);
         const result = await dispatchPendingOrder(order, drivers, settings, {
-          busyDriverIds: getBusyDriverIds(mergedOrders),
+          busyDriverIds: load.full,
+          liveByDriver: load.liveByDriver,
         });
         if (result.assigned) {
           setStatusTone('ok');
@@ -232,6 +271,32 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               La solicitud entra a Firestore al instante. Si hay conductor activo y libre, se asigna solo.
             </p>
           </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isVip}
+            onClick={() => setIsVip((v) => !v)}
+            className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+              isVip
+                ? 'border-emerald-400/50 bg-emerald-500/15'
+                : 'border-[#1E2E50] bg-[#111A2E] hover:border-emerald-500/30'
+            }`}
+          >
+            <Zap
+              className={`h-5 w-5 shrink-0 ${isVip ? 'text-emerald-300' : 'text-slate-500'}`}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-black text-white">Pedido VIP · prioridad 1</p>
+              <p className="text-[10px] text-slate-400">
+                Se asigna primero al transportista libre
+                {isVip ? ` · recargo ${formatCOP(vipSurchargeCop)}` : ''}
+              </p>
+            </div>
+            {isVip ? <VipBadge size="sm" /> : (
+              <span className="text-[10px] font-bold text-slate-500">Opcional</span>
+            )}
+          </button>
 
           {statusMsg && (
             <p className={`text-[11px] font-tech border rounded-xl px-3 py-2 ${statusClass}`}>

@@ -1,3 +1,6 @@
+import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
+
 export type ThemeMode = 'light' | 'dark';
 
 export const THEME_STORAGE_KEY = 'domiclick_theme';
@@ -26,10 +29,25 @@ export function resolveTheme(stored: ThemeMode | null = readStoredTheme()): Them
   return stored ?? systemTheme();
 }
 
+/** Barra de estado nativa: no tapa el contenido; color según tema. */
+export async function syncNativeStatusBar(mode: ThemeMode = resolveTheme()) {
+  if (typeof window === 'undefined' || !Capacitor.isNativePlatform()) return;
+  try {
+    await StatusBar.setOverlaysWebView({ overlay: false });
+    await StatusBar.setStyle({ style: mode === 'light' ? Style.Dark : Style.Light });
+    await StatusBar.setBackgroundColor({
+      color: mode === 'light' ? '#f3f6fb' : '#05080f',
+    });
+  } catch {
+    /* plugin ausente en web */
+  }
+}
+
 export function applyTheme(mode: ThemeMode) {
   if (typeof document === 'undefined') return;
   document.documentElement.setAttribute('data-theme', mode);
   document.documentElement.style.colorScheme = mode;
+  void syncNativeStatusBar(mode);
 }
 
 export function persistTheme(mode: ThemeMode) {
@@ -45,7 +63,18 @@ export function persistTheme(mode: ThemeMode) {
 }
 
 export function initTheme() {
+  if (typeof document !== 'undefined' && Capacitor.isNativePlatform()) {
+    document.documentElement.classList.add('native-app');
+    document.documentElement.classList.add(`plt-${Capacitor.getPlatform()}`);
+  }
   applyTheme(resolveTheme());
+  if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+    const resync = () => void syncNativeStatusBar(getCurrentTheme());
+    window.addEventListener('focus', resync);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') resync();
+    });
+  }
 }
 
 export function toggleTheme(): ThemeMode {

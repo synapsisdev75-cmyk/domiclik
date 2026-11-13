@@ -1,10 +1,10 @@
 export const BRAND = {
-  logoMark: '/brand/logo-mark.png',
+  logoMark: '/brand/logo-optimized-transparent.png',
   logoWordmark: '/brand/logo-wordmark.png',
   logoNeon: '/brand/logo-neon.png',
   logoOptimized: '/brand/logo-optimized-transparent.png',
   logo192: '/brand/logo-192.png',
-  logoHeader: '/brand/logo-header.png',
+  logoHeader: '/brand/logo-optimized-transparent.png',
   favicon: '/brand/favicon.png',
   heroVideo: '/brand/banner-hero.mp4',
 } as const;

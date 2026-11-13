@@ -23,7 +23,7 @@ import {
   userToProfile,
   type CustomerProfile,
 } from './firebase';
-import { findApprovedDriverByEmail } from './driverCabin';
+import { subscribeDriverByEmail } from './driverCabin';
 import { opsTowerUrl } from './config';
 import { requestSessionNotificationPermission } from './pushNotifications';
 
@@ -65,33 +65,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Error al volver de Google');
       });
-    const unsub = subscribeAuth(async (next) => {
-      try {
-        setUser(next);
-        if (next) {
-          const p = userToProfile(next);
-          setProfile(p);
-          const [admin, driver] = await Promise.all([
-            isActiveOpsAdmin(next.email),
-            findApprovedDriverByEmail(next.email || '').catch(() => null),
-          ]);
-          setIsOpsAdmin(admin);
-          setIsApprovedDriver(Boolean(driver && driver.status === 'approved'));
-          try {
-            await upsertCustomerProfile(p);
-          } catch (err) {
-            console.warn('[auth] no se pudo guardar perfil cliente', err);
-          }
-        } else {
-          setProfile(null);
-          setIsOpsAdmin(false);
-          setIsApprovedDriver(false);
-        }
-      } finally {
+    let unsubDriver: (() => void) | undefined;
+    const unsub = subscribeAuth((next) => {
+      unsubDriver?.();
+      unsubDriver = undefined;
+      setUser(next);
+      if (!next) {
+        setProfile(null);
+        setIsOpsAdmin(false);
+        setIsApprovedDriver(false);
         setLoading(false);
+        return;
       }
+      const p = userToProfile(next);
+      setProfile(p);
+      // Libera la UI ya: cabina no debe esperar admin/upsert
+      setLoading(false);
+      if (next.email) {
+        unsubDriver = subscribeDriverByEmail(next.email, (driver) => {
+          setIsApprovedDriver(Boolean(driver && driver.status === 'approved'));
+        });
+      } else {
+        setIsApprovedDriver(false);
+      }
+      void isActiveOpsAdmin(next.email)
+        .then((admin) => setIsOpsAdmin(admin))
+        .catch(() => setIsOpsAdmin(false));
+      void upsertCustomerProfile(p).catch((err) => {
+        console.warn('[auth] no se pudo guardar perfil cliente', err);
+      });
     });
-    return () => unsub();
+    return () => {
+      unsub();
+      unsubDriver?.();
+    };
   }, []);
 
   useEffect(() => {

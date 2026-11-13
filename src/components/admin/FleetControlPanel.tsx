@@ -34,6 +34,7 @@ export const FleetControlPanel: React.FC<FleetControlPanelProps> = ({ drivers })
   const [draft, setDraft] = useState(DEFAULT_FLEET_SETTINGS);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
   const [expandedDriverId, setExpandedDriverId] = useState<string | null>(null);
 
   const todayKey = new Date().toISOString().split('T')[0];
@@ -78,15 +79,21 @@ export const FleetControlPanel: React.FC<FleetControlPanelProps> = ({ drivers })
 
   const handleSaveFleet = async () => {
     setSaving(true);
+    setSaveErr(null);
     try {
-      await saveFleetSettings({
+      const saved = await saveFleetSettings({
         fuelPricePerGallonCop: Number(draft.fuelPricePerGallonCop),
         defaultKmPerGallon: Number(draft.defaultKmPerGallon),
         oilChangeIntervalKm: Number(draft.oilChangeIntervalKm),
         oilChangeIntervalDays: Number(draft.oilChangeIntervalDays),
       });
+      setDraft(saved);
+      setFleet(saved);
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      console.error('[flota] saveFleetSettings', e);
+      setSaveErr(e instanceof Error ? e.message : 'No se pudo guardar la flota');
     } finally {
       setSaving(false);
     }
@@ -206,11 +213,16 @@ export const FleetControlPanel: React.FC<FleetControlPanelProps> = ({ drivers })
             />
           </label>
         </div>
+        {saveErr ? (
+          <p className="text-xs text-red-300" role="alert">
+            {saveErr}
+          </p>
+        ) : null}
         <button
           type="button"
           disabled={saving}
           onClick={() => void handleSaveFleet()}
-          className="text-xs font-black px-4 py-2.5 rounded-xl bg-[#2B6CFF] text-white"
+          className="text-xs font-black px-4 py-2.5 rounded-xl bg-[#2B6CFF] text-white disabled:opacity-60"
         >
           {saving ? 'Guardando…' : saved ? 'Guardado' : 'Guardar parámetros flota'}
         </button>

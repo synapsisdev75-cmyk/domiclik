@@ -1,0 +1,5 @@
+DomiClick 1.0.75 (versionCode 76)
+
+- Botón "Optimizar ruta" en mapa y menú + del transportista (2+ pedidos).
+- Reacomoda R/E desde el GPS live: más cercana/lineal con tiempo de calles.
+- Incluye filtro GPS anti-saltos y tour unido previo.

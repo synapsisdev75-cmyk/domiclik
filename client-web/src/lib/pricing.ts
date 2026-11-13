@@ -5,6 +5,8 @@ export const PRICE_PER_KM_COP = 2300;
 export const PEAK_MULTIPLIER = 1.35;
 /** Mínimo de envío. */
 export const MIN_SHIPPING_FEE_COP = 5000;
+/** Recargo inicial pedido VIP / flash (configurable en torre). */
+export const DEFAULT_VIP_SURCHARGE_COP = 2000;
 /** Factor carretera aproximado si no hay ruta OSRM. */
 export const ROAD_FACTOR = 1.3;
 
@@ -44,6 +46,10 @@ export type ShippingQuote = {
   speedKmh: number;
   travelMin: number;
   bufferMin: number;
+  isVip?: boolean;
+  vipSurchargeCop?: number;
+  /** Tarifa del recorrido sin recargo VIP. */
+  baseShippingFee?: number;
 };
 
 /** Zona horaria operativa. */
@@ -122,21 +128,35 @@ export function estimateTravelMinutes(
   };
 }
 
+export type QuoteOptions = {
+  isVip?: boolean;
+  vipSurchargeCop?: number;
+};
+
 export function computeShippingQuote(
   distanceKm: number,
   when: Date = new Date(),
+  opts: QuoteOptions = {},
 ): ShippingQuote {
   const km = Math.max(0, Number(distanceKm) || 0);
   const band = pricingBandFor(when);
   const multiplier = band === 'peak' ? PEAK_MULTIPLIER : 1;
   const subtotal = km * PRICE_PER_KM_COP * multiplier;
-  const shippingFee = Math.max(MIN_SHIPPING_FEE_COP, Math.round(subtotal));
+  const baseShippingFee = Math.max(MIN_SHIPPING_FEE_COP, Math.round(subtotal));
+  const isVip = Boolean(opts.isVip);
+  const vipSurchargeCop = isVip
+    ? Math.max(0, Math.round(Number(opts.vipSurchargeCop) || DEFAULT_VIP_SURCHARGE_COP))
+    : 0;
+  const shippingFee = baseShippingFee + vipSurchargeCop;
   const label = band === 'peak' ? 'Hora pico' : 'Hora normal';
   const eta = estimateTravelMinutes(km, when);
-  const formula =
+  let formula =
     band === 'peak'
       ? `${km.toFixed(2)} km × $${PRICE_PER_KM_COP.toLocaleString('es-CO')} × ${PEAK_MULTIPLIER} (${label})`
       : `${km.toFixed(2)} km × $${PRICE_PER_KM_COP.toLocaleString('es-CO')} (${label})`;
+  if (vipSurchargeCop > 0) {
+    formula += ` + VIP $${vipSurchargeCop.toLocaleString('es-CO')}`;
+  }
 
   return {
     distanceKm: Math.round(km * 100) / 100,
@@ -151,6 +171,9 @@ export function computeShippingQuote(
     speedKmh: eta.speedKmh,
     travelMin: eta.travelMin,
     bufferMin: eta.bufferMin,
+    isVip,
+    vipSurchargeCop,
+    baseShippingFee,
   };
 }
 

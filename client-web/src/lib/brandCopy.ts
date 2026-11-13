@@ -32,6 +32,10 @@ export const PUSH_MESSAGES = {
     title: 'Pedido entregado',
     body: 'Tu pedido ya se entregó. ¡Gracias por confiar en nosotros y buen provecho!',
   },
+  cancelled: {
+    title: 'Pedido cancelado',
+    body: 'Tu pedido quedó en estado Cancelado. Ábrelo en Mis pedidos para ver el detalle.',
+  },
 } as const;
 
 export function pushForStatus(status: string): { title: string; body: string } | null {
@@ -42,5 +46,6 @@ export function pushForStatus(status: string): { title: string; body: string } |
   if (status === 'picked_up' || status === 'in_transit') return PUSH_MESSAGES.picked_up;
   if (status === 'at_destination') return PUSH_MESSAGES.nearby;
   if (status === 'delivered') return PUSH_MESSAGES.delivered;
+  if (status === 'cancelled') return PUSH_MESSAGES.cancelled;
   return null;
 }

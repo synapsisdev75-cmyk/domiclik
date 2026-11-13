@@ -8,7 +8,13 @@ import {
   subscribeMapWallSettings,
   RealtimeSyncMeta,
 } from '../../lib/firebase';
-import { alertDeliveryComplete } from '../../lib/alerts';
+import {
+  alertDeliveryComplete,
+  alertOrderCancelled,
+  pushTowerOpsToast,
+  subscribeTowerOpsToasts,
+  type TowerOpsToast,
+} from '../../lib/alerts';
 import { MapComponent, MapStyleType } from '../MapComponent';
 import { GoogleMapRadar, getGoogleMapsApiKey } from '../GoogleMapRadar';
 import { BrandIcon } from '../brand/BrandAssets';
@@ -50,6 +56,7 @@ export const MapWallScreen: React.FC = () => {
   const [floatingKpi, setFloatingKpi] = useState(false);
   const [kpiPos, setKpiPos] = useState({ x: 24, y: 88 });
   const [linkCopied, setLinkCopied] = useState(false);
+  const [opsToasts, setOpsToasts] = useState<TowerOpsToast[]>([]);
   const shareUrl = mapWallPublicUrl();
 
   const prevStatusRef = useRef<Map<string, string>>(new Map());
@@ -83,6 +90,14 @@ export const MapWallScreen: React.FC = () => {
 
   useEffect(() => subscribeRealtimeStatus(setRealtimeMeta), []);
   useEffect(() => subscribeMapWallSettings(setWallSettings), []);
+  useEffect(() => {
+    return subscribeTowerOpsToasts((toast) => {
+      setOpsToasts((list) => [...list.slice(-4), toast]);
+      window.setTimeout(() => {
+        setOpsToasts((list) => list.filter((t) => t.id !== toast.id));
+      }, 9000);
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,8 +132,23 @@ export const MapWallScreen: React.FC = () => {
     }
     for (const order of orders) {
       const was = prev.get(order.id);
+      const code = order.trackingCode || order.id;
+      const driverName = order.assignedDriverName || 'Transportista';
       if (was && was !== 'delivered' && order.status === 'delivered') {
         alertDeliveryComplete();
+        pushTowerOpsToast({
+          kind: 'delivered',
+          title: 'Entrega exitosa',
+          body: `${code} · ${driverName} finalizó el encargo.`,
+        });
+      }
+      if (was && was !== 'cancelled' && order.status === 'cancelled') {
+        alertOrderCancelled();
+        pushTowerOpsToast({
+          kind: 'cancelled',
+          title: 'Encargo sin éxito',
+          body: `${code} · cancelado${order.assignedDriverName ? ` · ${driverName}` : ''}.`,
+        });
       }
       prev.set(order.id, order.status);
     }
@@ -258,6 +288,24 @@ export const MapWallScreen: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-[9999] bg-[#05080f] text-[#e8eef9] flex flex-col font-sans overflow-hidden">
+      {opsToasts.length > 0 ? (
+        <div className="pointer-events-none absolute inset-x-4 top-20 z-[100] mx-auto flex max-w-xl flex-col gap-2">
+          {opsToasts.map((t) => (
+            <div
+              key={t.id}
+              className={`rounded-2xl border px-4 py-3 text-center shadow-2xl backdrop-blur-md ${
+                t.kind === 'delivered'
+                  ? 'border-emerald-400/50 bg-emerald-950/95 text-emerald-50'
+                  : 'border-amber-400/50 bg-amber-950/95 text-amber-50'
+              }`}
+              role="status"
+            >
+              <p className="text-xs font-black uppercase tracking-wide">{t.title}</p>
+              <p className="mt-1 text-sm font-semibold">{t.body}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <header className="shrink-0 border-b border-[#142340] bg-[#070B16]/95 backdrop-blur-md px-4 sm:px-6 py-3 space-y-3 relative z-20">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">

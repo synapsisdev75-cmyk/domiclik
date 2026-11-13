@@ -75,11 +75,17 @@ export function Driver3DMarkersLayer({ drivers, onModelReady }: Driver3DMarkersL
       lng: number,
       headingDeg: number
     ) => {
-      const matrix = transformer.fromLatLngAltitude({
-        lat,
-        lng,
-        altitude: 0.5,
-      });
+      let matrix: number[];
+      try {
+        matrix = transformer.fromLatLngAltitude({
+          lat,
+          lng,
+          altitude: 0.5,
+        });
+      } catch (err) {
+        console.warn('[Driver3D] fromLatLngAltitude omitido', err);
+        return;
+      }
       const base = new THREE.Matrix4().fromArray(matrix);
       const yaw =
         -THREE.MathUtils.degToRad(headingDeg + MODEL_YAW_OFFSET_DEG);

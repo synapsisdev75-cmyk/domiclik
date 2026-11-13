@@ -1,0 +1,1 @@
+﻿DomiClick 1.0.74 AAB (versionCode 75) — mismo build que el APK: filtro GPS, ruta unida R/E, sin rebote native/browser.

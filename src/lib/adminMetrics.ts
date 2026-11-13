@@ -29,6 +29,7 @@ export const DEFAULT_DISPATCH_SETTINGS: DispatchSettings = {
   searchRadiusKm: 15,
   baseFee: 3000,
   perKmRate: 800,
+  vipSurchargeCop: 2000,
   autoAssignEnabled: true,
   updatedAt: new Date().toISOString(),
 };

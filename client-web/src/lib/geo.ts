@@ -1114,9 +1114,58 @@ function approxRoute(from: LatLng, to: LatLng): RouteEstimate {
   };
 }
 
+function googleMapsApi(): typeof google | null {
+  return (window as unknown as { google?: typeof google }).google || null;
+}
+
+/** Espera a que el script de Maps exponga DirectionsService (APIProvider). */
+export function waitForGoogleDirections(timeoutMs = 10000): Promise<boolean> {
+  if (googleMapsApi()?.maps?.DirectionsService) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const id = window.setInterval(() => {
+      if (googleMapsApi()?.maps?.DirectionsService) {
+        window.clearInterval(id);
+        resolve(true);
+      } else if (Date.now() - started >= timeoutMs) {
+        window.clearInterval(id);
+        resolve(false);
+      }
+    }, 120);
+  });
+}
+
+function pathFromGoogleRoute(route: google.maps.DirectionsRoute, fallback: LatLng[]): LatLng[] {
+  const detailed: LatLng[] = [];
+  for (const leg of route.legs || []) {
+    for (const step of leg.steps || []) {
+      for (const p of step.path || []) {
+        detailed.push({ lat: p.lat(), lng: p.lng() });
+      }
+    }
+  }
+  if (detailed.length >= 2) return detailed;
+  const overview =
+    route.overview_path?.map((p) => ({ lat: p.lat(), lng: p.lng() })) || [];
+  return overview.length >= 2 ? overview : fallback;
+}
+
+function summarizeGoogleLegs(route: google.maps.DirectionsRoute) {
+  let meters = 0;
+  let seconds = 0;
+  for (const leg of route.legs || []) {
+    meters += leg.distance?.value || 0;
+    seconds += leg.duration_in_traffic?.value || leg.duration?.value || 0;
+  }
+  return {
+    distanceKm: Math.round((meters / 1000) * 100) / 100,
+    durationMin: Math.max(5, Math.round(seconds / 60)),
+  };
+}
+
 /** Google Directions JS (requiere Directions API habilitada en la key). */
 export function estimateRouteWithGoogle(from: LatLng, to: LatLng): Promise<RouteEstimate | null> {
-  const g = (window as unknown as { google?: typeof google }).google;
+  const g = googleMapsApi();
   if (!g?.maps?.DirectionsService) return Promise.resolve(null);
 
   const service = new g.maps.DirectionsService();
@@ -1126,38 +1175,40 @@ export function estimateRouteWithGoogle(from: LatLng, to: LatLng): Promise<Route
       const timer = window.setTimeout(() => {
         console.warn('[DomiClick] Google Directions timeout', travelMode);
         resolve(null);
-      }, 5000);
+      }, 8000);
 
-      service.route(
-        {
-          origin: from,
-          destination: to,
-          travelMode,
-          provideRouteAlternatives: false,
-          optimizeWaypoints: false,
-        },
-        (result, status) => {
-          window.clearTimeout(timer);
-          if (status !== g.maps.DirectionsStatus.OK || !result?.routes?.[0]?.legs?.[0]) {
-            console.warn('[DomiClick] Google Directions:', status, travelMode);
-            resolve(null);
-            return;
-          }
-          const route = result.routes[0];
-          const leg = route.legs[0];
-          const path: LatLng[] =
-            route.overview_path?.map((p) => ({ lat: p.lat(), lng: p.lng() })) ||
-            leg.steps?.flatMap((st) => st.path.map((p) => ({ lat: p.lat(), lng: p.lng() }))) ||
-            [from, to];
+      const request: google.maps.DirectionsRequest = {
+        origin: from,
+        destination: to,
+        travelMode,
+        provideRouteAlternatives: false,
+        optimizeWaypoints: false,
+      };
+      if (travelMode === g.maps.TravelMode.DRIVING) {
+        request.drivingOptions = {
+          departureTime: new Date(),
+          trafficModel: g.maps.TrafficModel.BEST_GUESS,
+        };
+      }
 
-          resolve({
-            distanceKm: Math.round(((leg.distance?.value || 0) / 1000) * 100) / 100,
-            durationMin: Math.max(5, Math.round((leg.duration?.value || 0) / 60)),
-            path: path.length >= 2 ? path : [from, to],
-            provider: 'google',
-          });
-        },
-      );
+      service.route(request, (result, status) => {
+        window.clearTimeout(timer);
+        if (status !== g.maps.DirectionsStatus.OK || !result?.routes?.[0]?.legs?.[0]) {
+          console.warn('[DomiClick] Google Directions:', status, travelMode);
+          resolve(null);
+          return;
+        }
+        const route = result.routes[0];
+        const path = pathFromGoogleRoute(route, [from, to]);
+        const summary = summarizeGoogleLegs(route);
+
+        resolve({
+          distanceKm: summary.distanceKm,
+          durationMin: summary.durationMin,
+          path: path.length >= 2 ? path : [from, to],
+          provider: 'google',
+        });
+      });
     });
 
   return (async () => {
@@ -1170,6 +1221,65 @@ export function estimateRouteWithGoogle(from: LatLng, to: LatLng): Promise<Route
     }
     return driving;
   })();
+}
+
+/**
+ * Ruta unida por calles respetando el orden de paradas (R/E ya planificado).
+ * No reordena waypoints: optimizeWaypoints queda en false.
+ */
+export async function estimateTourWithGoogle(stops: LatLng[]): Promise<RouteEstimate | null> {
+  const points = stops.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (points.length < 2) return null;
+  if (points.length === 2) return estimateRouteWithGoogle(points[0], points[1]);
+
+  const g = googleMapsApi();
+  if (!g?.maps?.DirectionsService) return null;
+  const service = new g.maps.DirectionsService();
+  const origin = points[0];
+  const destination = points[points.length - 1];
+  const waypoints = points.slice(1, -1).map((location) => ({
+    location,
+    stopover: true as const,
+  }));
+
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => {
+      console.warn('[DomiClick] Google tour Directions timeout');
+      resolve(null);
+    }, 12000);
+
+    service.route(
+      {
+        origin,
+        destination,
+        waypoints,
+        travelMode: g.maps.TravelMode.DRIVING,
+        optimizeWaypoints: false,
+        provideRouteAlternatives: false,
+        drivingOptions: {
+          departureTime: new Date(),
+          trafficModel: g.maps.TrafficModel.BEST_GUESS,
+        },
+      },
+      (result, status) => {
+        window.clearTimeout(timer);
+        if (status !== g.maps.DirectionsStatus.OK || !result?.routes?.[0]) {
+          console.warn('[DomiClick] Google tour Directions:', status);
+          resolve(null);
+          return;
+        }
+        const route = result.routes[0];
+        const path = pathFromGoogleRoute(route, points);
+        const summary = summarizeGoogleLegs(route);
+        resolve({
+          distanceKm: summary.distanceKm,
+          durationMin: summary.durationMin,
+          path: path.length >= 2 ? path : points,
+          provider: 'google',
+        });
+      },
+    );
+  });
 }
 
 const OSRM_ENDPOINTS = [
@@ -1214,6 +1324,45 @@ async function estimateRouteWithOsrm(from: LatLng, to: LatLng): Promise<RouteEst
   return null;
 }
 
+async function estimateTourWithOsrm(stops: LatLng[]): Promise<RouteEstimate | null> {
+  const points = stops.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (points.length < 2) return null;
+  const coords = points.map((p) => `${p.lng},${p.lat}`).join(';');
+  const qs = 'overview=full&geometries=geojson&steps=false';
+
+  for (const base of OSRM_ENDPOINTS) {
+    try {
+      const controller = new AbortController();
+      const t = window.setTimeout(() => controller.abort(), 10000);
+      const res = await fetch(`${base}/${coords}?${qs}`, { signal: controller.signal });
+      window.clearTimeout(t);
+      if (!res.ok) continue;
+      const data = (await res.json()) as {
+        code?: string;
+        routes?: Array<{
+          distance: number;
+          duration: number;
+          geometry?: { coordinates: [number, number][] };
+        }>;
+      };
+      if (data.code && data.code !== 'Ok') continue;
+      const route = data.routes?.[0];
+      if (!route?.geometry?.coordinates?.length) continue;
+      const path = route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+      if (path.length < 2) continue;
+      return {
+        distanceKm: Math.round((route.distance / 1000) * 100) / 100,
+        durationMin: Math.max(5, Math.round(route.duration / 60)),
+        path,
+        provider: 'osrm',
+      };
+    } catch (err) {
+      console.warn('[DomiClick] OSRM tour failed', base, err);
+    }
+  }
+  return null;
+}
+
 /**
  * Ruta por calles: OSRM (rápido/fiable) → Google Directions → línea aproximada.
  * OSRM primero porque la key de Maps en "development only" a menudo bloquea Directions.
@@ -1230,4 +1379,169 @@ export async function estimateRoute(from: LatLng, to: LatLng): Promise<RouteEsti
 
   if (osrm) return osrm;
   return approxRoute(from, to);
+}
+
+export type TravelCost = { durationSec: number; distanceM: number };
+
+/**
+ * Matriz de costos por calles (OSRM Table). Una sola petición para puntuar muchas
+ * secuencias de tour sin reordenar waypoints.
+ */
+export async function fetchTravelCostMatrix(points: LatLng[]): Promise<TravelCost[][] | null> {
+  const pts = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (pts.length < 2) return null;
+  const coords = pts.map((p) => `${p.lng},${p.lat}`).join(';');
+  const qs = 'annotations=duration,distance';
+
+  for (const base of OSRM_ENDPOINTS) {
+    const tableBase = base.replace('/route/v1/driving', '/table/v1/driving');
+    try {
+      const controller = new AbortController();
+      const t = window.setTimeout(() => controller.abort(), 10000);
+      const res = await fetch(`${tableBase}/${coords}?${qs}`, { signal: controller.signal });
+      window.clearTimeout(t);
+      if (!res.ok) continue;
+      const data = (await res.json()) as {
+        code?: string;
+        durations?: Array<Array<number | null>>;
+        distances?: Array<Array<number | null>>;
+      };
+      if (data.code && data.code !== 'Ok') continue;
+      if (!data.durations?.length) continue;
+      const n = pts.length;
+      const matrix: TravelCost[][] = [];
+      for (let i = 0; i < n; i++) {
+        const row: TravelCost[] = [];
+        for (let j = 0; j < n; j++) {
+          const durationSec = data.durations[i]?.[j];
+          const distanceM = data.distances?.[i]?.[j];
+          if (
+            i !== j &&
+            (durationSec == null ||
+              !Number.isFinite(durationSec) ||
+              distanceM == null ||
+              !Number.isFinite(distanceM))
+          ) {
+            row.push({ durationSec: Infinity, distanceM: Infinity });
+          } else {
+            row.push({
+              durationSec: i === j ? 0 : Number(durationSec) || 0,
+              distanceM: i === j ? 0 : Number(distanceM) || 0,
+            });
+          }
+        }
+        matrix.push(row);
+      }
+      return matrix;
+    } catch (err) {
+      console.warn('[DomiClick] OSRM table failed', tableBase, err);
+    }
+  }
+  return null;
+}
+
+/** Suma duración/distancia de una secuencia de índices sobre una matriz de costos. */
+export function pathCostFromMatrix(
+  matrix: TravelCost[][],
+  indices: number[],
+): TravelCost {
+  if (indices.length < 2) return { durationSec: 0, distanceM: 0 };
+  let durationSec = 0;
+  let distanceM = 0;
+  for (let i = 0; i < indices.length - 1; i++) {
+    const a = indices[i];
+    const b = indices[i + 1];
+    const cell = matrix[a]?.[b];
+    if (!cell || !Number.isFinite(cell.durationSec) || !Number.isFinite(cell.distanceM)) {
+      return { durationSec: Infinity, distanceM: Infinity };
+    }
+    durationSec += cell.durationSec;
+    distanceM += cell.distanceM;
+  }
+  return { durationSec, distanceM };
+}
+
+/**
+ * Costo de una secuencia fija por calles (sin geometría). Preferido para ranking
+ * de tours; cae a Directions/approx si Table no responde.
+ */
+export async function estimateTourCost(stops: LatLng[]): Promise<TravelCost> {
+  const points = stops.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (points.length < 2) return { durationSec: 0, distanceM: 0 };
+
+  const matrix = await fetchTravelCostMatrix(points);
+  if (matrix) {
+    const cost = pathCostFromMatrix(
+      matrix,
+      points.map((_, i) => i),
+    );
+    if (Number.isFinite(cost.durationSec)) return cost;
+  }
+
+  if (GOOGLE_MAPS_API_KEY) {
+    await waitForGoogleDirections(6000);
+    const googleTour = await estimateTourWithGoogle(points);
+    if (googleTour) {
+      return {
+        durationSec: Math.max(1, googleTour.durationMin) * 60,
+        distanceM: Math.max(1, googleTour.distanceKm) * 1000,
+      };
+    }
+  }
+
+  const osrmTour = await estimateTourWithOsrm(points);
+  if (osrmTour) {
+    return {
+      durationSec: Math.max(1, osrmTour.durationMin) * 60,
+      distanceM: Math.max(1, osrmTour.distanceKm) * 1000,
+    };
+  }
+
+  let distanceM = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    distanceM += haversineKm(points[i], points[i + 1]) * 1000 * ROAD_FACTOR;
+  }
+  const durationSec = Math.max(60, (distanceM / 1000 / 75) * 3600);
+  return { durationSec, distanceM };
+}
+
+/**
+ * Une paradas ya ordenadas (moto → R/E) trazando la ruta más rápida por calles.
+ * No cambia el orden: eso lo define planJoinedTour.
+ */
+export async function estimateTourRoute(stops: LatLng[]): Promise<RouteEstimate> {
+  const points = stops.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (points.length < 2) {
+    return { distanceKm: 0, durationMin: 0, path: points, provider: 'approx' };
+  }
+  if (points.length === 2) return estimateRoute(points[0], points[1]);
+
+  if (GOOGLE_MAPS_API_KEY) {
+    await waitForGoogleDirections(8000);
+    const googleTour = await estimateTourWithGoogle(points);
+    if (googleTour && googleTour.path.length > points.length) return googleTour;
+  }
+
+  const osrmTour = await estimateTourWithOsrm(points);
+  if (osrmTour && osrmTour.path.length > points.length) return osrmTour;
+
+  const joined: LatLng[] = [];
+  let distanceKm = 0;
+  let durationMin = 0;
+  let provider: RouteEstimate['provider'] = 'approx';
+  for (let i = 0; i < points.length - 1; i++) {
+    const seg = await estimateRoute(points[i], points[i + 1]);
+    distanceKm += seg.distanceKm;
+    durationMin += seg.durationMin;
+    if (seg.provider !== 'approx') provider = seg.provider;
+    const segment = seg.path.length >= 2 ? seg.path : [points[i], points[i + 1]];
+    joined.push(...(joined.length ? segment.slice(1) : segment));
+  }
+
+  return {
+    distanceKm: Math.round(distanceKm * 100) / 100,
+    durationMin: Math.max(5, Math.round(durationMin)),
+    path: joined.length >= 2 ? joined : points,
+    provider,
+  };
 }

@@ -33,6 +33,7 @@ import {
   query,
   where,
   limit,
+  arrayUnion,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -681,7 +682,12 @@ export type PublicOrderTracking = {
   updatedAt?: string;
   etaText?: string;
   paymentReviewStatus?: 'pending_review' | 'approved';
+  transferChannel?: 'breb' | 'qr' | 'pasarela';
+  paymentGatewayStatus?: string;
+  amountPaid?: number | null;
+  shippingFee?: number | null;
   assignedDriverPhone?: string | null;
+  deliveryProofUrl?: string | null;
   timeline?: Array<{ at?: string; to?: string; note?: string }>;
 };
 
@@ -757,9 +763,26 @@ function mapPublicOrder(docSnap: { id: string; data: () => Record<string, unknow
       data.paymentReviewStatus === 'pending_review' || data.paymentReviewStatus === 'approved'
         ? data.paymentReviewStatus
         : undefined,
+    transferChannel:
+      data.transferChannel === 'breb' ||
+      data.transferChannel === 'qr' ||
+      data.transferChannel === 'pasarela'
+        ? data.transferChannel
+        : undefined,
+    paymentGatewayStatus: data.paymentGatewayStatus ? String(data.paymentGatewayStatus) : undefined,
+    deliveryProofUrl: data.deliveryProofUrl ? String(data.deliveryProofUrl) : null,
+    amountPaid: typeof data.amountPaid === 'number' ? data.amountPaid : null,
+    shippingFee:
+      typeof data.shippingFee === 'number'
+        ? data.shippingFee
+        : typeof data.routePrice === 'number'
+          ? data.routePrice
+          : null,
     etaText:
       data.paymentReviewStatus === 'pending_review'
-        ? 'Central está revisando tu comprobante'
+        ? data.transferChannel === 'pasarela'
+          ? 'Esperando confirmación de la pasarela'
+          : 'Central está revisando tu comprobante'
         : etaForStatus(status),
     driverLocation: (() => {
       const live = parseCoords(data.driverLive);
@@ -1002,21 +1025,50 @@ export type ClientOrderInput = {
   pricingBand?: 'peak' | 'normal';
   pricePerKm?: number;
   peakMultiplier?: number;
+  isVip?: boolean;
+  vipSurchargeCop?: number;
   scheduledFor?: string;
   sourceSiteId: string;
   invoiceNumber?: string;
   invoicePhotoUrl?: string;
   paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
-  transferChannel?: 'breb' | 'qr';
+  transferChannel?: 'breb' | 'qr' | 'pasarela';
   paymentProofUrl?: string;
   paymentNote?: string;
   couponCode?: string;
 };
 
+/** Recargo VIP desde torre (settings/dispatch). */
+export function subscribeVipSurcharge(
+  callback: (vipSurchargeCop: number) => void,
+): Unsubscribe {
+  const DEFAULT = 2000;
+  return onSnapshot(
+    doc(db, 'settings', 'dispatch'),
+    (snap) => {
+      if (!snap.exists()) {
+        callback(DEFAULT);
+        return;
+      }
+      const raw = Number((snap.data() as { vipSurchargeCop?: number }).vipSurchargeCop);
+      callback(Number.isFinite(raw) && raw >= 0 ? Math.round(raw) : DEFAULT);
+    },
+    () => callback(DEFAULT),
+  );
+}
+
 export async function uploadInvoicePhoto(file: File, orderIdHint?: string): Promise<string> {
   const id = orderIdHint || `tmp_${Date.now()}`;
   const safeName = (file.name || 'factura.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `orders/${id}/invoice_${Date.now()}_${safeName}`;
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
+  return getDownloadURL(storageRef);
+}
+
+export async function uploadDeliveryProof(file: File, orderId: string): Promise<string> {
+  const safeName = (file.name || 'entrega.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `orders/${orderId}/delivery_${Date.now()}_${safeName}`;
   const storageRef = ref(storage, path);
   await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
   return getDownloadURL(storageRef);
@@ -1075,8 +1127,10 @@ export async function createClientOrder(input: ClientOrderInput) {
     }
   }
   const km = Number(input.routeDistanceKm) || 0;
+  const gatewayHold =
+    input.paymentMethod === 'transferencia' && input.transferChannel === 'pasarela';
   const awaitingProof =
-    input.paymentMethod === 'transferencia' && Boolean(input.paymentProofUrl);
+    (input.paymentMethod === 'transferencia' && Boolean(input.paymentProofUrl)) || gatewayHold;
 
   const order = {
     id: orderId,
@@ -1111,6 +1165,10 @@ export async function createClientOrder(input: ClientOrderInput) {
     pricingBand: input.pricingBand,
     pricePerKm: input.pricePerKm,
     peakMultiplier: input.peakMultiplier,
+    isVip: Boolean(input.isVip),
+    vipSurchargeCop: input.isVip
+      ? Math.max(0, Math.round(Number(input.vipSurchargeCop) || 0))
+      : 0,
     clientQuoted: fee > 0,
     scheduledFor: input.scheduledFor || undefined,
     status: 'pending' as const,
@@ -1125,6 +1183,9 @@ export async function createClientOrder(input: ClientOrderInput) {
           transferChannel: input.transferChannel,
           paymentProofUrl: input.paymentProofUrl,
           paymentReviewStatus: 'pending_review' as const,
+          ...(gatewayHold
+            ? { paymentGateway: 'wompi' as const, paymentGatewayStatus: 'pending' }
+            : {}),
         }
       : {}),
     paymentNote: input.paymentNote || '',
@@ -1135,9 +1196,11 @@ export async function createClientOrder(input: ClientOrderInput) {
         at: now,
         to: 'pending',
         byRole: 'customer',
-        note: awaitingProof
-          ? 'Solicitud creada · comprobante en revisión'
-          : 'Solicitud creada',
+        note: gatewayHold
+          ? 'Solicitud creada · esperando pago en pasarela'
+          : awaitingProof
+            ? 'Solicitud creada · comprobante en revisión'
+            : 'Solicitud creada',
       },
     ],
     sourceSiteId: input.sourceSiteId,
@@ -1159,6 +1222,7 @@ export async function createClientOrder(input: ClientOrderInput) {
     scheduledFor: order.scheduledFor || null,
     pricingBand: order.pricingBand || null,
     paymentReviewStatus: awaitingProof ? ('pending_review' as const) : undefined,
+    transferChannel: input.transferChannel,
   };
 }
 
@@ -1169,6 +1233,11 @@ export type CustomerOrderSummary = {
   pickupAddress?: string;
   deliveryAddress?: string;
   description?: string;
+  deliveryConfirmCode?: string | null;
+  pickupLat?: number;
+  pickupLng?: number;
+  deliveryLat?: number;
+  deliveryLng?: number;
   createdAt?: string;
   updatedAt?: string;
   scheduledFor?: string;
@@ -1180,13 +1249,26 @@ function mapCustomerOrderDoc(
 ): CustomerOrderSummary | null {
   const trackingCode = String(data.trackingCode || '').trim();
   if (!trackingCode) return null;
+  const status = String(data.status || 'pending');
+  const pickup = data.pickupCoords as { lat?: number; lng?: number } | undefined;
+  const delivery = data.deliveryCoords as { lat?: number; lng?: number } | undefined;
   return {
     orderId: id,
     trackingCode,
-    status: String(data.status || 'pending'),
+    status,
     pickupAddress: data.pickupAddress ? String(data.pickupAddress) : undefined,
     deliveryAddress: data.deliveryAddress ? String(data.deliveryAddress) : undefined,
     description: data.description ? String(data.description) : undefined,
+    deliveryConfirmCode:
+      status === 'delivered' || status === 'cancelled'
+        ? null
+        : data.deliveryConfirmCode
+          ? String(data.deliveryConfirmCode)
+          : null,
+    pickupLat: typeof pickup?.lat === 'number' ? pickup.lat : undefined,
+    pickupLng: typeof pickup?.lng === 'number' ? pickup.lng : undefined,
+    deliveryLat: typeof delivery?.lat === 'number' ? delivery.lat : undefined,
+    deliveryLng: typeof delivery?.lng === 'number' ? delivery.lng : undefined,
     createdAt: data.createdAt ? String(data.createdAt) : undefined,
     updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
     scheduledFor: data.scheduledFor ? String(data.scheduledFor) : undefined,
@@ -1328,11 +1410,93 @@ export function subscribeCustomerOrders(
 
 /** Pedidos aún no cerrados (el cliente debe verlos hasta entregar). */
 export function isCustomerOrderActive(status: string): boolean {
-  return status !== 'delivered' && status !== 'cancelled';
+  const s = String(status || '').trim().toLowerCase();
+  return s !== 'delivered' && s !== 'cancelled' && s !== 'canceled' && s !== 'cancelado';
 }
 
 /** Historial: entregados o cancelados. */
 export function isCustomerOrderHistory(status: string): boolean {
   return status === 'delivered' || status === 'cancelled';
+}
+
+function coordsClose(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+  km = 0.08,
+): boolean {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)) <= km;
+}
+
+export async function findActiveDuplicateOrder(params: {
+  uid: string;
+  email?: string | null;
+  pickupAddress: string;
+  deliveryAddress: string;
+  pickup: { lat: number; lng: number };
+  delivery: { lat: number; lng: number };
+}): Promise<CustomerOrderSummary | null> {
+  const list = await listCustomerOrders(params.uid, params.email);
+  const pickupAddr = params.pickupAddress.trim().toLowerCase();
+  const deliveryAddr = params.deliveryAddress.trim().toLowerCase();
+  return (
+    list.find((order) => {
+      if (!isCustomerOrderActive(order.status)) return false;
+      const sameAddr =
+        (order.pickupAddress || '').trim().toLowerCase() === pickupAddr &&
+        (order.deliveryAddress || '').trim().toLowerCase() === deliveryAddr;
+      const sameCoords =
+        order.pickupLat != null &&
+        order.pickupLng != null &&
+        order.deliveryLat != null &&
+        order.deliveryLng != null &&
+        coordsClose({ lat: order.pickupLat, lng: order.pickupLng }, params.pickup) &&
+        coordsClose({ lat: order.deliveryLat, lng: order.deliveryLng }, params.delivery);
+      return sameAddr || sameCoords;
+    }) || null
+  );
+}
+
+/** El cliente puede cerrar su propio pedido si sigue pendiente y sin motorizado. */
+export async function cancelOwnPendingOrder(orderId: string, uid: string): Promise<void> {
+  const id = String(orderId || '').trim();
+  const customerUid = String(uid || '').trim();
+  if (!id || !customerUid) throw new Error('No se pudo cancelar el pedido.');
+  const ref = doc(db, 'orders', id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('No encontré ese pedido.');
+  const data = snap.data() as Record<string, unknown>;
+  if (String(data.customerUid || '') !== customerUid) {
+    throw new Error('Este pedido no está en tu cuenta.');
+  }
+  const status = String(data.status || 'pending');
+  if (!isCustomerOrderActive(status)) return;
+  if (data.assignedDriverId && status !== 'pending') {
+    throw new Error('Ya tiene repartidor. Pide la cancelación a Central.');
+  }
+  const now = new Date().toISOString();
+  await updateDoc(ref, {
+    status: 'cancelled',
+    assignedDriverId: null,
+    assignedDriverName: '',
+    assignedDriverPhone: '',
+    deliveryConfirmCode: '',
+    cancelledAt: now,
+    cancelledBy: 'customer',
+    updatedAt: now,
+    timeline: arrayUnion({
+      at: now,
+      from: status,
+      to: 'cancelled',
+      byRole: 'customer',
+      note: 'Cancelado por el cliente',
+    }),
+  });
 }
 

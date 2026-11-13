@@ -8,6 +8,7 @@ import {
 } from 'react';
 import { Loader2, MessageCircle, Phone, Send, X } from 'lucide-react';
 import { PHONE, WHATSAPP_URL } from '../lib/config';
+import { SUPPORT_PHONE_DISPLAY } from '../lib/companyInfo';
 import {
   getWelcomeReply,
   replyToUserMessage,
@@ -152,7 +153,7 @@ export function ChatbotPlaceholder() {
   }
 
   return (
-    <div className="fixed bottom-24 right-3 z-40 flex flex-col items-end gap-3 sm:bottom-5 sm:right-5 max-sm:scale-90 origin-bottom-right">
+    <div className="domi-chat-fab fixed bottom-[calc(var(--domi-nav-clear,5.75rem)+env(safe-area-inset-bottom,0px))] left-3 z-40 flex flex-col items-start gap-3 sm:bottom-5 sm:left-auto sm:right-5 sm:items-end max-sm:scale-[0.88] origin-bottom-left sm:origin-bottom-right">
       {open ? (
         <div
           id={panelId}
@@ -256,14 +257,14 @@ export function ChatbotPlaceholder() {
               className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25D366]/15 px-3 py-2.5 text-xs font-bold text-[#25D366] transition hover:bg-[#25D366]/25"
             >
               <MessageCircle className="h-3.5 w-3.5" aria-hidden />
-              WhatsApp
+              WhatsApp {SUPPORT_PHONE_DISPLAY}
             </a>
             <a
               href={`tel:${PHONE}`}
               className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[rgba(0,229,255,0.1)] px-3 py-2.5 text-xs font-bold text-[var(--domi-cyan)] transition hover:bg-[rgba(0,229,255,0.18)]"
             >
               <Phone className="h-3.5 w-3.5" aria-hidden />
-              Llamar
+              Llamar {SUPPORT_PHONE_DISPLAY}
             </a>
           </div>
         </div>
@@ -271,7 +272,7 @@ export function ChatbotPlaceholder() {
 
       <button
         type="button"
-        className="cta-primary h-14 w-14 !rounded-full !p-0"
+        className="cta-primary h-12 w-12 !rounded-full !p-0 sm:h-14 sm:w-14"
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((v) => !v)}

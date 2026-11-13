@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { COMMERCIAL_PHONE_E164, SUPPORT_PHONE_E164 } from './companyInfo';
 
 export const API_URL = (import.meta.env.VITE_DOMICLICK_API_URL || 'http://localhost:8787').replace(
   /\/$/,
@@ -10,14 +11,23 @@ export const INGEST_TOKEN =
 
 export const SITE_ID = import.meta.env.VITE_DOMICLICK_SITE_ID || 'clientes-landing';
 
-export const WHATSAPP = import.meta.env.VITE_DOMICLICK_WHATSAPP || '573001234567';
+/** WhatsApp / chat IA → soporte y atención PQR. */
+export const WHATSAPP = import.meta.env.VITE_DOMICLICK_WHATSAPP || SUPPORT_PHONE_E164;
 
-export const PHONE = import.meta.env.VITE_DOMICLICK_PHONE || '+573001234567';
+export const PHONE = import.meta.env.VITE_DOMICLICK_PHONE || `+${SUPPORT_PHONE_E164}`;
+
+export const COMMERCIAL_PHONE =
+  import.meta.env.VITE_DOMICLICK_COMMERCIAL_PHONE || `+${COMMERCIAL_PHONE_E164}`;
 
 export const WHATSAPP_URL = `https://wa.me/${WHATSAPP.replace(/\D/g, '')}`;
 
-/** Vacío = badge “Próximamente”. Cuando tengas el link, pégalo aquí o en VITE_PLAY_STORE_URL. */
-export const PLAY_STORE_URL = String(import.meta.env.VITE_PLAY_STORE_URL || '').trim();
+export const COMMERCIAL_WHATSAPP_URL = `https://wa.me/${COMMERCIAL_PHONE.replace(/\D/g, '')}`;
+
+/** Google Play — enlace activo. Override con VITE_PLAY_STORE_URL si hace falta. */
+export const PLAY_STORE_URL = String(
+  import.meta.env.VITE_PLAY_STORE_URL ||
+    'https://play.google.com/store/apps/details?id=com.domiclick.app&hl=es_CO',
+).trim();
 
 /** Vacío = badge “Próximamente”. Cuando tengas el link, pégalo aquí o en VITE_APP_STORE_URL. */
 export const APP_STORE_URL = String(import.meta.env.VITE_APP_STORE_URL || '').trim();

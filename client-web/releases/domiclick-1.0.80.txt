@@ -1,0 +1,8 @@
+﻿Nueva actualización DomiClick para paradas más claras en el mapa.
+
+• Al tocar paradas 1, 2, 3… (R1/E2…) solo se muestra la ficha con información.
+• El mapa de DomiClick se centra en esa parada; Google Maps no se abre solo.
+• Maps se abre solo con los botones de la ficha (recogida/entrega exacta).
+• VIP sigue con prioridad 1 en asignación y tablero.
+
+Actualiza y sigue entregando con DomiClick.

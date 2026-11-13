@@ -1,0 +1,7 @@
+Actualización importante de estabilidad en DomiClick.
+
+• Corregimos un cierre inesperado al activar la ubicación en vivo en varios celulares (incluye Motorola y Android reciente).
+• El GPS del transportista ahora pide el permiso de forma segura antes de seguirte en el mapa.
+• Siguen disponibles Optimizar ruta y el recorrido unido cuando llevas varios pedidos.
+
+Actualiza para una entrega más estable. DomiClick: excelencia a un click de ti.

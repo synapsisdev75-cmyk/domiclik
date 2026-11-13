@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { MotorizadoDriver, DeliveryOrder, AdminAccount, type StaffRole } from '../../types';
+import { MotorizadoDriver, DeliveryOrder, AdminAccount, type ChatRoom, type StaffRole } from '../../types';
 import { MapComponent, MapStyleType } from '../MapComponent';
 import { GoogleMapRadar, getGoogleMapsApiKey } from '../GoogleMapRadar';
 import { BrandIcon } from '../brand/BrandAssets';
 import { ChatWindow } from '../chat/ChatWindow';
 import { CreateOrderModal } from './CreateOrderModal';
 import { AdminSection, AdminSectionPanels } from './AdminSectionPanels';
+import { DriverApprovalModal, PendingDriverQueue } from './DriverApprovalModal';
 import { BANNER_HERO_VIDEO_URL } from '../../lib/firebase';
-import { Plus, MapPin, MessageSquare, ShieldCheck, PictureInPicture2 } from 'lucide-react';
+import { Plus, MapPin, MessageSquare, ShieldCheck, PictureInPicture2, Clock } from 'lucide-react';
 import {
-  DomiMotoIcon,
   DomiRadarIcon,
   DomiTowerIcon,
   DomiCargoIcon,
@@ -18,7 +18,8 @@ import { ORDER_STATUS_LABEL, isLiveOrderStatus } from '../../lib/orderFlow';
 import { openMapWallWindow } from './MapWallScreen';
 import { MapWallVideoPanel } from './MapWallVideoPanel';
 import { staffCan } from '../../lib/staffAccess';
-import { subscribeIncidents } from '../../lib/firebase';
+import { subscribeChatRooms, subscribeIncidents } from '../../lib/firebase';
+import { FleetMailState, unreadForDriver } from './FleetMailState';
 import type { OpsIncident } from '../../types';
 import { AlertTriangle } from 'lucide-react';
 
@@ -45,7 +46,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const canCreateOrders = staffCan(staffRole, 'orders.create');
   const [selectedDriverForChat, setSelectedDriverForChat] = useState<MotorizadoDriver | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [approvalDriver, setApprovalDriver] = useState<MotorizadoDriver | null>(null);
   const [incidents, setIncidents] = useState<OpsIncident[]>([]);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
   const [mapStyleToggle, setMapStyleToggle] = useState<'map' | 'satellite'>('map');
   const radarMapStyle: MapStyleType =
     mapStyleToggle === 'satellite' ? 'google_satellite' : 'dark';
@@ -56,7 +59,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const approvedDrivers = drivers.filter((d) => d.status === 'approved');
   const activeDrivers = approvedDrivers.filter((d) => d.isActive);
-  const pendingOrders = orders.filter((o) => o.status === 'pending').length;
+  const fleetPreview = [...approvedDrivers].sort((a, b) => {
+    if (Boolean(a.isActive) !== Boolean(b.isActive)) return a.isActive ? -1 : 1;
+    return String(b.updatedAt || b.createdAt || '').localeCompare(
+      String(a.updatedAt || a.createdAt || ''),
+    );
+  });
+  const unassignedPending = orders
+    .filter(
+      (o) => o.status === 'pending' && !o.assignedDriverId && o.paymentReviewStatus !== 'pending_review',
+    )
+    .sort((a, b) => {
+      if (Boolean(a.isVip) !== Boolean(b.isVip)) return a.isVip ? -1 : 1;
+      return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+    });
+  const pendingOrders = unassignedPending.length;
   const transitOrders = orders.filter(
     (o) => isLiveOrderStatus(o.status)
   ).length;
@@ -84,6 +101,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const currentSection = (section || 'dashboard') as AdminSection;
 
   useEffect(() => subscribeIncidents(setIncidents), []);
+  useEffect(() => subscribeChatRooms(setChatRooms), []);
 
   const openPanic = incidents.filter((i) => i.status === 'open' && i.isPanic);
   const chatSender =
@@ -108,6 +126,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       ) : (
         <>
+          <PendingDriverQueue
+            drivers={drivers}
+            adminName={currentAdminEmail || 'torre'}
+            onReview={setApprovalDriver}
+          />
+          <DriverApprovalModal
+            driver={approvalDriver}
+            isOpen={Boolean(approvalDriver)}
+            onClose={() => setApprovalDriver(null)}
+            adminName={currentAdminEmail || 'torre'}
+          />
+          {unassignedPending.length > 0 && (
+            <button
+              type="button"
+              onClick={() => go('solicitudes')}
+              className="w-full text-left rounded-2xl border-2 border-amber-400/70 bg-amber-950/35 p-4 flex items-center gap-3 hover:bg-amber-950/50 transition"
+            >
+              <Clock className="w-8 h-8 text-amber-300 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-sm font-black text-amber-100 uppercase tracking-wide">
+                  Sin asignar · {unassignedPending.length} pedido{unassignedPending.length > 1 ? 's' : ''}
+                </div>
+                <div className="text-xs text-amber-200/90 mt-0.5 truncate">
+                  {unassignedPending
+                    .slice(0, 3)
+                    .map((o) => `${o.isVip ? 'VIP·' : ''}${o.trackingCode || o.id}`)
+                    .join(' · ')}
+                  {unassignedPending.length > 3 ? '…' : ''} · VIP prioridad 1 · pulsa Solicitudes
+                </div>
+              </div>
+            </button>
+          )}
           {openPanic.length > 0 && (
             <button
               type="button"
@@ -144,7 +194,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="absolute inset-0 bg-gradient-to-r from-[#05080f]/80 via-[#05080f]/45 to-[#05080f]/25" />
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center relative z-10">
-              <div className="lg:col-span-7 space-y-3">
+              <div className="on-dark lg:col-span-7 space-y-3">
                 <span className="text-xs font-semibold text-slate-200 font-tech tracking-wider drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)]">
                   Bienvenido a
                 </span>
@@ -262,39 +312,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Telemetry bar */}
-          <div className="bg-[#080E1C] border border-[#152342] rounded-2xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-4 shadow-lg font-tech text-xs">
-            <div className="flex flex-wrap items-center gap-5">
-              <div className="flex items-center gap-2">
-                <BrandIcon name="gps" className="w-6 h-6" />
-                <span className="text-slate-400 font-bold">GPS ONLINE:</span>
-                <span className="text-[#00E676] font-black">
-                  {activeDrivers.length}/{approvedDrivers.length}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <BrandIcon name="servidor" className="w-6 h-6" />
-                <span className="text-slate-400 font-bold">SERVIDOR:</span>
-                <span className="text-[#00E676] font-black">ÓPTIMO</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <BrandIcon name="rastreo" className="w-6 h-6" />
-                <span className="text-slate-400 font-bold">MAPAS:</span>
-                <span className="text-[#00E5FF] font-black">
-                  {useGoogleMaps ? 'GOOGLE' : 'LEAFLET'}
-                </span>
-              </div>
+          {canCreateOrders && (
+            <div className="flex justify-end">
+              <button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="bg-gradient-to-r from-[#FF5722] via-[#F4511E] to-[#D84315] hover:scale-105 text-white font-black px-5 py-2.5 rounded-xl transition shadow-[0_0_25px_rgba(255,87,34,0.5)] border border-[#FF7043] flex items-center gap-2 text-xs tracking-wider uppercase shrink-0"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                <span>NUEVA SOLICITUD</span>
+              </button>
             </div>
-            {canCreateOrders && (
-            <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="bg-gradient-to-r from-[#FF5722] via-[#F4511E] to-[#D84315] hover:scale-105 text-white font-black px-5 py-2.5 rounded-xl transition shadow-[0_0_25px_rgba(255,87,34,0.5)] border border-[#FF7043] flex items-center gap-2 text-xs tracking-wider uppercase shrink-0"
-            >
-              <Plus className="w-4 h-4 stroke-[3]" />
-              <span>NUEVA SOLICITUD</span>
-            </button>
-            )}
-          </div>
+          )}
 
           {/* Map — solo administrador */}
           {!isSecretary && (
@@ -438,7 +466,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="lg:col-span-4 bg-[#070B16] border border-[#142340] rounded-3xl p-5 shadow-2xl flex flex-col space-y-4">
               <div className="flex items-center justify-between border-b border-[#142340] pb-3">
                 <h3 className="text-xs font-black text-white font-mono uppercase tracking-wider flex items-center gap-2">
-                  <DomiMotoIcon className="w-5 h-5" color="#00E676" />
+                  <img src="/brand/fleet-moto.png" alt="" className="h-7 w-8 object-contain" />
                   FLOTA DE MOTORIZADOS
                 </h3>
                 <button
@@ -456,7 +484,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <p>Aparecen al registrarse y ser aprobados.</p>
                   </div>
                 ) : (
-                  approvedDrivers.slice(0, 5).map((drv, i) => (
+                  fleetPreview.slice(0, 5).map((drv, i) => (
                     <div
                       key={drv.id}
                       className="bg-[#0A1020] border border-[#162748] rounded-2xl p-3 flex items-center justify-between gap-3 hover:border-[#00E676]/50 transition cursor-pointer"
@@ -495,12 +523,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </div>
                           <div className="text-[10px] text-slate-400 font-tech truncate">
                             {drv.plateNumber || drv.motoModel || `DC-00${i + 1}`}
+                            {drv.isActive ? ' · En turno' : ' · Fuera'}
+                            {drv.location?.lat ? '' : ' · Sin GPS'}
                           </div>
                         </div>
                       </div>
-                      <span className="text-[10px] text-[#00E5FF] font-tech font-bold flex items-center gap-1">
-                        <MessageSquare className="w-3.5 h-3.5" /> Chat
-                      </span>
+                      <FleetMailState
+                        count={unreadForDriver(chatRooms, drv.id)}
+                      />
                     </div>
                   ))
                 )}
@@ -510,7 +540,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 onClick={() => go(isSecretary ? 'chats' : 'flota')}
                 className="w-full py-2.5 rounded-xl bg-[#0B1428] hover:bg-[#121F3D] border border-[#192E56] text-slate-200 text-xs font-mono font-bold transition flex items-center justify-center gap-2"
               >
-                <DomiMotoIcon className="w-4 h-4" color="#00F0FF" />
+                <img src="/brand/fleet-moto.png" alt="" className="h-5 w-6 object-contain" />
                 {isSecretary ? 'Abrir radios' : 'Gestionar Flota'}
               </button>
             </div>
@@ -587,7 +617,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           {/* Brand banner */}
-          <div className="bg-gradient-to-r from-[#070E1E] via-[#0B152A] to-[#070E1E] border border-[#142340] rounded-3xl p-6 shadow-2xl flex flex-col lg:flex-row items-center justify-between gap-6">
+          <div className="ops-banner bg-gradient-to-r from-[#070E1E] via-[#0B152A] to-[#070E1E] border border-[#142340] rounded-3xl p-6 shadow-2xl flex flex-col lg:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-2xl bg-[#0052FF]/20 border border-[#00F0FF]/50 flex items-center justify-center shrink-0">
                 <ShieldCheck className="w-8 h-8 text-[#00F0FF]" />

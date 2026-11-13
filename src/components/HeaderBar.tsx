@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, ChevronDown, Sparkles, LogOut } from 'lucide-react';
+import { ChevronDown, Sparkles, LogOut } from 'lucide-react';
 import { BrandLogo } from './brand/BrandAssets';
 import { InstallAppButton } from './InstallAppButton';
 import { ThemeToggle } from './ThemeToggle';
@@ -17,6 +17,33 @@ interface HeaderBarProps {
   compact?: boolean;
   /** Sin menú desplegable de roles (repartidor detectado). */
   hideRoleMenu?: boolean;
+  /** Campana de avisos (torre y secretaría). */
+  notificationSlot?: React.ReactNode;
+  /** Foto de la cuenta (Google / correo). */
+  photoUrl?: string | null;
+}
+
+function AccountAvatar({
+  photoUrl,
+  email,
+  ring,
+}: {
+  photoUrl?: string | null;
+  email?: string;
+  ring: string;
+}) {
+  const letter = (email || '?').trim().charAt(0).toUpperCase();
+  return (
+    <div
+      className={`flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-[#111C33] ${ring}`}
+    >
+      {photoUrl ? (
+        <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <span className="text-[11px] font-black text-white">{letter}</span>
+      )}
+    </div>
+  );
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
@@ -30,6 +57,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   roleLabel,
   compact = false,
   hideRoleMenu = false,
+  notificationSlot,
+  photoUrl,
 }) => {
   const [timeString, setTimeString] = useState<string>('');
   const [dateString, setDateString] = useState<string>('');
@@ -57,9 +86,9 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   const flatDriverBar = compact || hideRoleMenu;
 
   return (
-    <header className="ops-chrome border-b px-4 sm:px-6 py-3 flex items-center justify-between gap-4 select-none relative z-30 backdrop-blur-md">
+    <header className="ops-chrome relative z-30 flex select-none items-center justify-between gap-2 border-b px-3 py-3 backdrop-blur-md sm:gap-4 sm:px-6 pt-[max(0.75rem,env(safe-area-inset-top,0px))]">
       <div
-        className={`flex items-center gap-3 ${onOpenBrandModal ? 'cursor-pointer group' : ''}`}
+        className={`flex min-w-0 items-center gap-2 sm:gap-3 ${onOpenBrandModal ? 'cursor-pointer group' : ''}`}
         onClick={onOpenBrandModal}
       >
         <div className="relative">
@@ -77,7 +106,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             <span className="text-[#FF5722] drop-shadow-[0_0_12px_rgba(255,87,34,0.6)]">Click</span>
           </h1>
           <p className="text-[11px] font-medium text-[var(--domi-muted)] tracking-tight mt-0.5">
-            {flatDriverBar ? 'Cabina del transportista' : 'Excelencia a un click de ti.'}
+            {flatDriverBar ? 'Torre de control' : 'Excelencia a un click de ti.'}
           </p>
         </div>
       </div>
@@ -122,6 +151,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       </div>
 
       <div className="flex items-center gap-2">
+        {notificationSlot}
         <div className="md:hidden">
           <ThemeToggle compact />
         </div>
@@ -134,9 +164,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         {flatDriverBar ? (
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-2 bg-[#090F1E] border border-[#182643] px-3 py-2 rounded-2xl">
-              <div className="w-8 h-8 rounded-full bg-[#111C33] border border-[#00E676]/50 flex items-center justify-center">
-                <User className="w-4 h-4 text-[#00E676]" />
-              </div>
+              <AccountAvatar photoUrl={photoUrl} email={currentUserEmail} ring="border-[#00E676]/50" />
               <div className="text-left">
                 <div className="text-xs font-bold text-white leading-tight max-w-[140px] truncate">
                   {roleLabel || 'Transportista'}
@@ -163,9 +191,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               className="flex items-center gap-3 bg-[#090F1E] hover:bg-[#0E172C] border border-[#182643] px-3.5 py-2 rounded-2xl transition shadow-lg"
             >
-              <div className="w-8 h-8 rounded-full bg-[#111C33] border border-[#00E5FF]/40 flex items-center justify-center">
-                <User className="w-4 h-4 text-[#00E5FF]" />
-              </div>
+              <AccountAvatar photoUrl={photoUrl} email={currentUserEmail} ring="border-[#00E5FF]/40" />
               <div className="text-left hidden sm:block">
                 <div className="text-xs font-bold text-white leading-tight">
                   {roleLabel || (canAccessAdmin ? 'Admin Operador' : 'Usuario')}

@@ -8,8 +8,10 @@ export const SECRETARY_SECTIONS: AdminSection[] = [
   'dashboard',
   'solicitudes',
   'envios',
+  'historial',
   'incidentes',
   'chats',
+  'reportes',
 ];
 
 export type StaffPermission =
@@ -27,6 +29,7 @@ export type StaffPermission =
 const SECRETARY_PERMISSIONS: StaffPermission[] = [
   'orders.create',
   'orders.view',
+  'orders.assign',
   'chat.send',
   'incidents.view',
 ];

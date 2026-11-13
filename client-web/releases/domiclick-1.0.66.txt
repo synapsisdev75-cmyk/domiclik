@@ -1,0 +1,7 @@
+DomiClick 1.0.66 (versionCode 67)
+
+- Cliente: el encabezado ya no se cruza con la barra de estado / cámara.
+- Modo claro: buscador, títulos y tarjetas con contraste legible.
+- Responsivo en móvil y tablet (cliente y cabina).
+- Status bar nativa sincronizada con claro/oscuro; sin overlay sobre el contenido.
+- Torre de control: cabecera más compacta en pantallas chicas.

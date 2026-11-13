@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { CheckCircle2, Copy, KeyRound, Radar } from 'lucide-react';
 import { useState } from 'react';
 import type { IngestOrderResponse } from '../contracts/salesIngest';
+import { GatewayPayButtons } from './GatewayPayButtons';
 
 interface SuccessScreenProps {
   result: IngestOrderResponse;
@@ -34,8 +35,8 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
         <div>
           <h2 className="font-display text-2xl font-bold text-[var(--domi-text)]">Solicitud recibida</h2>
           <p className="mt-1 text-sm text-[var(--domi-muted)]">
-            {result.paymentReviewStatus === 'pending_review'
-              ? 'Tu comprobante está en revisión. El pedido entra en circulación cuando Central dé luz verde.'
+            {result.transferChannel === 'pasarela'
+              ? 'Te abrimos la pasarela. Al pagar, Wompi te devuelve con el resultado: exitoso o rechazado.'
               : 'Guarda el seguimiento y el PIN. El repartidor te pedirá el PIN al entregar.'}
           </p>
         </div>
@@ -79,6 +80,10 @@ export function SuccessScreen({ result, onNewRequest }: SuccessScreenProps) {
             {copiedPin ? 'Copiado' : 'Copiar PIN'}
           </button>
         </div>
+      ) : null}
+
+      {result.transferChannel === 'pasarela' && result.paymentReviewStatus === 'pending_review' ? (
+        <GatewayPayButtons orderId={result.orderId} amountCop={result.shippingFee} />
       ) : null}
 
       {(result.shippingFee || result.scheduledFor) && (

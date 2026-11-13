@@ -1,0 +1,5 @@
+DomiClick 1.0.76 (versionCode 77)
+
+- Parche crítico: el localizador en vivo ya no arranca el servicio de ubicación en primer plano sin permiso runtime (evita el cierre en Motorola / Android 14+ / targetSdk 36).
+- Pide ubicación antes de activar LiveLocator; si falla, cae a GPS web sin tumbar la app.
+- Incluye Optimizar ruta y mejoras de tour unido previas.

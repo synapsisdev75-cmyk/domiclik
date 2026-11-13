@@ -43,7 +43,7 @@ export function StructuredAddressFields({
     .join(', ');
 
   return (
-    <div className="address-fields space-y-2.5 rounded-2xl border border-[var(--domi-border)] bg-[rgba(5,8,15,0.35)] p-3">
+    <div className="address-fields space-y-2.5 rounded-2xl border border-[var(--domi-border)] bg-[var(--domi-panel)] p-3">
       <p
         className="text-xs font-bold uppercase tracking-wide"
         style={{ color: accent === 'pickup' ? 'var(--domi-cyan)' : 'var(--domi-orange)' }}

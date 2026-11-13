@@ -38,11 +38,13 @@ export type IngestOrderBody = {
   pricingBand?: 'peak' | 'normal';
   pricePerKm?: number;
   peakMultiplier?: number;
+  isVip?: boolean;
+  vipSurchargeCop?: number;
   scheduledFor?: string;
   invoiceNumber?: string;
   invoicePhotoUrl?: string;
   paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
-  transferChannel?: 'breb' | 'qr';
+  transferChannel?: 'breb' | 'qr' | 'pasarela';
   paymentProofUrl?: string;
   paymentNote?: string;
   couponCode?: string;

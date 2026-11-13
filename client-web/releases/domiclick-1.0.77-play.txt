@@ -1,0 +1,7 @@
+Nueva actualización DomiClick para una navegación más clara.
+
+• El botón Ubicarme ahora te centra y te sigue en el mapa mientras te desplazas, como en Google Maps.
+• Puedes rotar e inclinar el mapa con gestos para orientarte mejor en la ruta.
+• Más estabilidad al usar la ubicación en vivo.
+
+Actualiza y sigue entregando con DomiClick.

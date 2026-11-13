@@ -83,8 +83,8 @@ export function OrdersPage() {
   const filtered = tab === 'activos' ? activeOrders : historyOrders;
 
   return (
-    <div className="app-screen mx-auto min-h-[100svh] max-w-lg px-4 pb-8 sm:px-6">
-      <h1 className="font-display text-2xl font-bold text-white">Mis pedidos</h1>
+    <div className="app-screen mx-auto min-h-[100svh] px-4 pb-8 sm:px-6">
+      <h1 className="font-display text-2xl font-bold text-[var(--domi-text)]">Mis pedidos</h1>
       <p className="mt-1 text-sm text-[var(--domi-muted)]">
         Los activos se mantienen hasta la entrega; luego pasan al historial.
       </p>
@@ -184,6 +184,11 @@ export function OrdersPage() {
                     {order.updatedAt || order.createdAt ? (
                       <p className="mt-2 text-[11px] text-slate-500">
                         {formatDate(order.updatedAt || order.createdAt)}
+                      </p>
+                    ) : null}
+                    {active && order.deliveryConfirmCode ? (
+                      <p className="mt-2 font-mono text-sm font-bold tracking-[0.28em] text-[var(--domi-orange)]">
+                        PIN {order.deliveryConfirmCode}
                       </p>
                     ) : null}
                     {active ? (

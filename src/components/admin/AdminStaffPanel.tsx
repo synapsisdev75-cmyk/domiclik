@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AdminAccount } from '../../types';
-import { activateAdmin, inviteAdmin, inviteStaff, revokeAdmin } from '../../lib/firebase';
+import {
+  activateAdmin,
+  inviteAdmin,
+  inviteStaff,
+  revokeAdmin,
+  STAFF_REQUEST_TTL_MS,
+  staffRequestRemainingMs,
+} from '../../lib/firebase';
 import { ShieldCheck, UserPlus, Ban, CheckCircle2, Clock, FileText } from 'lucide-react';
 
 interface Props {
@@ -8,16 +15,30 @@ interface Props {
   currentAdminEmail: string;
 }
 
+function formatRemain(ms: number): string {
+  const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 export const AdminStaffPanel: React.FC<Props> = ({ admins, currentAdminEmail }) => {
   const [inviteEmail, setInviteEmail] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const t = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
 
   const pending = admins.filter((a) => a.status === 'pending');
   const active = admins.filter((a) => a.status === 'active');
   const revoked = admins.filter((a) => a.status === 'revoked');
   const me = currentAdminEmail.trim().toLowerCase();
+  const ttlMin = Math.round(STAFF_REQUEST_TTL_MS / 60000);
 
   const roleLabel = (a: AdminAccount) =>
     a.role === 'secretary' ? 'SECRETARÍA' : 'ADMIN';
@@ -49,6 +70,8 @@ export const AdminStaffPanel: React.FC<Props> = ({ admins, currentAdminEmail }) 
         <p className="text-[12px] text-slate-400 leading-relaxed">
           Solo un administrador <span className="text-white font-semibold">activo</span> puede activar a otro.
           Un login con Google o correo no otorga permisos de torre de control hasta que lo apruebes aquí.
+          Las solicitudes pendientes se eliminan solas a los{' '}
+          <span className="text-amber-300 font-semibold">{ttlMin} minutos</span> si nadie responde.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <input
@@ -123,37 +146,51 @@ export const AdminStaffPanel: React.FC<Props> = ({ admins, currentAdminEmail }) 
 
       <div className="space-y-2">
         <h3 className="text-xs font-black text-amber-400 font-tech uppercase flex items-center gap-2">
-          <Clock className="w-3.5 h-3.5" /> Pendientes ({pending.length})
+          <Clock className="w-3.5 h-3.5" /> Pendientes ({pending.length}) · caducan en {ttlMin} min
         </h3>
         {pending.length === 0 ? (
           <p className="text-[11px] text-slate-500">No hay solicitudes de admin o secretaría en espera.</p>
         ) : (
-          pending.map((a) => (
-            <div
-              key={a.id}
-              className="bg-[#0A1020] border border-amber-500/30 rounded-2xl p-3.5 flex items-center justify-between gap-3"
-            >
-              <div>
-                <div className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
-                  {a.displayName || a.email}
-                  <span className={`px-2 py-0.5 rounded-lg border font-tech ${roleBadgeClass(a)}`}>
-                    {roleLabel(a)}
-                  </span>
-                </div>
-                <div className="text-[10px] text-slate-400 font-tech">
-                  {a.email} · solicitado {new Date(a.requestedAt).toLocaleString('es-CO')}
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={busy === a.email || a.email.toLowerCase() === me}
-                onClick={() => run(a.email, () => activateAdmin(a.email, me).then(() => undefined))}
-                className="text-[10px] font-black bg-[#2B6CFF] text-white px-3 py-2 rounded-xl disabled:opacity-40"
+          pending.map((a) => {
+            const remain = staffRequestRemainingMs(a, nowTick);
+            const urgent = remain <= 5 * 60 * 1000;
+            return (
+              <div
+                key={a.id}
+                className={`bg-[#0A1020] border rounded-2xl p-3.5 flex items-center justify-between gap-3 ${
+                  urgent ? 'border-red-500/50' : 'border-amber-500/30'
+                }`}
               >
-                Activar
-              </button>
-            </div>
-          ))
+                <div>
+                  <div className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
+                    {a.displayName || a.email}
+                    <span className={`px-2 py-0.5 rounded-lg border font-tech ${roleBadgeClass(a)}`}>
+                      {roleLabel(a)}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-tech">
+                    {a.email} · solicitado{' '}
+                    {a.requestedAt ? new Date(a.requestedAt).toLocaleString('es-CO') : '—'}
+                  </div>
+                  <div
+                    className={`mt-1 text-[11px] font-black font-mono ${
+                      urgent ? 'text-red-300' : 'text-amber-200'
+                    }`}
+                  >
+                    Se elimina en {formatRemain(remain)} si no la activas
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy === a.email || a.email.toLowerCase() === me}
+                  onClick={() => run(a.email, () => activateAdmin(a.email, me).then(() => undefined))}
+                  className="text-[10px] font-black bg-[#2B6CFF] text-white px-3 py-2 rounded-xl disabled:opacity-40"
+                >
+                  Activar
+                </button>
+              </div>
+            );
+          })
         )}
       </div>
 

@@ -1,4 +1,4 @@
-/** Deep links a Google Maps. El destino es la dirección guardada en DomiClick, no un pin suelto. */
+/** Deep links a Google Maps. Prioriza el pin (lat/lng) guardado en DomiClick. */
 
 export type LatLng = { lat: number; lng: number };
 
@@ -36,17 +36,24 @@ function savedAddress(address?: string | null): string {
   return text;
 }
 
+/**
+ * Destino/origen para Maps: si hay coordenadas DomiClick, van primero
+ * (antes se prefería solo la dirección y Maps re-geocodificaba mal).
+ */
 function endpoint(point: NavPoint): { query: string; placeId?: string } {
   const placeId = point.placeId?.trim() || '';
   const address = savedAddress(point.address);
-  if (placeId) return { query: address || fmt(point), placeId };
+  if (isValid(point)) {
+    if (placeId && address) return { query: address, placeId };
+    return { query: fmt(point) };
+  }
+  if (placeId) return { query: address || '.', placeId };
   if (address) return { query: address };
-  return { query: fmt(point) };
+  return { query: '0,0' };
 }
 
 /**
  * URL de direcciones Google Maps.
- * Con placeId + dirección, Maps abre el mismo sitio que quedó guardado en DomiClick.
  */
 export function buildGoogleMapsDirectionsUrl(opts: {
   destination: NavPoint;
@@ -74,7 +81,7 @@ export function buildGoogleMapsDirectionsUrl(opts: {
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
-/** Ruta completa A (recolección) → B (entrega), con la dirección guardada. */
+/** Ruta completa A (recolección) → B (entrega). */
 export function buildGoogleMapsAbRouteUrl(pickup: NavPoint, delivery: NavPoint, navigate = false): string {
   return buildGoogleMapsDirectionsUrl({
     origin: pickup,
@@ -83,7 +90,7 @@ export function buildGoogleMapsAbRouteUrl(pickup: NavPoint, delivery: NavPoint, 
   });
 }
 
-/** Navegar hacia un punto. El origen es el GPS; el destino es la dirección de DomiClick. */
+/** Navegar hacia un punto. El origen es el GPS; el destino es el pin DomiClick. */
 export function buildGoogleMapsNavigateToUrl(destination: NavPoint, origin?: LatLng | null): string {
   return buildGoogleMapsDirectionsUrl({
     origin: origin && isValid(origin) ? origin : 'current',
@@ -92,20 +99,17 @@ export function buildGoogleMapsNavigateToUrl(destination: NavPoint, origin?: Lat
   });
 }
 
-function isMapsUrl(url: string): boolean {
-  return /google\.[^/]+\/maps/i.test(url);
-}
-
-/** Abre Maps en otra pestaña. Si esta pantalla se va a Maps, vuelve sola a DomiClick. */
+/** Abre Maps. En móvil/APK: misma ventana para que Android entregue a la app Maps. */
 export function openGoogleMapsNav(url: string): void {
   if (typeof window === 'undefined') return;
-  const home = window.location.href;
-  window.open(url, '_blank', 'noopener,noreferrer');
-  const back = () => {
-    if (!isMapsUrl(window.location.href)) return;
-    if (!home || isMapsUrl(home)) return;
-    window.location.replace(home);
-  };
-  window.setTimeout(back, 600);
-  window.setTimeout(back, 1500);
+  const ua = navigator.userAgent || '';
+  const isMobile =
+    /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+    window.matchMedia('(max-width: 768px)').matches;
+  if (isMobile) {
+    window.location.assign(url);
+    return;
+  }
+  const w = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!w) window.location.assign(url);
 }

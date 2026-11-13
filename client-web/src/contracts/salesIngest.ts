@@ -33,12 +33,15 @@ export type IngestOrderBody = {
   pricingBand?: 'peak' | 'normal';
   pricePerKm?: number;
   peakMultiplier?: number;
+  /** Pedido flash / VIP. */
+  isVip?: boolean;
+  vipSurchargeCop?: number;
   /** ISO — entrega programada (máx. 15 días) */
   scheduledFor?: string;
   invoiceNumber?: string;
   invoicePhotoUrl?: string;
   paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
-  transferChannel?: 'breb' | 'qr';
+  transferChannel?: 'breb' | 'qr' | 'pasarela';
   paymentProofUrl?: string;
   paymentNote?: string;
   couponCode?: string;
@@ -56,6 +59,7 @@ export type IngestOrderResponse = {
   scheduledFor?: string | null;
   pricingBand?: 'peak' | 'normal' | null;
   paymentReviewStatus?: 'pending_review' | 'approved';
+  transferChannel?: 'breb' | 'qr' | 'pasarela';
 };
 
 export type IngestErrorResponse = {

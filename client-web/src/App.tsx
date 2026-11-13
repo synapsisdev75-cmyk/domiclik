@@ -17,6 +17,7 @@ import { SolicitarPage } from './pages/SolicitarPage';
 import { TrackingPage } from './pages/TrackingPage';
 import { TransportistaPage } from './pages/TransportistaPage';
 import { WelcomePage } from './pages/WelcomePage';
+import { OrderStatusAlerts } from './components/OrderStatusAlerts';
 
 const NATIVE = isNativeApp();
 
@@ -79,7 +80,7 @@ function NativeShell() {
   return (
     <WelcomeRedirect>
       <DriverHomeGate>
-        <div className={hideChrome ? '' : 'pb-28'}>
+        <div className={hideChrome ? '' : 'pb-[calc(7rem+env(safe-area-inset-bottom,0px))]'}>
           <Routes>
             <Route path="/welcome" element={<WelcomePage />} />
             <Route path="/" element={<AppHomePage />} />
@@ -107,6 +108,7 @@ function NativeShell() {
 export default function App() {
   return (
     <AuthProvider>
+      <OrderStatusAlerts />
       <BrowserRouter>{NATIVE ? <NativeShell /> : <WebShell />}</BrowserRouter>
     </AuthProvider>
   );

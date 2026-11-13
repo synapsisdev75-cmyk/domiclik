@@ -1,0 +1,6 @@
+DomiClick 1.0.67 (versionCode 68)
+
+- Mapa cabina: botón «Ocultar menú» para ver la ruta a pantalla completa.
+- Torre y móvil: el sonido de pedido nuevo se apaga al asignar (auto o manual).
+- Si nadie tiene cupo, sigue sonando hasta que se asigne.
+- Safe area / contraste cliente (modo claro) y ancho tablet.

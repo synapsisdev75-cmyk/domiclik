@@ -35,6 +35,12 @@ public class LiveLocatorPlugin extends Plugin {
 
   @PluginMethod
   public void start(PluginCall call) {
+    if (!LiveLocatorService.hasLocationPermission(getContext())) {
+      call.reject(
+          "LOCATION_PERMISSION_REQUIRED",
+          "Concede ubicación precisa antes de activar el localizador en vivo.");
+      return;
+    }
     LiveLocatorService.start(getContext());
     call.resolve();
   }

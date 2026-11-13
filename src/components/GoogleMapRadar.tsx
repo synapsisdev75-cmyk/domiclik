@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
 import { APIProvider, Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
 import { MotorizadoDriver, DeliveryOrder, type StaffRole } from '../types';
 import { ChatWindow } from './chat/ChatWindow';
 import { VILLAVICENCIO_CENTER } from '../data/villavicencio';
 import { BRAND } from './brand/BrandAssets';
 import { calculateOptimalRoute } from '../utils/routing';
-import { isLiveOrderStatus } from '../lib/orderFlow';
+import { isLiveOrderStatus, ORDER_STATUS_LABEL, paymentMethodLabel } from '../lib/orderFlow';
+import { isDriverOnShiftToday } from '../lib/workShift';
 import { Driver3DMarkersLayer } from './map/Driver3DMarkersLayer';
 import {
   bearingDeg,
@@ -13,9 +14,43 @@ import {
   projectOnPath,
   roadSignature,
   sliceFrom,
-  sliceUntil,
   type RoadPoint,
 } from '../lib/roadFollow';
+import { createRadarTrackSmoother } from '../lib/liveTrackSmooth';
+
+/** Evita que un error de Google Maps tumbe toda la torre de control. */
+class RadarErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[GoogleMapRadar] error de mapa', error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 bg-[#0a0e16] p-4 text-center">
+          <p className="text-sm font-black text-white">El radar no pudo cargar el mapa</p>
+          <p className="max-w-sm text-[11px] text-slate-400">
+            {this.state.error.message?.slice(0, 160) || 'Error de Google Maps'}
+          </p>
+          <button
+            type="button"
+            className="rounded-xl bg-[#FF5722] px-4 py-2 text-xs font-black text-white"
+            onClick={() => this.setState({ error: null })}
+          >
+            Reintentar mapa
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const ROAD_SNAP_M = 450;
 
@@ -74,9 +109,42 @@ function routeColor(kind: RouteKind) {
 type Drawn = {
   glow: google.maps.Polyline;
   line: google.maps.Polyline;
+  color: string;
+  orderId?: string;
 };
 
 type LatLng = { lat: number; lng: number };
+
+function isFiniteLatLng(p: unknown): p is LatLng {
+  if (!p || typeof p !== 'object') return false;
+  const lat = Number((p as LatLng).lat);
+  const lng = Number((p as LatLng).lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+}
+
+function asLatLng(p: unknown): LatLng | null {
+  if (!isFiniteLatLng(p)) return null;
+  return { lat: Number((p as LatLng).lat), lng: Number((p as LatLng).lng) };
+}
+
+/** Evita InvalidValueError: fitBounds con {lat,lng} o bounds vacíos tumba toda la ops. */
+function safeFitBounds(map: google.maps.Map, points: LatLng[], padding = 72) {
+  const valid = points.map(asLatLng).filter((p): p is LatLng => !!p);
+  if (!valid.length) return;
+  try {
+    if (valid.length === 1) {
+      map.panTo(valid[0]);
+      map.setZoom(14);
+      return;
+    }
+    const bounds = new google.maps.LatLngBounds();
+    for (const p of valid) bounds.extend(p);
+    if (bounds.isEmpty()) return;
+    map.fitBounds(bounds, padding);
+  } catch (err) {
+    console.warn('[radar] fitBounds omitido', err);
+  }
+}
 
 /** Parte de la ruta que falta. Lo ya recorrido se oculta. Si el moto está lejos de la vía, se deja completa. */
 function remainingRoute(path: LatLng[], driver: LatLng): LatLng[] {
@@ -121,7 +189,7 @@ function remainingRoute(path: LatLng[], driver: LatLng): LatLng[] {
 type TourStop = LatLng & { orderId: string; kind: 'pickup' | 'drop' };
 
 /** Recogida antes que su entrega. Entre lo que ya se puede visitar, elige el más cercano. */
-function nearestTour(orders: DeliveryOrder[], start: LatLng): LatLng[] {
+function planOpenStops(orders: DeliveryOrder[], start: LatLng | null): TourStop[] {
   const left: TourStop[] = [];
   for (const order of orders) {
     const pickup = { lat: order.pickupCoords.lat, lng: order.pickupCoords.lng, orderId: order.id, kind: 'pickup' as const };
@@ -129,7 +197,7 @@ function nearestTour(orders: DeliveryOrder[], start: LatLng): LatLng[] {
     if (PICKUP_LEG.has(order.status)) left.push(pickup, drop);
     else left.push(drop);
   }
-  const path: LatLng[] = [start];
+  const path: TourStop[] = [];
   let cursor = start;
   while (left.length) {
     const open = left.filter(
@@ -137,21 +205,51 @@ function nearestTour(orders: DeliveryOrder[], start: LatLng): LatLng[] {
     );
     if (!open.length) break;
     let best = open[0];
-    let bestD = Infinity;
-    for (const stop of open) {
-      const dLat = stop.lat - cursor.lat;
-      const dLng = stop.lng - cursor.lng;
-      const d = dLat * dLat + dLng * dLng;
-      if (d < bestD) {
-        bestD = d;
-        best = stop;
+    if (cursor) {
+      let bestD = Infinity;
+      for (const stop of open) {
+        const dLat = stop.lat - cursor.lat;
+        const dLng = stop.lng - cursor.lng;
+        const d = dLat * dLat + dLng * dLng;
+        if (d < bestD) {
+          bestD = d;
+          best = stop;
+        }
       }
     }
-    path.push({ lat: best.lat, lng: best.lng });
-    cursor = { lat: best.lat, lng: best.lng };
+    path.push(best);
+    cursor = best;
     left.splice(left.indexOf(best), 1);
   }
   return path;
+}
+
+type StopMark = { label: string; kind: 'pickup' | 'drop'; orderId: string };
+
+/** R1/E1, R2/E2… solo cuando el mismo repartidor lleva 2 o 3 pedidos unidos. */
+function unifiedStopMarks(orders: DeliveryOrder[], drivers: MotorizadoDriver[]): Record<string, StopMark> {
+  const marks: Record<string, StopMark> = {};
+  const byDriver: Record<string, DeliveryOrder[]> = {};
+  for (const order of orders) {
+    if (routeKind(order.status) !== 'proceso' || !order.assignedDriverId) continue;
+    if (!order.pickupCoords?.lat || !order.deliveryCoords?.lat) continue;
+    const group = byDriver[order.assignedDriverId] || [];
+    group.push(order);
+    byDriver[order.assignedDriverId] = group;
+  }
+  for (const driverId of Object.keys(byDriver)) {
+    const group = byDriver[driverId];
+    if (group.length < 2 || group.length > 3) continue;
+    const loc = liveDriverPoint(group[0], drivers);
+    const stops = planOpenStops(group, loc);
+    let r = 0;
+    let e = 0;
+    for (const stop of stops) {
+      const label = stop.kind === 'pickup' ? `R${(r += 1)}` : `E${(e += 1)}`;
+      marks[`${stop.orderId}:${stop.kind}`] = { label, kind: stop.kind, orderId: stop.orderId };
+    }
+  }
+  return marks;
 }
 
 function fresherStop(a?: LatLng & { updatedAt?: string }, b?: LatLng & { updatedAt?: string }): LatLng | null {
@@ -187,19 +285,23 @@ function StreetRoutesLayer({
   orders,
   drivers,
   onRoads,
+  onPickOrder,
 }: {
   orders: DeliveryOrder[];
   drivers: MotorizadoDriver[];
   onRoads?: (roads: Record<string, RoadPoint[]>) => void;
+  onPickOrder?: (orderId: string) => void;
 }) {
   const map = useMap();
-  const linesRef = useRef<Record<string, Drawn & { color: string }>>({});
+  const linesRef = useRef<Record<string, Drawn>>({});
   const cacheRef = useRef<Record<string, LatLng[]>>({});
   const inflightRef = useRef<Set<string>>(new Set());
   const [cacheTick, setCacheTick] = useState(0);
   const fittedKeyRef = useRef('');
   const onRoadsRef = useRef(onRoads);
   onRoadsRef.current = onRoads;
+  const onPickRef = useRef(onPickOrder);
+  onPickRef.current = onPickOrder;
   const roadSigRef = useRef('');
 
   const routeOrders = useMemo(() => {
@@ -230,8 +332,12 @@ function StreetRoutesLayer({
     if (!map || !(window as unknown as { google?: typeof google }).google?.maps) return;
 
     const keep: Record<string, true> = {};
-    const bounds = new google.maps.LatLngBounds();
+    const fitPoints: LatLng[] = [];
     let anyPath = false;
+    const pushFit = (p: unknown) => {
+      const pt = asLatLng(p);
+      if (pt) fitPoints.push(pt);
+    };
 
     const remember = (key: string, from: LatLng, to: LatLng) => {
       const hit = cacheRef.current[key];
@@ -252,20 +358,24 @@ function StreetRoutesLayer({
         });
     };
 
-    const upsert = (id: string, path: LatLng[], color: string, z: number) => {
+    const upsert = (id: string, path: LatLng[], color: string, z: number, orderId?: string) => {
       if (path.length < 2) return;
       keep[id] = true;
       const existing = linesRef.current[id];
-      if (existing && existing.color === color) {
+      if (existing && existing.color === color && existing.orderId === orderId) {
         existing.glow.setPath(path);
         existing.line.setPath(path);
         return;
       }
       existing?.glow.setMap(null);
       existing?.line.setMap(null);
+      const pick = () => {
+        if (orderId) onPickRef.current?.(orderId);
+      };
       const glow = new google.maps.Polyline({
         path,
         geodesic: false,
+        clickable: Boolean(orderId),
         strokeColor: color,
         strokeOpacity: 0.22,
         strokeWeight: 12,
@@ -275,6 +385,7 @@ function StreetRoutesLayer({
       const line = new google.maps.Polyline({
         path,
         geodesic: false,
+        clickable: Boolean(orderId),
         strokeColor: color,
         strokeOpacity: 0.95,
         strokeWeight: 4,
@@ -293,7 +404,11 @@ function StreetRoutesLayer({
         map,
         zIndex: z + 1,
       });
-      linesRef.current[id] = { glow, line, color };
+      if (orderId) {
+        glow.addListener('click', pick);
+        line.addListener('click', pick);
+      }
+      linesRef.current[id] = { glow, line, color, orderId };
     };
 
     const chained: Record<string, true> = {};
@@ -313,32 +428,47 @@ function StreetRoutesLayer({
       group.forEach((order) => {
         chained[order.id] = true;
       });
-      const stops = nearestTour(group, loc);
-      const tourStops = stops.slice(1);
-      let stable: LatLng[] = [];
-      for (let i = 0; i < tourStops.length - 1; i++) {
-        const from = tourStops[i];
-        const to = tourStops[i + 1];
-        const key = `chain:${driverId}:${from.lat.toFixed(4)},${from.lng.toFixed(4)}>${to.lat.toFixed(4)},${to.lng.toFixed(4)}`;
-        remember(key, from, to);
-        const segment = cacheRef.current[key] || [from, to];
-        stable = stable.length ? [...stable, ...segment.slice(1)] : [...segment];
-      }
+      const stops = planOpenStops(group, loc);
+      const legs: Array<{ path: LatLng[]; orderId: string }> = [];
+      let prev: LatLng = loc;
+      stops.forEach((stop, index) => {
+        const key = `chain:${driverId}:leg:${index}:${prev.lat.toFixed(4)},${prev.lng.toFixed(4)}>${stop.lat.toFixed(4)},${stop.lng.toFixed(4)}`;
+        remember(key, prev, stop);
+        const segment = cacheRef.current[key] || [prev, stop];
+        legs.push({
+          path: segment.length >= 2 ? segment : [prev, stop],
+          orderId: stop.orderId,
+        });
+        prev = stop;
+      });
+      const stable = legs.reduce<LatLng[]>((acc, leg) => {
+        if (!leg.path.length) return acc;
+        return acc.length ? [...acc, ...leg.path.slice(1)] : [...leg.path];
+      }, []);
       if (stable.length >= 2) roads[driverId] = stable;
       const snap = stable.length >= 2 ? projectOnPath(stable, loc) : null;
       const onRoad = Boolean(snap && snap.metersOff <= ROAD_SNAP_M);
-      const ahead = onRoad && snap ? sliceFrom(stable, snap.along) : stable;
-      const traveled = onRoad && snap ? sliceUntil(stable, snap.along) : [];
-      if (traveled.length >= 2) {
-        upsert(`chain:${driverId}:trail`, traveled, '#8AA0B4', 24);
-        traveled.forEach((point) => bounds.extend(point));
-      }
-      if (ahead.length >= 2) {
-        upsert(`chain:${driverId}`, ahead, ROUTE_COLOR_EN_PROCESO, 70);
-        ahead.forEach((point) => bounds.extend(point));
-        bounds.extend(loc);
+      let walked = 0;
+      legs.forEach((leg, index) => {
+        let legMeters = 0;
+        for (let i = 0; i < leg.path.length - 1; i++) {
+          const dy = (leg.path[i + 1].lat - leg.path[i].lat) * 111320;
+          const dx = (leg.path[i + 1].lng - leg.path[i].lng) * 111320;
+          legMeters += Math.hypot(dx, dy);
+        }
+        const legStart = walked;
+        walked += legMeters;
+        let visible = leg.path;
+        if (onRoad && snap) {
+          if (walked <= snap.along + 12) return;
+          if (legStart < snap.along) visible = sliceFrom(leg.path, Math.max(0, snap.along - legStart));
+        }
+        if (visible.length < 2) return;
+        upsert(`chain:${driverId}:leg:${index}`, visible, ROUTE_COLOR_EN_PROCESO, 70, leg.orderId);
+        visible.forEach(pushFit);
+        pushFit(loc);
         anyPath = true;
-      }
+      });
     }
 
     for (const order of routeOrders) {
@@ -355,27 +485,27 @@ function StreetRoutesLayer({
       const loc = liveDriverPoint(order, drivers);
 
       if (kind === 'proceso' && loc && PICKUP_LEG.has(order.status)) {
-        upsert(`${order.id}:corridor`, corridor, ROUTE_COLOR_EN_PROCESO, 30);
-        corridor.forEach((p) => bounds.extend(p));
+        upsert(`${order.id}:corridor`, corridor, ROUTE_COLOR_EN_PROCESO, 30, order.id);
+        corridor.forEach(pushFit);
         const navKey = `${order.id}:nav:pickup:${loc.lat.toFixed(3)},${loc.lng.toFixed(3)}`;
         remember(navKey, loc, pickup);
         const nav = cacheRef.current[navKey] || [loc, pickup];
         const visible = remainingRoute(nav, loc);
-        upsert(`${order.id}:nav`, visible, ROUTE_COLOR_RECOGIDA, 60);
-        visible.forEach((p) => bounds.extend(p));
-        bounds.extend(loc);
+        upsert(`${order.id}:nav`, visible, ROUTE_COLOR_RECOGIDA, 60, order.id);
+        visible.forEach(pushFit);
+        pushFit(loc);
       } else if (kind === 'proceso' && loc && (DELIVERY_LEG.has(order.status) || order.status !== 'pending')) {
         const navKey = `${order.id}:nav:drop:${loc.lat.toFixed(3)},${loc.lng.toFixed(3)}`;
         remember(navKey, loc, dropoff);
         const nav = cacheRef.current[navKey] || [loc, dropoff];
         const visible = remainingRoute(nav, loc);
-        upsert(`${order.id}:nav`, visible, ROUTE_COLOR_EN_PROCESO, 60);
-        visible.forEach((p) => bounds.extend(p));
-        bounds.extend(loc);
+        upsert(`${order.id}:nav`, visible, ROUTE_COLOR_EN_PROCESO, 60, order.id);
+        visible.forEach(pushFit);
+        pushFit(loc);
       } else {
         const color = routeColor(kind);
-        upsert(`${order.id}:corridor`, corridor, color, kind === 'proceso' ? 40 : 20);
-        corridor.forEach((p) => bounds.extend(p));
+        upsert(`${order.id}:corridor`, corridor, color, kind === 'proceso' ? 40 : 20, order.id);
+        corridor.forEach(pushFit);
       }
       anyPath = true;
     }
@@ -400,14 +530,14 @@ function StreetRoutesLayer({
     const fitKey = routeOrders.map((o) => `${o.id}:${o.status}`).join('|');
     if (anyPath && fittedKeyRef.current !== fitKey) {
       fittedKeyRef.current = fitKey;
-      map.fitBounds(bounds, 72);
+      safeFitBounds(map, fitPoints, 72);
     }
   }, [map, routeOrders, progressKey, drivers, cacheTick]);
 
   useEffect(() => {
     const lines = linesRef.current;
     return () => {
-      Object.values(lines).forEach((drawn) => {
+      Object.values(lines).forEach((drawn: Drawn) => {
         drawn.glow.setMap(null);
         drawn.line.setMap(null);
       });
@@ -422,7 +552,8 @@ function StreetRoutesLayer({
 function useStreetGlide(drivers: MotorizadoDriver[], roads: Record<string, RoadPoint[]>) {
   const alongRef = useRef<Record<string, number>>({});
   const roadKeyRef = useRef('');
-  const [pos, setPos] = useState<Record<string, RoadPoint>>({});
+  const smoothRef = useRef(createRadarTrackSmoother());
+  const [pos, setPos] = useState<Record<string, RoadPoint & { heading?: number }>>({});
   const targetKey = drivers
     .map((driver) => {
       const loc = driver.location;
@@ -438,6 +569,7 @@ function useStreetGlide(drivers: MotorizadoDriver[], roads: Record<string, RoadP
     let raf = 0;
     let alive = true;
     const started = performance.now();
+    const smoother = smoothRef.current;
     if (roadKey !== roadKeyRef.current) {
       roadKeyRef.current = roadKey;
       alongRef.current = {};
@@ -446,29 +578,45 @@ function useStreetGlide(drivers: MotorizadoDriver[], roads: Record<string, RoadP
     const to: Record<string, number> = {};
     const dur: Record<string, number> = {};
     const pathOf: Record<string, RoadPoint[]> = {};
-    const raw: Record<string, RoadPoint> = {};
+    const raw: Record<string, RoadPoint & { heading?: number }> = {};
+    const active = new Set<string>();
 
     for (const driver of drivers) {
       const loc = driver.location;
       if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) continue;
-      raw[driver.id] = { lat: loc.lat, lng: loc.lng };
+      active.add(driver.id);
+      // Suaviza snapshot Firestore antes de proyectar (corta teleports esquina↔esquina).
+      const soft = smoother.applyRaw(driver.id, {
+        lat: loc.lat,
+        lng: loc.lng,
+        heading: loc.heading,
+        updatedAt: loc.updatedAt,
+        moving: loc.moving,
+      });
+      raw[driver.id] = { lat: soft.lat, lng: soft.lng, heading: soft.heading };
       const path = roads[driver.id];
-      const proj = path && path.length >= 2 ? projectOnPath(path, loc) : null;
+      const proj = path && path.length >= 2 ? projectOnPath(path, soft) : null;
       if (!path || !proj || proj.metersOff > ROAD_SNAP_M) {
         alongRef.current[driver.id] = Number.NaN;
         continue;
       }
       pathOf[driver.id] = path;
       const prev = alongRef.current[driver.id];
-      from[driver.id] = Number.isFinite(prev) ? prev : proj.along;
-      to[driver.id] = proj.along;
+      const clampedTo = smoother.clampAlong(driver.id, proj.along);
+      from[driver.id] = Number.isFinite(prev) ? prev : clampedTo;
+      to[driver.id] = clampedTo;
+      // Si el clamp bloqueó un retroceso ruidoso, no anime hacia atrás.
+      if (to[driver.id] + 1 < from[driver.id] && clampedTo === from[driver.id]) {
+        to[driver.id] = from[driver.id];
+      }
       const delta = Math.abs(to[driver.id] - from[driver.id]);
       dur[driver.id] = Math.min(8000, Math.max(900, delta * 55));
     }
+    smoother.prune(active);
 
     const tick = (now: number) => {
       if (!alive) return;
-      const next: Record<string, RoadPoint> = {};
+      const next: Record<string, RoadPoint & { heading?: number }> = {};
       let pending = false;
       for (const driver of drivers) {
         const id = driver.id;
@@ -482,7 +630,12 @@ function useStreetGlide(drivers: MotorizadoDriver[], roads: Record<string, RoadP
         const eased = t * t * (3 - 2 * t);
         const along = from[id] + (to[id] - from[id]) * eased;
         alongRef.current[id] = along;
-        next[id] = pointAtAlong(path, along);
+        smoother.rememberAlong(id, along);
+        const point = pointAtAlong(path, along);
+        const ahead = pointAtAlong(path, along + 18);
+        let heading = raw[id].heading;
+        if (metersHint(point, ahead) > 4) heading = bearingDeg(point, ahead) % 360;
+        next[id] = { ...point, heading };
         if (t < 1) pending = true;
       }
       setPos(next);
@@ -502,7 +655,7 @@ function useStreetGlide(drivers: MotorizadoDriver[], roads: Record<string, RoadP
     if (!point || !driver.location) return driver;
     const path = roads[driver.id];
     const along = alongRef.current[driver.id];
-    let heading = driver.location.heading;
+    let heading = point.heading ?? driver.location.heading;
     if (path && Number.isFinite(along)) {
       const ahead = pointAtAlong(path, along + 18);
       if (metersHint(point, ahead) > 4) heading = bearingDeg(point, ahead) % 360;
@@ -518,6 +671,21 @@ function metersHint(a: RoadPoint, b: RoadPoint) {
   const dy = (b.lat - a.lat) * 111320;
   const dx = (b.lng - a.lng) * 111320;
   return Math.hypot(dx, dy);
+}
+
+function StopPin({ label, sub, color }: { label: string; sub?: string; color: string }) {
+  return (
+    <div className="flex cursor-pointer flex-col items-center" style={{ transform: 'translateY(8px)' }}>
+      <div
+        className="rounded-xl border-[3px] border-white px-2 py-1 text-center shadow-xl"
+        style={{ background: color, boxShadow: `0 0 0 2px ${color}, 0 8px 18px rgba(0,0,0,.45)` }}
+      >
+        <div className="text-[11px] font-black uppercase tracking-wide text-black">{label}</div>
+        {sub ? <div className="max-w-[92px] truncate text-[9px] font-bold text-black/80">{sub}</div> : null}
+      </div>
+      <div className="h-3 w-3 -translate-y-1.5 rotate-45 border-2 border-white" style={{ background: color }} />
+    </div>
+  );
 }
 
 /**
@@ -553,6 +721,9 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
   }, [drivers, orders]);
   const approved = liveDrivers.filter((d) => d.status === 'approved');
   const located = approved.filter(hasMapPoint);
+  const onShiftNoGps = approved.filter(
+    (d) => d.isActive && isDriverOnShiftToday(d) && !hasMapPoint(d),
+  );
   const [roads, setRoads] = useState<Record<string, RoadPoint[]>>({});
   const acceptRoads = useCallback((next: Record<string, RoadPoint[]>) => {
     setRoads(next);
@@ -560,8 +731,14 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
   const shown = useStreetGlide(located, roads);
   const [model3dReady, setModel3dReady] = useState(false);
   const [pickedId, setPickedId] = useState<string | null>(null);
+  const [orderFocus, setOrderFocus] = useState<{ id: string; label: string } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const picked = located.find((d) => d.id === pickedId) || null;
+  const stopMarks = useMemo(() => unifiedStopMarks(orders, liveDrivers), [orders, liveDrivers]);
+  const focusedOrder = orderFocus ? orders.find((order) => order.id === orderFocus.id) || null : null;
+  const openOrder = useCallback((id: string, label: string) => {
+    setOrderFocus({ id, label });
+  }, []);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 10000);
@@ -572,6 +749,7 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
   const procesoCount = orders.filter((o) => isLiveOrderStatus(o.status)).length;
 
   return (
+    <RadarErrorBoundary>
     <div className={`relative ${height} w-full overflow-hidden bg-[#0a0e16]`}>
       <APIProvider apiKey={apiKey} libraries={['marker', 'geometry', 'routes']}>
         <Map
@@ -591,10 +769,24 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
           style={{ width: '100%', height: '100%' }}
           className="w-full h-full"
         >
-          <StreetRoutesLayer orders={orders} drivers={liveDrivers} onRoads={acceptRoads} />
+          <StreetRoutesLayer
+            orders={orders}
+            drivers={liveDrivers}
+            onRoads={acceptRoads}
+            onPickOrder={(orderId) => {
+              const mark =
+                stopMarks[`${orderId}:pickup`] ||
+                stopMarks[`${orderId}:drop`] ||
+                null;
+              const order = orders.find((row) => row.id === orderId);
+              openOrder(orderId, mark?.label || order?.trackingCode || 'Pedido');
+            }}
+          />
           <Driver3DMarkersLayer drivers={shown} onModelReady={setModel3dReady} />
 
           {shown.map((driver) => {
+            const pos = asLatLng(driver.location);
+            if (!pos) return null;
             const fresh = gpsFreshness(driver.location?.updatedAt, nowMs);
             const live = fresh.live;
             const stopped = live && driver.location?.moving === false;
@@ -604,7 +796,7 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
             return (
               <AdvancedMarker
                 key={driver.id}
-                position={{ lat: driver.location.lat, lng: driver.location.lng }}
+                position={pos}
                 title={`${driver.fullName} · ${driver.plateNumber || 'Sin placa'} · ${motion}`}
                 onClick={() => setPickedId((cur) => (cur === driver.id ? null : driver.id))}
                 zIndex={pickedId === driver.id ? 80 : 40}
@@ -638,56 +830,91 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
           })}
 
           {orders.map((order) => {
-            const kind = routeKind(order.status);
-            if (!kind || !order.pickupCoords || !order.deliveryCoords) return null;
-            const color = routeColor(kind);
+            if (!routeKind(order.status)) return null;
+            const pickupPos = asLatLng(order.pickupCoords);
+            const dropPos = asLatLng(order.deliveryCoords);
+            if (!pickupPos || !dropPos) return null;
+            const code = order.trackingCode || '';
+            const pickupMark = stopMarks[`${order.id}:pickup`];
+            const dropMark = stopMarks[`${order.id}:drop`];
+            const pickupLabel = pickupMark?.label || 'R';
+            const dropLabel = dropMark?.label || 'E';
+            const showPickup = Boolean(pickupMark) || PICKUP_LEG.has(order.status) || order.status === 'pending';
             return (
               <React.Fragment key={order.id}>
-                <AdvancedMarker
-                  position={{
-                    lat: order.pickupCoords.lat,
-                    lng: order.pickupCoords.lng,
-                  }}
-                  title={`${order.trackingCode || order.id} · Recolección`}
-                >
-                  <div
-                    className="pointer-events-none flex items-center justify-center"
-                    style={{ width: 16, height: 16, transform: 'translateY(50%)' }}
+                {showPickup ? (
+                  <AdvancedMarker
+                    position={pickupPos}
+                    title={`${pickupLabel} · ${order.customerName || code} · Recogida`}
+                    zIndex={orderFocus?.id === order.id ? 60 : 30}
+                    onClick={() => openOrder(order.id, pickupLabel)}
                   >
-                    <div
-                      className="h-3 w-3 rounded-full border-2 border-white"
-                      style={{
-                        background: color,
-                        boxShadow: `0 0 0 1px ${color}, 0 1px 4px rgba(0,0,0,.55)`,
-                      }}
+                    <StopPin
+                      label={pickupLabel}
+                      sub={order.customerName || code}
+                      color={ROUTE_COLOR_RECOGIDA}
                     />
-                  </div>
-                </AdvancedMarker>
+                  </AdvancedMarker>
+                ) : null}
                 <AdvancedMarker
-                  position={{
-                    lat: order.deliveryCoords.lat,
-                    lng: order.deliveryCoords.lng,
-                  }}
-                  title={`${order.trackingCode || order.id} · Entrega`}
+                  position={dropPos}
+                  title={`${dropLabel} · ${order.customerName || code} · Entrega`}
+                  zIndex={orderFocus?.id === order.id ? 61 : 31}
+                  onClick={() => openOrder(order.id, dropLabel)}
                 >
-                  <div
-                    className="pointer-events-none flex items-center justify-center"
-                    style={{ width: 18, height: 18, transform: 'translateY(50%)' }}
-                  >
-                    <div
-                      className="h-3.5 w-3.5 rounded-sm border-2 border-white"
-                      style={{
-                        background: color,
-                        boxShadow: `0 0 0 1px ${color}, 0 1px 4px rgba(0,0,0,.55)`,
-                      }}
-                    />
-                  </div>
+                  <StopPin
+                    label={dropLabel}
+                    sub={order.customerName || code}
+                    color={ROUTE_COLOR_EN_PROCESO}
+                  />
                 </AdvancedMarker>
               </React.Fragment>
             );
           })}
         </Map>
       </APIProvider>
+
+      {focusedOrder ? (
+        <div className="absolute right-2 top-2 z-20 w-[min(360px,calc(100%-1rem))] rounded-2xl border border-[#00E5FF]/40 bg-[#070B16]/95 p-3 text-white shadow-2xl">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-wide text-[#00E5FF]">
+                {orderFocus?.label} · {focusedOrder.trackingCode || focusedOrder.id}
+              </p>
+              <p className="truncate text-sm font-black">{focusedOrder.customerName || 'Cliente'}</p>
+              <p className="text-[11px] text-slate-400">{focusedOrder.customerPhone || 'Sin teléfono'}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOrderFocus(null)}
+              className="shrink-0 text-[10px] font-bold text-slate-400"
+            >
+              Cerrar
+            </button>
+          </div>
+          <p className="mt-2 text-[11px] text-slate-300">
+            {ORDER_STATUS_LABEL[focusedOrder.status] || focusedOrder.status}
+            {focusedOrder.assignedDriverName ? ` · ${focusedOrder.assignedDriverName}` : ''}
+          </p>
+          <p className="mt-2 text-[11px] leading-snug">
+            <span className="font-black text-[#C8F542]">Recogida · </span>
+            {focusedOrder.pickupAddress || 'Sin dirección'}
+          </p>
+          <p className="mt-1 text-[11px] leading-snug">
+            <span className="font-black text-[#00E5FF]">Entrega · </span>
+            {focusedOrder.deliveryAddress || 'Sin dirección'}
+          </p>
+          {focusedOrder.description ? (
+            <p className="mt-1 text-[11px] text-slate-300">Detalle: {focusedOrder.description}</p>
+          ) : null}
+          {focusedOrder.notes ? (
+            <p className="mt-1 text-[11px] text-slate-400">Notas: {focusedOrder.notes}</p>
+          ) : null}
+          {paymentMethodLabel(focusedOrder) ? (
+            <p className="mt-1 text-[11px] text-slate-300">Pago: {paymentMethodLabel(focusedOrder)}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {picked && tower ? (
         <div className="absolute bottom-16 right-2 z-20 w-[min(420px,calc(100%-1rem))] overflow-hidden rounded-2xl border border-[#00E5FF]/40 bg-[#070B16]/95 shadow-2xl">
@@ -717,6 +944,15 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
         </div>
       ) : null}
 
+      {onShiftNoGps.length > 0 ? (
+        <div className="absolute top-2 left-2 right-2 z-20 rounded-xl border border-amber-400/50 bg-amber-950/90 px-3 py-2 text-[11px] text-amber-100 shadow-lg">
+          <p className="font-black uppercase tracking-wide">En turno, sin GPS en el mapa</p>
+          <p className="mt-0.5 truncate text-amber-200/90">
+            {onShiftNoGps.map((d) => d.fullName).join(' · ')} · pídeles abrir la cabina
+          </p>
+        </div>
+      ) : null}
+
       {/* Leyenda — esquina inferior izquierda */}
       <div className="absolute bottom-2 left-2 z-10 max-w-[220px] rounded-xl border border-[#1a2744] bg-[#0a101c]/92 px-3 py-2 shadow-lg backdrop-blur-sm">
         <p className="mb-1.5 text-[9px] font-black uppercase tracking-wider text-slate-400">
@@ -741,20 +977,28 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
               }}
             />
             <span>
-              Entrega <span className="text-slate-400">({procesoCount})</span>
+              Ruta de entrega <span className="text-slate-400">({procesoCount})</span>
             </span>
           </div>
           <div className="flex items-center gap-2">
             <span
-              className="inline-block h-1 w-6 rounded-full"
-              style={{
-                background: ROUTE_COLOR_RECOGIDA,
-                boxShadow: `0 0 6px ${ROUTE_COLOR_RECOGIDA}`,
-              }}
-            />
-            <span>Navegación en vivo</span>
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-black text-black"
+              style={{ background: ROUTE_COLOR_RECOGIDA }}
+            >
+              R
+            </span>
+            <span>Recogida</span>
           </div>
-          <div className="flex items-center gap-2 pt-0.5 text-[9px] text-slate-500">
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-[8px] font-black text-black"
+              style={{ background: ROUTE_COLOR_EN_PROCESO }}
+            >
+              E
+            </span>
+            <span>Entrega · toca R/E o la ruta</span>
+          </div>
+          <div className="flex items-center gap-2">
             <span className="inline-block h-2 w-2 rounded-full bg-[#00E676]" />
             {model3dReady ? 'Moto 3D en mapa' : 'Cargando moto 3D…'}
           </div>
@@ -771,6 +1015,7 @@ export const GoogleMapRadar: React.FC<GoogleMapRadarProps> = ({
         </div>
       </div>
     </div>
+    </RadarErrorBoundary>
   );
 };
 

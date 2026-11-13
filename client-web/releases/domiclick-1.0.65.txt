@@ -1,0 +1,4 @@
+DomiClick 1.0.65 (versionCode 66)
+
+- Pastilla de modo claro y oscuro en Perfil de la cabina.
+- Incluye el ojo de la contraseña (1.0.64) y el contraste, la radio y el regreso desde Google Maps.

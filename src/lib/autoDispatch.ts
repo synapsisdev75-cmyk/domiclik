@@ -10,6 +10,11 @@ import { calculateOptimalRoute } from '../utils/routing';
 import { updateOrderFields, updateOrderStatus } from './firebase';
 import { driverCanTakeOrder, isDriverAssignable, minutesFromDistanceKm } from './workShift';
 
+/** Pedidos vivos que la torre puede dejarle al mismo transportista. */
+export const MAX_AUTO_ORDERS = 3;
+/** El 2.º y el 3.º también entran si el pedido va por una parada que ya lleva. */
+export const ALONG_ROUTE_KM = 8;
+
 /** Distancia geodésica en km (Haversine). */
 export function haversineKm(
   a: { lat: number; lng: number },
@@ -37,19 +42,55 @@ export type NearestDriverResult = {
   distanceKm: number;
 };
 
-/** Conductores ocupados: cualquier pedido en estado vivo (assigned → at_destination). */
-export function getBusyDriverIds(orders: DeliveryOrder[]): Set<string> {
-  const busy = new Set<string>();
-  for (const o of orders) {
-    if (isLiveOrderStatus(o.status) && o.assignedDriverId) {
-      busy.add(o.assignedDriverId);
-    }
+/** Pedidos vivos de cada conductor y quién ya llegó al tope de 3. */
+export function driverAutoLoad(orders: DeliveryOrder[]): {
+  full: Set<string>;
+  liveByDriver: Map<string, DeliveryOrder[]>;
+} {
+  const liveByDriver = new Map<string, DeliveryOrder[]>();
+  const full = new Set<string>();
+  for (const order of orders) {
+    if (!isLiveOrderStatus(order.status) || !order.assignedDriverId) continue;
+    const list = liveByDriver.get(order.assignedDriverId) ?? [];
+    list.push(order);
+    liveByDriver.set(order.assignedDriverId, list);
+    if (list.length >= MAX_AUTO_ORDERS) full.add(order.assignedDriverId);
   }
-  return busy;
+  return { full, liveByDriver };
+}
+
+/** Conductores que ya no pueden recibir otro pedido automático. */
+export function getBusyDriverIds(orders: DeliveryOrder[]): Set<string> {
+  return driverAutoLoad(orders).full;
+}
+
+function gpsAgeMs(driver: MotorizadoDriver): number {
+  const at = Date.parse(driver.location?.updatedAt || '');
+  return Number.isFinite(at) ? Date.now() - at : Number.POSITIVE_INFINITY;
+}
+
+function sharesRoute(
+  driverLoc: { lat: number; lng: number } | null | undefined,
+  open: DeliveryOrder[],
+  pickup: LocationCoords,
+  delivery: LocationCoords,
+): boolean {
+  if (!open.length) return true;
+  const anchors: { lat: number; lng: number }[] = [];
+  if (driverLoc?.lat && driverLoc?.lng) anchors.push(driverLoc);
+  for (const order of open) {
+    if (order.pickupCoords?.lat && order.pickupCoords?.lng) anchors.push(order.pickupCoords);
+    if (order.deliveryCoords?.lat && order.deliveryCoords?.lng) anchors.push(order.deliveryCoords);
+  }
+  if (!anchors.length) return false;
+  const near = (point: LocationCoords) =>
+    anchors.some((anchor) => haversineKm(anchor, point) <= ALONG_ROUTE_KM);
+  return near(pickup) || near(delivery);
 }
 
 /**
- * Motorizado: aprobado + activo + asistencia de entrada hoy + no suspendido + GPS + libre + radio.
+ * Motorizado: aprobado + activo + en turno + GPS.
+ * Libre dentro del radio, o con 1–2 pedidos si sigue cerca o va por la misma ruta.
  */
 export function findNearestEligibleDriver(
   drivers: MotorizadoDriver[],
@@ -57,6 +98,9 @@ export function findNearestEligibleDriver(
   radiusKm: number,
   busyDriverIds: Set<string> = new Set(),
   job?: { durationMin?: number; delivery?: LocationCoords },
+  liveByDriver: Map<string, DeliveryOrder[]> = new Map(),
+  /** VIP: solo motos sin pedido abierto (libre total). */
+  idleOnly = false,
 ): NearestDriverResult | null {
   const orderMinutes =
     job?.durationMin && job.durationMin > 0
@@ -68,9 +112,18 @@ export function findNearestEligibleDriver(
   for (const driver of drivers) {
     if (!isDriverAssignable(driver)) continue;
     if (busyDriverIds.has(driver.id)) continue;
+    const open = liveByDriver.get(driver.id) ?? [];
+    if (idleOnly && open.length > 0) continue;
+    if (open.length >= MAX_AUTO_ORDERS) continue;
     if (!driver.location?.lat || !driver.location?.lng) continue;
     const distanceKm = haversineKm(driver.location, pickup);
-    if (distanceKm > radiusKm) continue;
+    const closeEnough = distanceKm <= radiusKm;
+    const onRoute =
+      open.length > 0 &&
+      Boolean(job?.delivery && sharesRoute(driver.location, open, pickup, job.delivery));
+    // 2.º/3.º: puede ir por la misma ruta, pero nunca gana a alguien más cerca del pickup.
+    if (open.length === 0 && !closeEnough) continue;
+    if (open.length > 0 && !closeEnough && !onRoute) continue;
     if (
       !driverCanTakeOrder({
         lastPunchAt: driver.lastPunchAt,
@@ -80,7 +133,11 @@ export function findNearestEligibleDriver(
     ) {
       continue;
     }
-    if (!best || distanceKm < best.distanceKm) {
+    const fresher =
+      best &&
+      Math.abs(distanceKm - best.distanceKm) <= 0.4 &&
+      gpsAgeMs(driver) < gpsAgeMs(best.driver);
+    if (!best || distanceKm < best.distanceKm - 0.05 || fresher) {
       best = { driver, distanceKm };
     }
   }
@@ -102,6 +159,7 @@ export type DispatchResult = {
 
 export type DispatchOptions = {
   busyDriverIds?: Set<string>;
+  liveByDriver?: Map<string, DeliveryOrder[]>;
   /** Radio ampliado si nadie está en el radio base (km). Default 30. */
   expandRadiusKm?: number;
 };
@@ -192,11 +250,15 @@ export async function dispatchPendingOrder(
   }
 
   const busy = options.busyDriverIds ?? new Set<string>();
+  const liveByDriver = options.liveByDriver ?? new Map<string, DeliveryOrder[]>();
   const baseRadius = Math.max(1, Number(settings.searchRadiusKm) || 15);
   const expandRadius = Math.max(
     baseRadius,
     options.expandRadiusKm ?? Math.max(30, baseRadius * 3)
   );
+  // VIP prioridad 1: radio ciudad + primero libre total; si no hay, cae a cupo 2.º/3.º.
+  const vipPriority = Boolean(order.isVip);
+  const firstRadius = vipPriority ? expandRadius : baseRadius;
 
   const job = {
     durationMin: routeDurationMin,
@@ -205,20 +267,35 @@ export async function dispatchPendingOrder(
   let nearest = findNearestEligibleDriver(
     drivers,
     order.pickupCoords,
-    baseRadius,
+    firstRadius,
     busy,
     job,
+    liveByDriver,
+    vipPriority,
   );
-  let usedRadius = baseRadius;
+  let usedRadius = firstRadius;
 
-  // Si nadie en el radio base: buscar en radio ampliado (ciudad)
-  if (!nearest) {
+  if (!nearest && vipPriority) {
     nearest = findNearestEligibleDriver(
       drivers,
       order.pickupCoords,
       expandRadius,
       busy,
       job,
+      liveByDriver,
+      false,
+    );
+  }
+
+  // Si nadie en el radio base: buscar en radio ampliado (ciudad)
+  if (!nearest && !vipPriority) {
+    nearest = findNearestEligibleDriver(
+      drivers,
+      order.pickupCoords,
+      expandRadius,
+      busy,
+      job,
+      liveByDriver,
     );
     usedRadius = expandRadius;
   }
@@ -247,6 +324,7 @@ export async function dispatchPendingOrder(
     assignedDistanceKm: Math.round(nearest.distanceKm * 100) / 100,
     assignedDriverPhone: nearest.driver.phone || null,
     dispatchRadiusKm: usedRadius,
+    dispatchCriterion: vipPriority ? 'vip_priority_nearest_pickup' : 'nearest_pickup',
     updatedAt: now,
   });
 
@@ -268,8 +346,8 @@ export async function dispatchPendingOrder(
 }
 
 /**
- * Despacha todos los pending: el más cercano activo y libre.
- * Asignaciones secuenciales para no dar el mismo conductor a dos pedidos.
+ * Despacha los pending al activo más cercano.
+ * Un conductor puede llevar hasta 3 si el pedido nuevo va por su misma ruta.
  */
 export async function dispatchAllPendingOrders(
   orders: DeliveryOrder[],
@@ -283,20 +361,24 @@ export async function dispatchAllPendingOrders(
         !o.assignedDriverId &&
         o.paymentReviewStatus !== 'pending_review',
     )
-    .sort(
-      (a, b) =>
-        new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
-    );
+    .sort((a, b) => {
+      if (Boolean(a.isVip) !== Boolean(b.isVip)) return a.isVip ? -1 : 1;
+      return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+    });
 
-  const busy = getBusyDriverIds(orders);
+  const { full: busy, liveByDriver } = driverAutoLoad(orders);
   const results: DispatchResult[] = [];
 
   for (const order of pending) {
     const result = await dispatchPendingOrder(order, drivers, settings, {
       busyDriverIds: busy,
+      liveByDriver,
     });
     if (result.assigned && result.driverId) {
-      busy.add(result.driverId);
+      const list = liveByDriver.get(result.driverId) ?? [];
+      list.push({ ...order, assignedDriverId: result.driverId, status: 'assigned' });
+      liveByDriver.set(result.driverId, list);
+      if (list.length >= MAX_AUTO_ORDERS) busy.add(result.driverId);
     }
     results.push(result);
   }

@@ -1,0 +1,8 @@
+﻿Nueva actualización DomiClick para rutas multi-parada más claras.
+
+• Ruta optimizada en la cabina con paradas numeradas (1, 2, 3…) y distintivos R/E.
+• Navegar tour exporta todas las paradas a Google Maps.
+• Botón Optimizar más compacto y mapa ajustado a la barra inferior.
+• Ubicación solo con icono; brújula del mapa removida.
+
+Actualiza y sigue entregando con DomiClick.

@@ -1,0 +1,7 @@
+﻿DomiClick 1.0.81 — VIP + aviso solo al asignado
+
+• Etiqueta VIP verde en pedidos y paradas (cabina y torre).
+• VIP prioridad 1: auto-asigna primero al transportista libre.
+• Secretaría puede crear y marcar VIP.
+• Sonido torre: ping al crear; loop tras pago hasta asignar; se corta al asignar.
+• Aviso de pedido asignado: solo el motorizado asignado (no suena al resto de la flota).

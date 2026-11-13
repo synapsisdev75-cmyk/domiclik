@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   MotorizadoDriver,
   DeliveryOrder,
@@ -11,14 +11,16 @@ import { MapComponent, MapStyleType } from '../MapComponent';
 import { GoogleMapRadar, getGoogleMapsApiKey } from '../GoogleMapRadar';
 import { ChatWindow } from '../chat/ChatWindow';
 import { DriverRouteHistoryView } from './DriverRouteHistoryView';
-import { DriverApprovalModal } from './DriverApprovalModal';
+import { DriverApprovalModal, PendingDriverQueue } from './DriverApprovalModal';
 import { DriverFleetProfile } from './DriverFleetProfile';
 import {
   updateOrderStatus,
+  updateOrderFields,
   saveDispatchSettings,
   subscribeDispatchSettings,
   cancelOrder,
   deleteOrder,
+  deleteDriverFromTower,
   approveTransferPayment,
   subscribeIncidents,
   resolveIncident,
@@ -29,7 +31,7 @@ import { AdminStaffPanel } from './AdminStaffPanel';
 import { AttendancePanel } from './AttendancePanel';
 import { FleetControlPanel } from './FleetControlPanel';
 import { FleetMotoPanel } from './FleetMotoPanel';
-import { DEFAULT_DISPATCH_SETTINGS, formatCOP } from '../../lib/adminMetrics';
+import { DEFAULT_DISPATCH_SETTINGS, downloadExcel, formatCOP } from '../../lib/adminMetrics';
 import { driverAssignBlockReason, isDriverAssignable, minutesFromDistanceKm } from '../../lib/workShift';
 import { haversineKm } from '../../lib/autoDispatch';
 import {
@@ -51,18 +53,22 @@ import {
   Star,
   MessageCircle,
   Phone,
+  VolumeX,
   X,
+  Download,
 } from 'lucide-react';
 import {
   DomiCargoIcon,
   DomiHelmetIcon,
   DomiRadarIcon,
 } from '../ui/CustomIcons';
+import { VipBadge } from '../ui/VipBadge';
 import { openMapWallWindow } from './MapWallScreen';
 import { MapWallVideoPanel } from './MapWallVideoPanel';
 import { SecretariatPanel } from './SecretariatPanel';
 import { SecretaryChatsPanel } from './SecretaryChatsPanel';
 import { canAccessSection, staffCan } from '../../lib/staffAccess';
+import { isPendingDriverStatus } from '../../lib/driverStatus';
 import type { StaffRole } from '../../types';
 import { customerOrderWhatsAppText, openWhatsAppTo } from '../../lib/whatsapp';
 
@@ -81,8 +87,20 @@ export type AdminSection =
   | 'usuarios'
   | 'ajustes';
 
-import { ORDER_STATUS_LABEL, isLiveOrderStatus, isPaymentOnHold } from '../../lib/orderFlow';
-import { dispatchPendingOrder, getBusyDriverIds } from '../../lib/autoDispatch';
+import {
+  ORDER_STATUS_LABEL,
+  isLiveOrderStatus,
+  isPaymentOnHold,
+  orderTransferPaid,
+  paymentMethodLabel,
+} from '../../lib/orderFlow';
+import {
+  isUnpaidOrderMuted,
+  muteUnpaidOrderAlarms,
+  unmuteUnpaidOrderAlarms,
+  subscribeUnpaidMute,
+} from '../../lib/alerts';
+import { dispatchPendingOrder, driverAutoLoad } from '../../lib/autoDispatch';
 
 function statusBadge(status: OrderStatus) {
   if (status === 'assigned' || status === 'accepted') return 'bg-blue-500/20 text-blue-300 border-blue-500/40';
@@ -149,8 +167,10 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
   currentAdminEmail = '',
   staffRole = 'admin',
 }) => {
-  const approvedDrivers = drivers.filter((d) => d.status === 'approved');
-  const pendingDrivers = drivers.filter((d) => d.status === 'pending');
+  const approvedDrivers = drivers.filter(
+    (d) => String(d.status || '').toLowerCase() === 'approved',
+  );
+  const pendingDrivers = drivers.filter((d) => isPendingDriverStatus(d.status));
   const activeDrivers = approvedDrivers.filter((d) => d.isActive);
 
   const [search, setSearch] = useState('');
@@ -158,18 +178,25 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
   const [profileDriver, setProfileDriver] = useState<MotorizadoDriver | null>(null);
   const [approvalDriver, setApprovalDriver] = useState<MotorizadoDriver | null>(null);
   const [mapStyleToggle, setMapStyleToggle] = useState<'map' | 'satellite'>('map');
+  const [unpaidMuteTick, setUnpaidMuteTick] = useState(0);
+  useEffect(() => subscribeUnpaidMute(setUnpaidMuteTick), []);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [orderBusyId, setOrderBusyId] = useState<string | null>(null);
+  const [driverBusyId, setDriverBusyId] = useState<string | null>(null);
   const [incidents, setIncidents] = useState<OpsIncident[]>([]);
   const [incidentBusyId, setIncidentBusyId] = useState<string | null>(null);
   const [dispatchDraft, setDispatchDraft] = useState<DispatchSettings>(DEFAULT_DISPATCH_SETTINGS);
   const [dispatchSaving, setDispatchSaving] = useState(false);
   const [dispatchSaved, setDispatchSaved] = useState(false);
+  const [dispatchSaveErr, setDispatchSaveErr] = useState<string | null>(null);
+  const dispatchSavingRef = useRef(false);
   const [detailOrder, setDetailOrder] = useState<DeliveryOrder | null>(null);
   const [photoLightbox, setPhotoLightbox] = useState<string | null>(null);
 
   useEffect(() => {
     return subscribeDispatchSettings((s) => {
+      // No pisar el borrador mientras se guarda
+      if (dispatchSavingRef.current) return;
       setDispatchDraft(s);
     });
   }, []);
@@ -206,11 +233,29 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
     () => orders.filter((o) => o.status === 'pending' && isPaymentOnHold(o)).filter(filterText),
     [orders, search],
   );
+  const transferPaidOrders = useMemo(
+    () =>
+      orders
+        .filter((o) => o.paymentMethod === 'transferencia' && orderTransferPaid(o) > 0)
+        .filter(filterText)
+        .sort((a, b) =>
+          String(b.paymentReviewedAt || b.updatedAt || b.createdAt || '').localeCompare(
+            String(a.paymentReviewedAt || a.updatedAt || a.createdAt || ''),
+          ),
+        ),
+    [orders, search],
+  );
+  const transferPaidSum = transferPaidOrders.reduce((sum, o) => sum + orderTransferPaid(o), 0);
   const pendingOrders = useMemo(
     () =>
       orders
         .filter((o) => o.status === 'pending' && !isPaymentOnHold(o))
-        .filter(filterText),
+        .filter(filterText)
+        .sort((a, b) => {
+          // VIP = prioridad 1 encima del resto (luego más antiguo primero).
+          if (Boolean(a.isVip) !== Boolean(b.isVip)) return a.isVip ? -1 : 1;
+          return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+        }),
     [orders, search],
   );
   const transitOrders = useMemo(
@@ -284,6 +329,25 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
     }
   };
 
+  const handleDeleteDriver = async (drv: MotorizadoDriver) => {
+    if (
+      !window.confirm(
+        `¿Eliminar a ${drv.fullName || drv.email || drv.id} de la flota? Se suelta la moto vinculada y deja de aparecer en la torre.`,
+      )
+    ) {
+      return;
+    }
+    setDriverBusyId(drv.id);
+    try {
+      await deleteDriverFromTower(drv.id);
+      if (profileDriver?.id === drv.id) setProfileDriver(null);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'No se pudo eliminar el transportista.');
+    } finally {
+      setDriverBusyId(null);
+    }
+  };
+
   const handleResolveIncident = async (inc: OpsIncident) => {
     const note =
       window.prompt('Nota de resolución (opcional):', 'Incidencia solucionada por torre') || '';
@@ -328,9 +392,16 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           )}
         </div>
         <div className="min-w-0">
-          <div className="text-xs font-bold text-white font-tech">{ord.trackingCode || ord.id}</div>
+          <div className="text-xs font-bold text-white font-tech">
+            {ord.trackingCode || ord.id}
+            {ord.isVip ? <VipBadge className="ml-2 align-middle" size="xs" /> : null}
+          </div>
+          <div className="text-[11px] text-slate-300 truncate">{ord.customerName}</div>
           <div className="text-[11px] text-slate-400 truncate">
-            {ord.customerName} → {ord.deliveryAddress}
+            Origen: {ord.pickupAddress || 'Sin origen'}
+          </div>
+          <div className="text-[11px] text-slate-400 truncate">
+            Destino: {ord.deliveryAddress || 'Sin destino'}
           </div>
           {ord.customerPhone ? (
             <div className="text-[10px] text-emerald-300/90 mt-0.5">{ord.customerPhone}</div>
@@ -358,7 +429,14 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           ) : null}
           {isPaymentOnHold(ord) ? (
             <div className="text-[10px] font-bold text-emerald-300 mt-0.5">
-              {ord.transferChannel === 'qr' ? 'QR' : 'Bre-B'} · comprobante por aprobar
+              {ord.transferChannel === 'pasarela'
+                ? 'Pasarela · esperando pago'
+                : 'Transferencia por fuera · comprobante por aprobar'}
+            </div>
+          ) : null}
+          {orderTransferPaid(ord) > 0 ? (
+            <div className="text-[10px] font-bold text-cyan-300 mt-0.5">
+              Pagó transferencia ${orderTransferPaid(ord).toLocaleString('es-CO')}
             </div>
           ) : null}
           {ord.sourceSiteId && (
@@ -366,8 +444,18 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           )}
           {ord.serviceRating ? (
             <div className="text-[10px] text-amber-300 font-tech mt-0.5 flex items-center gap-1">
-              <Star className="w-3 h-3 fill-amber-300 text-amber-300" />
-              {ord.serviceRating}★ · {Math.round((Number(ord.serviceRating) / 5) * 100)}% cliente
+              {[1, 2, 3, 4, 5].map((n) => (
+                <Star
+                  key={n}
+                  className="w-3 h-3"
+                  fill={n <= Math.round(Number(ord.serviceRating)) ? '#F59E0B' : 'transparent'}
+                  stroke={n <= Math.round(Number(ord.serviceRating)) ? '#F59E0B' : '#475569'}
+                />
+              ))}
+              {ord.serviceRating}★
+              <span className="text-slate-400">
+                · {Math.round((Number(ord.serviceRating) / 5) * 100)}%
+              </span>
             </div>
           ) : null}
           <div className="text-[10px] text-[#FF5722]/80 mt-1 font-bold">Ver ficha completa →</div>
@@ -379,6 +467,12 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
         >
           {ORDER_STATUS_LABEL[ord.status] || ord.status}
         </span>
+        {ord.isVip ? <VipBadge size="sm" withSurcharge={ord.vipSurchargeCop} /> : null}
+        {paymentMethodLabel(ord) ? (
+          <span className="text-[10px] font-tech font-bold px-2.5 py-1 rounded-lg border border-slate-500/40 text-slate-300">
+            {paymentMethodLabel(ord)}
+          </span>
+        ) : null}
         {ord.customerPhone ? (
           <button
             type="button"
@@ -495,15 +589,54 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                 {detailOrder.customerEmail ? (
                   <p className="text-[10px] text-slate-500">{detailOrder.customerEmail}</p>
                 ) : null}
-                <span
-                  className={`mt-2 inline-block text-[10px] font-tech font-bold px-2 py-1 rounded-lg border ${statusBadge(detailOrder.status)}`}
-                >
-                  {ORDER_STATUS_LABEL[detailOrder.status] || detailOrder.status}
-                </span>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-block text-[10px] font-tech font-bold px-2 py-1 rounded-lg border ${statusBadge(detailOrder.status)}`}
+                  >
+                    {ORDER_STATUS_LABEL[detailOrder.status] || detailOrder.status}
+                  </span>
+                  {detailOrder.isVip ? (
+                    <VipBadge size="sm" withSurcharge={detailOrder.vipSurchargeCop} />
+                  ) : null}
+                </div>
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
+              {staffCan(staffRole, 'orders.create') && detailOrder.status === 'pending' ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const next = !detailOrder.isVip;
+                    try {
+                      await updateOrderFields(detailOrder.id, {
+                        isVip: next,
+                        vipSurchargeCop: next
+                          ? detailOrder.vipSurchargeCop ||
+                            DEFAULT_DISPATCH_SETTINGS.vipSurchargeCop
+                          : 0,
+                      });
+                      setDetailOrder({
+                        ...detailOrder,
+                        isVip: next,
+                        vipSurchargeCop: next
+                          ? detailOrder.vipSurchargeCop ||
+                            DEFAULT_DISPATCH_SETTINGS.vipSurchargeCop
+                          : 0,
+                      });
+                    } catch (err) {
+                      console.warn('[vip] toggle', err);
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] font-bold ${
+                    detailOrder.isVip
+                      ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-300'
+                      : 'border-[#1a2744] text-slate-300'
+                  }`}
+                >
+                  {detailOrder.isVip ? 'Quitar VIP' : 'Marcar VIP · prioridad 1'}
+                </button>
+              ) : null}
               {detailOrder.customerPhone ? (
                 <>
                   <a
@@ -544,14 +677,48 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
               {detailOrder.notes ? <p>Notas: {detailOrder.notes}</p> : null}
               {detailOrder.paymentMethod ? (
                 <p>
-                  Pago: {detailOrder.paymentMethod}
-                  {detailOrder.transferChannel === 'breb'
-                    ? ' · Bre-B'
-                    : detailOrder.transferChannel === 'qr'
-                      ? ' · QR'
+                  Pago: {paymentMethodLabel(detailOrder) || detailOrder.paymentMethod}
+                  {detailOrder.transferChannel === 'pasarela'
+                    ? ' · Pasarela Wompi'
+                    : detailOrder.transferChannel
+                      ? ' · comprobante por fuera'
                       : ''}
                   {detailOrder.paymentNote ? ` · ${detailOrder.paymentNote}` : ''}
                   {isPaymentOnHold(detailOrder) ? ' · esperando luz verde' : ''}
+                  {orderTransferPaid(detailOrder) > 0
+                    ? ` · pagado $${orderTransferPaid(detailOrder).toLocaleString('es-CO')}`
+                    : ''}
+                </p>
+              ) : null}
+              {detailOrder.payments?.length || orderTransferPaid(detailOrder) > 0 ? (
+                <div className="mt-2 rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-2">
+                  <p className="text-[10px] font-tech uppercase text-cyan-200/80">
+                    Pagos transferencia · $
+                    {orderTransferPaid(detailOrder).toLocaleString('es-CO')} sumados
+                  </p>
+                  <ul className="mt-1 space-y-1">
+                    {(detailOrder.payments || []).map((pay) => (
+                      <li key={pay.id} className="text-[11px] text-slate-200">
+                        ${Number(pay.amount || 0).toLocaleString('es-CO')} ·{' '}
+                        {pay.source === 'wompi' ? 'pasarela' : 'comprobante'}
+                        {pay.at ? ` · ${new Date(pay.at).toLocaleString('es-CO')}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {detailOrder.routeDistanceKm != null ? (
+                <p>
+                  Distancia app:{' '}
+                  <span className="font-mono font-bold text-white">
+                    {Number(detailOrder.routeDistanceKm).toFixed(2)} km
+                  </span>
+                  {detailOrder.assignedDistanceKm != null
+                    ? ` · al pickup ${Number(detailOrder.assignedDistanceKm).toFixed(2)} km`
+                    : ''}
+                  {detailOrder.dispatchCriterion === 'nearest_pickup'
+                    ? ' · criterio: más cercano a la recogida'
+                    : ''}
                 </p>
               ) : null}
             </div>
@@ -559,7 +726,8 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             {detailOrder.paymentProofUrl ? (
               <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
                 <p className="text-[10px] font-tech uppercase text-emerald-200/80">
-                  Comprobante {detailOrder.transferChannel === 'qr' ? 'QR' : 'Bre-B'}
+                  Comprobante{' '}
+                  {detailOrder.transferChannel === 'pasarela' ? 'pasarela' : 'por fuera'}
                 </p>
                 <button
                   type="button"
@@ -590,8 +758,10 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                           };
                           setDetailOrder(approved);
                           if (dispatchDraft.autoAssignEnabled) {
+                            const load = driverAutoLoad(orders);
                             await dispatchPendingOrder(approved, drivers, dispatchDraft, {
-                              busyDriverIds: getBusyDriverIds(orders),
+                              busyDriverIds: load.full,
+                              liveByDriver: load.liveByDriver,
                             });
                           }
                         } finally {
@@ -611,6 +781,54 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                     {detailOrder.paymentReviewedBy ? ` por ${detailOrder.paymentReviewedBy}` : ''}
                   </p>
                 )}
+              </div>
+            ) : null}
+
+            {!detailOrder.paymentProofUrl &&
+            isPaymentOnHold(detailOrder) &&
+            detailOrder.transferChannel === 'pasarela' ? (
+              <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-3">
+                <p className="text-[10px] font-tech uppercase text-cyan-200/80">
+                  Pasarela Wompi · {detailOrder.paymentGatewayStatus || 'pending'}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-300">
+                  Si el webhook confirma, entra solo. Si pagaron por fuera o el evento no llegó, da
+                  luz verde aquí.
+                </p>
+                <button
+                  type="button"
+                  disabled={orderBusyId === detailOrder.id}
+                  onClick={() => {
+                    void (async () => {
+                      setOrderBusyId(detailOrder.id);
+                      try {
+                        await approveTransferPayment(
+                          detailOrder.id,
+                          currentAdminEmail || 'torre',
+                        );
+                        const approved = {
+                          ...detailOrder,
+                          paymentReviewStatus: 'approved' as const,
+                        };
+                        setDetailOrder(approved);
+                        if (dispatchDraft.autoAssignEnabled) {
+                          const load = driverAutoLoad(orders);
+                          await dispatchPendingOrder(approved, drivers, dispatchDraft, {
+                            busyDriverIds: load.full,
+                            liveByDriver: load.liveByDriver,
+                          });
+                        }
+                      } finally {
+                        setOrderBusyId(null);
+                      }
+                    })();
+                  }}
+                  className="mt-3 w-full rounded-xl bg-emerald-600 py-2.5 text-xs font-black text-white"
+                >
+                  {orderBusyId === detailOrder.id
+                    ? 'Aprobando…'
+                    : 'Luz verde · poner en circulación'}
+                </button>
               </div>
             ) : null}
 
@@ -635,6 +853,45 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                 ) : null}
               </div>
             )}
+
+            {detailOrder.deliveryProofUrl ? (
+              <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-3">
+                <p className="text-[10px] font-tech uppercase text-cyan-200/80">Foto de entrega</p>
+                <button
+                  type="button"
+                  onClick={() => setPhotoLightbox(detailOrder.deliveryProofUrl || null)}
+                  className="mt-2 block overflow-hidden rounded-lg border border-[#162748]"
+                >
+                  <img
+                    src={detailOrder.deliveryProofUrl}
+                    alt="Evidencia de entrega"
+                    className="max-h-56 w-full object-contain bg-black/40"
+                  />
+                </button>
+              </div>
+            ) : null}
+
+            {detailOrder.serviceRating ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                <p className="text-[10px] font-tech uppercase text-amber-200/80">Calificación del cliente</p>
+                <div className="mt-1 flex items-center gap-1">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Star
+                      key={n}
+                      className="h-4 w-4"
+                      fill={n <= Math.round(Number(detailOrder.serviceRating)) ? '#F59E0B' : 'transparent'}
+                      stroke={n <= Math.round(Number(detailOrder.serviceRating)) ? '#F59E0B' : '#475569'}
+                    />
+                  ))}
+                  <span className="ml-2 text-sm font-bold text-white">
+                    {detailOrder.serviceRating}★
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    · {Math.round((Number(detailOrder.serviceRating) / 5) * 100)}% efectividad
+                  </span>
+                </div>
+              </div>
+            ) : null}
 
             {detailOrder.timeline && detailOrder.timeline.length > 0 ? (
               <div>
@@ -664,6 +921,15 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
         </div>
       </div>
     ) : null;
+
+  const approvalModal = (
+    <DriverApprovalModal
+      driver={approvalDriver}
+      isOpen={Boolean(approvalDriver)}
+      onClose={() => setApprovalDriver(null)}
+      adminName={currentAdminEmail || 'torre'}
+    />
+  );
 
   const photoLightboxModal =
     photoLightbox ? (
@@ -698,6 +964,11 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             ) : undefined
           }
         />
+        <PendingDriverQueue
+          drivers={drivers}
+          adminName={currentAdminEmail || 'torre'}
+          onReview={setApprovalDriver}
+        />
         <div className="relative max-w-md">
           <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
           <input
@@ -708,18 +979,58 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           />
         </div>
         {paymentReviews.length > 0 ? (
-          <div className="space-y-2.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3">
-            <p className="text-[11px] font-black uppercase tracking-wide text-emerald-200">
-              Comprobantes por aprobar · {paymentReviews.length}
+          <div className="space-y-2.5 rounded-2xl border-2 border-amber-400/50 bg-amber-500/10 p-3 animate-pulse">
+            <p className="text-[11px] font-black uppercase tracking-wide text-amber-200">
+              Pendientes de pago / comprobante · {paymentReviews.length}
             </p>
+            <p className="text-[11px] text-amber-100/80">
+              Sonido 1 (esperando pago) en loop · al confirmar suena otro distinto. Pasarela: si
+              Wompi no confirma en 20 min se cancela solo.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const ids = paymentReviews.map((o) => o.id);
+                if (paymentReviews.every((o) => isUnpaidOrderMuted(o.id))) {
+                  unmuteUnpaidOrderAlarms(ids);
+                } else {
+                  muteUnpaidOrderAlarms(ids);
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-amber-500/15 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-amber-100 hover:bg-amber-500/25"
+            >
+              <VolumeX className="h-3.5 w-3.5" />
+              {paymentReviews.every((o) => isUnpaidOrderMuted(o.id))
+                ? 'Quitar silencio · volver a sonar'
+                : 'Silenciar hasta que completen el pago'}
+            </button>
             <p className="text-[11px] text-emerald-100/70">
-              Transferencia Bre-B o QR. Abre la ficha, revisa la foto y da luz verde para ponerla en circulación.
+              Transferencia: pasarela (entra sola al confirmar Wompi) o comprobante si pagaron por fuera. Abre la ficha y da luz verde.
             </p>
             {paymentReviews.map((ord) => (
               <OrderRow key={ord.id} ord={ord} />
             ))}
           </div>
         ) : null}
+        <div className="space-y-2.5 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 p-3">
+          <p className="text-[11px] font-black uppercase tracking-wide text-cyan-200">
+            Pagos realizados · transferencia
+          </p>
+          <p className="text-lg font-black text-white">
+            ${transferPaidSum.toLocaleString('es-CO')}
+            <span className="ml-2 text-[11px] font-tech font-normal text-slate-400">
+              · {transferPaidOrders.length} pedido{transferPaidOrders.length === 1 ? '' : 's'}
+            </span>
+          </p>
+          {transferPaidOrders.length === 0 ? (
+            <p className="text-[11px] text-slate-400">
+              Cuando Wompi confirme o des luz verde a un comprobante, el valor queda sumado aquí y
+              en la ficha del pedido.
+            </p>
+          ) : (
+            transferPaidOrders.slice(0, 12).map((ord) => <OrderRow key={`pay-${ord.id}`} ord={ord} />)
+          )}
+        </div>
         {pendingOrders.length === 0 ? (
           <EmptyState
             title="Sin solicitudes pendientes"
@@ -734,6 +1045,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
         )}
         {orderDetailModal}
         {photoLightboxModal}
+        {approvalModal}
       </div>
     );
   }
@@ -766,6 +1078,11 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             <div className="text-2xl font-black text-amber-400 font-tech">{pendingDrivers.length}</div>
           </div>
         </div>
+        <PendingDriverQueue
+          drivers={drivers}
+          adminName={currentAdminEmail || 'torre'}
+          onReview={setApprovalDriver}
+        />
         {approvedDrivers.length === 0 ? (
           <EmptyState
             title="Sin flota aprobada"
@@ -842,6 +1159,16 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                   >
                     <MessageSquare className="w-3.5 h-3.5" /> Chat
                   </button>
+                  <button
+                    type="button"
+                    disabled={driverBusyId === drv.id}
+                    onClick={() => void handleDeleteDriver(drv)}
+                    className="text-[10px] text-red-300 font-tech font-bold flex items-center gap-1 px-2 py-1.5 rounded-lg border border-red-500/30 hover:border-red-400/60"
+                    title="Eliminar transportista"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {driverBusyId === drv.id ? '…' : 'Eliminar'}
+                  </button>
                 </div>
               </div>
             ))}
@@ -878,6 +1205,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             />
           </div>
         )}
+        {approvalModal}
       </div>
     );
   }
@@ -1111,6 +1439,48 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
   }
 
   if (section === 'historial') {
+    // Secretaría: historial de todos los envíos (sin mover el resto del rol)
+    if (staffRole === 'secretary') {
+      const historyOrders = [...orders].sort((a, b) =>
+        String(b.updatedAt || b.createdAt || '').localeCompare(
+          String(a.updatedAt || a.createdAt || ''),
+        ),
+      );
+      return (
+        <div className="space-y-5">
+          <SectionHeader
+            title="Historial de envíos"
+            subtitle={`Todos los envíos · ${historyOrders.length} registros`}
+            action={
+              <div className="relative max-w-xs">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar envío…"
+                  className="w-full bg-[#0A1020] border border-[#162748] rounded-xl pl-9 pr-3 py-2 text-xs text-white"
+                />
+              </div>
+            }
+          />
+          {historyOrders.filter(filterText).length === 0 ? (
+            <EmptyState
+              title="Sin envíos en historial"
+              text="Cuando haya pedidos registrados, aparecerán aquí."
+            />
+          ) : (
+            <div className="space-y-2.5">
+              {historyOrders.filter(filterText).map((ord) => (
+                <OrderRow key={ord.id} ord={ord} showAssign={false} />
+              ))}
+            </div>
+          )}
+          {orderDetailModal}
+          {photoLightboxModal}
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-5">
         <SectionHeader
@@ -1135,7 +1505,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             <DomiRadarIcon className="w-4 h-4" color="#00E5FF" />
             Replay de ruta GPS
           </h3>
-          <DriverRouteHistoryView drivers={drivers} />
+          <DriverRouteHistoryView drivers={drivers} orders={orders} />
         </div>
         {allDelivered.length > deliveredToday.length && (
           <div className="space-y-2.5">
@@ -1160,6 +1530,52 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
         staffRole={staffRole}
         currentEmail={currentAdminEmail}
       />
+    );
+  }
+
+  if (section === 'reportes' && staffRole === 'secretary') {
+    const downloadShippingReport = () => {
+      const rows = orders.map((o) => ({
+        Tracking: o.trackingCode || o.id,
+        Cliente: o.customerName,
+        Origen: o.pickupAddress || '',
+        Destino: o.deliveryAddress || '',
+        Estado: ORDER_STATUS_LABEL[o.status] || o.status,
+        VIP: o.isVip ? 'Sí' : 'No',
+        Recargo_VIP_COP: o.isVip ? o.vipSurchargeCop || 0 : 0,
+        Forma_de_pago: paymentMethodLabel(o),
+        Motorizado: o.assignedDriverName || '',
+        Flete_COP: o.shippingFee || 0,
+        Calificacion: o.serviceRating || '',
+        Creado: o.createdAt,
+        Actualizado: o.updatedAt,
+      }));
+      downloadExcel(
+        `domiclick-informe-envio-${new Date().toISOString().slice(0, 10)}.xls`,
+        rows,
+        'Envios',
+      );
+    };
+    return (
+      <div className="mx-auto max-w-lg space-y-5">
+        <SectionHeader
+          title="Descargar"
+          subtitle="Informe de envío para secretaría"
+        />
+        <div className="rounded-2xl border border-[#162748] bg-[#0A1020] p-6 text-center space-y-4">
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Descarga el listado de envíos (tracking, cliente, estado, pago, motorizado y flete).
+          </p>
+          <button
+            type="button"
+            onClick={downloadShippingReport}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#2B6CFF] px-5 py-4 text-sm font-black text-white"
+          >
+            <Download className="h-4 w-4" />
+            Descargar informe de envío
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -1243,17 +1659,29 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                     {drv.status} · {drv.email}
                   </div>
                 </div>
-                <span
-                  className={`text-[10px] font-tech font-bold px-2 py-1 rounded-lg border ${
-                    drv.status === 'approved'
-                      ? 'border-[#00E676]/40 text-[#00E676]'
-                      : drv.status === 'pending'
-                        ? 'border-amber-500/40 text-amber-300'
-                        : 'border-red-500/40 text-red-300'
-                  }`}
-                >
-                  {drv.status.toUpperCase()}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-[10px] font-tech font-bold px-2 py-1 rounded-lg border ${
+                      drv.status === 'approved'
+                        ? 'border-[#00E676]/40 text-[#00E676]'
+                        : drv.status === 'pending'
+                          ? 'border-amber-500/40 text-amber-300'
+                          : 'border-red-500/40 text-red-300'
+                    }`}
+                  >
+                    {drv.status.toUpperCase()}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={driverBusyId === drv.id}
+                    onClick={() => void handleDeleteDriver(drv)}
+                    className="text-[10px] text-red-300 font-tech font-bold flex items-center gap-1 px-2 py-1.5 rounded-lg border border-red-500/30 hover:border-red-400/60"
+                    title="Eliminar transportista"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {driverBusyId === drv.id ? '…' : 'Eliminar'}
+                  </button>
+                </div>
               </div>
             ))
           )}
@@ -1262,7 +1690,7 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
           driver={approvalDriver}
           isOpen={Boolean(approvalDriver)}
           onClose={() => setApprovalDriver(null)}
-          adminName="Admin DomiClick"
+          adminName={currentAdminEmail || 'torre'}
         />
       </div>
     );
@@ -1326,6 +1754,22 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
                   className="w-full bg-[#070B16] border border-[#1a2744] rounded-lg px-2 py-2 text-white text-sm"
                 />
               </label>
+              <label className="text-[11px] text-slate-400 space-y-1">
+                Recargo VIP / flash (COP)
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={dispatchDraft.vipSurchargeCop ?? 2000}
+                  onChange={(e) =>
+                    setDispatchDraft({
+                      ...dispatchDraft,
+                      vipSurchargeCop: Number(e.target.value),
+                    })
+                  }
+                  className="w-full bg-[#070B16] border border-[#1a2744] rounded-lg px-2 py-2 text-white text-sm"
+                />
+              </label>
               <label className="text-[11px] text-slate-400 space-y-1 flex flex-col">
                 Auto-asignar
                 <button
@@ -1348,26 +1792,43 @@ export const AdminSectionPanels: React.FC<PanelsProps> = ({
             </div>
             <p className="text-[10px] text-slate-500 font-tech">
               Ejemplo 4 km → {formatCOP(dispatchDraft.baseFee + 4 * dispatchDraft.perKmRate)}
+              {' · '}VIP +{formatCOP(dispatchDraft.vipSurchargeCop ?? 2000)}
             </p>
+            {dispatchSaveErr ? (
+              <p className="text-xs text-red-300" role="alert">
+                {dispatchSaveErr}
+              </p>
+            ) : null}
             <button
               type="button"
               disabled={dispatchSaving}
               onClick={async () => {
+                dispatchSavingRef.current = true;
                 setDispatchSaving(true);
+                setDispatchSaveErr(null);
+                setDispatchSaved(false);
                 try {
-                  await saveDispatchSettings({
+                  const saved = await saveDispatchSettings({
                     searchRadiusKm: dispatchDraft.searchRadiusKm,
                     baseFee: dispatchDraft.baseFee,
                     perKmRate: dispatchDraft.perKmRate,
+                    vipSurchargeCop: dispatchDraft.vipSurchargeCop,
                     autoAssignEnabled: dispatchDraft.autoAssignEnabled,
                   });
+                  setDispatchDraft(saved);
                   setDispatchSaved(true);
-                  setTimeout(() => setDispatchSaved(false), 2000);
+                  setTimeout(() => setDispatchSaved(false), 2500);
+                } catch (e) {
+                  console.error('[ajustes] saveDispatchSettings', e);
+                  setDispatchSaveErr(
+                    e instanceof Error ? e.message : 'No se pudo guardar las reglas de despacho',
+                  );
                 } finally {
+                  dispatchSavingRef.current = false;
                   setDispatchSaving(false);
                 }
               }}
-              className="inline-flex items-center gap-2 text-xs font-black px-4 py-2.5 rounded-xl bg-[#2B6CFF] text-white"
+              className="inline-flex items-center gap-2 text-xs font-black px-4 py-2.5 rounded-xl bg-[#2B6CFF] text-white disabled:opacity-60"
             >
               {dispatchSaving ? 'Guardando…' : dispatchSaved ? 'Guardado en Firebase' : 'Guardar reglas de despacho'}
             </button>

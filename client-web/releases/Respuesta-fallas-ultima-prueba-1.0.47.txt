@@ -1,0 +1,107 @@
+DomiClick
+Respuesta a “Fallas y Correcciones última prueba Oct. 31 2026”
+Versión 1.0.47  ·  versionCode 48  ·  31 de octubre de 2026
+
+Este documento responde, en lenguaje sencillo, cada hallazgo de la prueba
+del 31 de octubre. Las correcciones ya están publicadas en la web de
+clientes y en la torre. En el teléfono se ven al instalar el AAB 1.0.47.
+
+
+Qué se corrigió
+
+
+1. Orden cancelada sin alerta visible ni sonora
+Antes: el estado pasaba a Cancelado, pero el cliente no lo notaba a tiempo.
+Ahora: al confirmar la cancelación el cliente recibe aviso inmediato,
+con mensaje claro y alerta sonora. En el seguimiento ve un recuadro
+rojo de Pedido cancelado y puede crear uno nuevo.
+
+
+2. Sin alerta sonora al recoger el pedido
+Antes: el cliente no oía nada cuando el pedido pasaba a Recogido.
+Ahora: al registrar Recogido suena una alerta y llega la notificación,
+con la app abierta o en segundo plano (si el permiso está activo).
+En el seguimiento se ve el aviso “Pedido recogido”.
+
+
+3. Teléfonos de contacto y enlace del chat IA
+Antes: los números no coincidían y el chat no llevaba a soporte.
+Ahora quedan así en web, app y asistente:
+  Soporte y atención / PQR:  312 777 9841  (WhatsApp del chat IA)
+  Soporte comercial:         312 777 6059
+El botón de WhatsApp del asistente abre el 312 777 9841.
+
+
+4. Sin alerta sonora al llegar al destino
+Antes: el cliente no oía nada cuando el repartidor marcaba llegada.
+Ahora: al registrar Llegada al destino suena una alerta y llega
+la notificación. En el seguimiento se ve “El repartidor llegó”
+y se pide tener listo el PIN.
+
+
+5. Foto de entrega sin visibilidad para el usuario
+Antes: la foto se tomaba, pero el cliente no la veía.
+Ahora: la foto queda asociada al pedido. El cliente la ve como
+evidencia de entrega antes de calificar. Si la carga falla,
+el repartidor puede reintentar.
+
+
+6. El pedido no se liberaba después de cancelar
+Antes: al crear otra entrega el sistema decía que aún había un
+pedido activo y mostraba el código cancelado.
+Ahora: al cancelar se cierra el pedido, se libera al motorizado
+y se limpia la caché del teléfono. El código cancelado no bloquea
+una solicitud nueva.
+
+
+7. Depuración de datos de prueba
+La plataforma de producción no se vació en esta entrega, para no
+borrar pedidos reales. Si Central autoriza el reinicio antes de
+operar, se puede hacer en un paso aparte.
+
+
+8. Pedidos pendientes de asignación o de pago, sin alerta en Central
+Antes: la torre no sonaba con fuerza cuando un pedido quedaba
+sin asignar o esperando pago en Wompi.
+Ahora: suena y se ve un aviso hasta resolverlo. Si falta el pago,
+Central lo identifica y puede avisar al cliente. Si la pasarela
+no confirma en 20 minutos, el pedido se cancela solo y el cliente
+recibe el mensaje: el pago no se confirmó a tiempo y puede crear
+uno nuevo.
+
+
+9. Errores de contraste en modo claro
+Antes: textos blancos se perdían sobre fondos claros.
+Ahora: textos, íconos, campos y fondos se leen en modo claro.
+El modo oscuro no cambia.
+
+
+Otros cambios de esta versión
+
+
+Pasarela Wompi (transferencia)
+El cliente elige QR o PSE/tarjeta. La app entrega a Wompi el valor
+del domicilio, la referencia del pedido, el correo y el teléfono.
+Al pagar, Wompi avisa por webhook y el pedido entra a circulación.
+Si pagan por fuera, siguen subiendo el comprobante.
+Si la pasarela no abre, no se usa una llave vacía: se muestra
+un error claro y se puede reintentar.
+
+Favicon e icono de la app
+Web, torre y AAB usan el logo nuevo (cursor azul y flecha naranja).
+
+Eliminar transportista
+En la torre (Flota y Usuarios) hay un botón para eliminar al
+motorizado. Se suelta la moto vinculada y deja de aparecer
+en Central.
+
+
+Cómo probarlo
+- Torre: https://domiclick-ops.web.app  (recargar con Ctrl+F5)
+- Web:   https://gen-lang-client-0954482957.web.app
+- App:   instalar el AAB 1.0.47 (versionCode 48)
+  Archivo: client-web/releases/domiclick-1.0.47.aab
+
+En resumen: las 9 fallas de la prueba del 31 de octubre quedaron
+atendidas en esta versión, más la pasarela, el icono y el botón
+de eliminar transportista.

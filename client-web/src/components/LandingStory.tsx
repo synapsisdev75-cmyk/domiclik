@@ -2,10 +2,13 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { MapPinned, Phone, ShieldCheck } from 'lucide-react';
 import {
   BRAND_TAGLINE,
+  COMMERCIAL_PHONE_DISPLAY,
   OFFICE_ADDRESS_LINE1,
   OFFICE_ADDRESS_LINE2,
   OFFICE_CITY,
+  SUPPORT_PHONE_DISPLAY,
 } from '../lib/companyInfo';
+import { COMMERCIAL_WHATSAPP_URL, PHONE, WHATSAPP_URL } from '../lib/config';
 import { OfficeMap } from './OfficeMap';
 
 function Reveal({
@@ -241,14 +244,33 @@ export function LandingStory({ onCtaClick }: { onCtaClick: () => void }) {
               <p className="flex gap-3">
                 <Phone className="mt-1 h-5 w-5 shrink-0 text-[var(--domi-orange)]" aria-hidden />
                 <span>
-                  <strong className="text-[var(--domi-text)]">Soporte</strong>
+                  <strong className="text-[var(--domi-text)]">Soporte y atención / PQR</strong>
                   <br />
                   <a
                     className="text-[var(--domi-cyan)] underline-offset-4 hover:underline"
-                    href="mailto:soporte@domiclick.com"
+                    href={WHATSAPP_URL}
+                    target="_blank"
+                    rel="noreferrer"
                   >
-                    soporte@domiclick.com
+                    {SUPPORT_PHONE_DISPLAY}
                   </a>
+                  <br />
+                  <a className="text-[var(--domi-cyan)] underline-offset-4 hover:underline" href={`tel:${PHONE}`}>
+                    Llamar {SUPPORT_PHONE_DISPLAY}
+                  </a>
+                  <br />
+                  <span className="mt-2 block">
+                    <strong className="text-[var(--domi-text)]">Soporte comercial</strong>
+                    <br />
+                    <a
+                      className="text-[var(--domi-cyan)] underline-offset-4 hover:underline"
+                      href={COMMERCIAL_WHATSAPP_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {COMMERCIAL_PHONE_DISPLAY}
+                    </a>
+                  </span>
                 </span>
               </p>
             </div>

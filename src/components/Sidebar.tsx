@@ -35,7 +35,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   staffRole = 'admin',
 }) => {
   const allowed = new Set(sidebarSectionsFor(staffRole));
-  const menuItems = ALL_ITEMS.filter((item) => allowed.has(item.id));
+  const menuItems = ALL_ITEMS.filter((item) => allowed.has(item.id)).map((item) =>
+    staffRole === 'secretary' && item.id === 'reportes'
+      ? { ...item, label: 'Descargar' }
+      : item,
+  );
 
   return (
     <aside className="w-20 sm:w-24 ops-chrome border-r flex flex-col items-center py-4 justify-between shrink-0 select-none min-h-screen backdrop-blur-md">

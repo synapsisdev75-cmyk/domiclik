@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import basicSsl from '@vitejs/plugin-basic-ssl';
 import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
@@ -7,7 +8,8 @@ export default defineConfig(({ mode }) => {
   const parentEnv = loadEnv(mode, '..', '');
 
   return {
-    plugins: [react(), tailwindcss()],
+    // HTTPS local: el celular (IP LAN) puede pedir GPS preciso; en http://192.168.x.x el browser lo bloquea.
+    plugins: [react(), tailwindcss(), basicSsl()],
     envDir: '..',
     define: {
       'import.meta.env.VITE_GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(
@@ -21,6 +23,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5174,
       host: true,
+      https: {},
     },
   };
 });

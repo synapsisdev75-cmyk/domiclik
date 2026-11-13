@@ -1,0 +1,5 @@
+DomiClick 1.0.77 (versionCode 78)
+
+- Ubicarme: centra y sigue el GPS en el mapa (estilo Google Maps); al arrastrar se suelta el seguimiento.
+- Gestos de rotación e inclinación del mapa habilitados.
+- Incluye parche LiveLocator (sin cierre por FGS sin permiso) y Optimizar ruta.

@@ -5,9 +5,10 @@ import {
   sendChatMessage,
   deleteChatMessage,
   clearChatMessages,
+  ackChatMessages,
 } from '../../lib/firebase';
 import { alertNewMessage } from '../../lib/alerts';
-import { Send, Trash2, Eraser } from 'lucide-react';
+import { Bike, Check, MapPin, Send, ShieldAlert, TrafficCone, Trash2, Eraser } from 'lucide-react';
 import { DomiChatRadioIcon } from '../ui/CustomIcons';
 
 interface ChatWindowProps {
@@ -18,12 +19,48 @@ interface ChatWindowProps {
   heightClass?: string;
 }
 
-const QUICK_PRESETS = [
-  '🛵 En camino al punto de recogida',
-  '📍 Llegué a la dirección en Villavicencio',
-  '🚦 Demora por tráfico en Av. 40',
-  '✅ Paquete entregado a satisfacción',
-  '⚠️ Necesito confirmación del Despacho',
+const QUICK_PRESETS: {
+  text: string;
+  icon: React.ComponentType<{ className?: string }>;
+  ring: string;
+  glow: string;
+  ink: string;
+}[] = [
+  {
+    text: 'En camino al punto de recogida',
+    icon: Bike,
+    ring: 'border-[#FF5722]',
+    glow: 'shadow-[0_0_8px_rgba(255,87,34,0.85),inset_0_0_8px_rgba(255,87,34,0.28)]',
+    ink: 'text-[#FF8A65]',
+  },
+  {
+    text: 'Llegué a la dirección en Villavicencio',
+    icon: MapPin,
+    ring: 'border-[#E040FB]',
+    glow: 'shadow-[0_0_8px_rgba(224,64,251,0.85),inset_0_0_8px_rgba(224,64,251,0.28)]',
+    ink: 'text-[#F48FB1]',
+  },
+  {
+    text: 'Demora por tráfico en Av. 40',
+    icon: TrafficCone,
+    ring: 'border-[#FFC107]',
+    glow: 'shadow-[0_0_8px_rgba(255,193,7,0.85),inset_0_0_8px_rgba(255,193,7,0.28)]',
+    ink: 'text-[#FFE082]',
+  },
+  {
+    text: 'Paquete entregado a satisfacción',
+    icon: Check,
+    ring: 'border-[#00E676]',
+    glow: 'shadow-[0_0_8px_rgba(0,230,118,0.8),inset_0_0_8px_rgba(0,230,118,0.25)]',
+    ink: 'text-[#69F0AE]',
+  },
+  {
+    text: 'Necesito confirmación del Despacho',
+    icon: ShieldAlert,
+    ring: 'border-[#29B6F6]',
+    glow: 'shadow-[0_0_8px_rgba(41,182,246,0.85),inset_0_0_8px_rgba(41,182,246,0.28)]',
+    ink: 'text-[#81D4FA]',
+  },
 ];
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -63,6 +100,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     });
     return () => unsubscribe();
   }, [chatId, currentRole]);
+
+  useEffect(() => {
+    const viewer = isTower ? 'admin' : 'driver';
+    const other = isTower ? 'driver' : 'admin';
+    const pending = messages.some((msg) => msg.senderRole === other && msg.receipt !== 'seen');
+    if (!pending) return;
+    void ackChatMessages(chatId, viewer, 'seen');
+  }, [messages, chatId, isTower]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -112,7 +157,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   return (
-    <div className={`flex flex-col ${heightClass} bg-[#070A12] border border-[#00F0FF]/30 rounded-2xl overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.8)]`}>
+    <div className={`on-dark flex flex-col ${heightClass} bg-[#070A12] border border-[#00F0FF]/30 rounded-2xl overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.8)]`}>
       <div className="bg-[#0D1322] p-3.5 border-b border-[#1E293B] flex items-center justify-between font-mono">
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -162,7 +207,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-[#050811]/90 font-mono">
+      <div className="min-h-0 flex-1 overflow-y-auto space-y-3 bg-[#050811]/90 p-4 font-mono">
         {messages.length === 0 ? (
           <div className="text-center py-12 px-4">
             <div className="w-12 h-12 rounded-2xl bg-[#0B101D] border border-[#00F0FF]/30 flex items-center justify-center mx-auto mb-3 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
@@ -204,6 +249,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     </span>
                   </div>
                   <p className="whitespace-pre-wrap font-sans text-xs">{msg.text}</p>
+                  {isMe ? <ReceiptMark receipt={msg.receipt} /> : null}
                   {isAdmin && (
                     <button
                       type="button"
@@ -223,17 +269,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="bg-[#0D1322] px-3 py-2 border-t border-[#1E293B] flex items-center gap-1.5 overflow-x-auto text-[11px] font-mono">
-        <span className="text-[10px] text-[#FF5722] font-black shrink-0">RÁPIDOS:</span>
-        {QUICK_PRESETS.map((preset, i) => (
-          <button
-            key={i}
-            onClick={() => handleSendMessage(preset)}
-            className="shrink-0 bg-[#0B101D] hover:bg-[#0052FF]/30 text-slate-300 hover:text-white px-2.5 py-1 rounded-lg border border-[#1E293B] hover:border-[#00F0FF]/50 text-[10px] transition font-sans font-semibold"
-          >
-            {preset}
-          </button>
-        ))}
+      <div className="quick-neon shrink-0 border-t border-[#1E293B] px-2 py-2">
+        <p className="mb-1.5 text-[10px] font-black tracking-wide text-[#FF5722]">RÁPIDOS</p>
+        <div className="grid grid-cols-5 gap-1.5">
+          {QUICK_PRESETS.map((preset) => {
+            const Icon = preset.icon;
+            return (
+              <button
+                key={preset.text}
+                type="button"
+                onClick={() => handleSendMessage(preset.text)}
+                className={`quick-neon__card flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-xl border px-1.5 py-1.5 text-center ${preset.ring} ${preset.glow}`}
+              >
+                <Icon className={`h-4 w-4 shrink-0 ${preset.ink}`} />
+                <span className="text-[10px] font-bold leading-tight text-white">{preset.text}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <form
@@ -265,3 +318,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     </div>
   );
 };
+
+function ReceiptMark({ receipt }: { receipt?: ChatMessage['receipt'] }) {
+  if (receipt === 'seen') {
+    return <p className="mt-1 text-right text-[10px] font-bold text-[#7DF9FF]">✓✓ Visto</p>;
+  }
+  if (receipt === 'delivered') {
+    return <p className="mt-1 text-right text-[10px] font-bold text-white/80">✓✓ Entregado</p>;
+  }
+  return <p className="mt-1 text-right text-[10px] font-bold text-white/55">✓ Enviado</p>;
+}

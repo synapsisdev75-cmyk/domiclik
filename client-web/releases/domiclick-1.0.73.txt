@@ -1,0 +1,6 @@
+DomiClick 1.0.73 (versionCode 74)
+
+- Optimización de ruta unida al aceptar varios pedidos: parte del GPS live del transportista.
+- Orden óptimo de paradas de la más cercana a la más lejana, respetando recogida antes de entrega (si hay una R de por medio, la recoge).
+- El orden se congela mientras el lote no cambie (el GPS no reordena a mitad de camino).
+- Las calles las traza Directions sobre ese orden (sin reordenar waypoints).

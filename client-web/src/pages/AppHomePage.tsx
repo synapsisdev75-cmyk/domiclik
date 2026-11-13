@@ -54,18 +54,20 @@ export function AppHomePage() {
   );
 
   return (
-    <div className="app-screen mx-auto min-h-[100svh] max-w-lg px-4 pb-8 sm:px-6">
+    <div className="app-screen mx-auto min-h-[100svh] px-4 pb-8 sm:px-6">
       <header className="mb-5 flex items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--domi-cyan)]">
             DomiClick
           </p>
-          <p className="mt-0.5 font-display text-lg font-bold text-white">{OFFICE_CITY}</p>
+          <p className="mt-0.5 truncate font-display text-lg font-bold text-[var(--domi-text)]">
+            {OFFICE_CITY}
+          </p>
         </div>
         <Link
           to="/notificaciones"
           aria-label="Notificaciones"
-          className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--domi-border)] bg-[var(--domi-panel)] text-[var(--domi-muted)] transition active:border-[rgba(255,87,34,0.45)] active:text-[var(--domi-orange)]"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--domi-border)] bg-[var(--domi-panel)] text-[var(--domi-muted)] transition active:border-[rgba(255,87,34,0.45)] active:text-[var(--domi-orange)]"
         >
           <Bell className="h-5 w-5" />
         </Link>
@@ -74,10 +76,10 @@ export function AppHomePage() {
       <button
         type="button"
         onClick={() => navigate('/solicitar')}
-        className="mb-5 flex w-full items-center gap-3 rounded-2xl border border-[var(--domi-border)] bg-[rgba(5,8,15,0.65)] px-4 py-3.5 text-left transition active:border-[rgba(255,87,34,0.4)]"
+        className="mb-5 flex w-full items-center gap-3 rounded-2xl border border-[var(--domi-border)] bg-[var(--domi-field-bg)] px-4 py-3.5 text-left shadow-sm transition active:border-[rgba(255,87,34,0.4)]"
       >
         <Search className="h-5 w-5 shrink-0 text-[var(--domi-muted)]" />
-        <span className="text-sm text-[#5f6f8c]">Buscar dirección o lugar…</span>
+        <span className="text-sm text-[var(--domi-placeholder)]">Buscar dirección o lugar…</span>
       </button>
 
       <button
@@ -85,38 +87,38 @@ export function AppHomePage() {
         onClick={() => navigate('/solicitar')}
         className="mb-6 w-full rounded-2xl border border-[rgba(255,87,34,0.35)] bg-gradient-to-br from-[rgba(255,87,34,0.18)] to-[rgba(255,87,34,0.05)] p-5 text-left transition active:brightness-110"
       >
-        <p className="font-display text-lg font-bold text-white">¿Necesitas enviar algo?</p>
-        <p className="mt-1 text-sm text-[var(--domi-muted)]">
-          Nosotros te ayudamos →
-        </p>
+        <p className="font-display text-lg font-bold text-[var(--domi-text)]">¿Necesitas enviar algo?</p>
+        <p className="mt-1 text-sm font-medium text-[var(--domi-muted)]">Nosotros te ayudamos →</p>
       </button>
 
       <section className="mb-8">
         <h2 className="mb-4 font-display text-sm font-semibold text-[var(--domi-muted)]">
           Solicitar entrega
         </h2>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="app-home-cats">
           {CATEGORIES.map(({ id, label, icon: Icon, color, bg }) => (
             <button
               key={id}
               type="button"
               onClick={() => navigate(`/solicitar?tipo=${id}`)}
-              className="flex flex-col items-center gap-2"
+              className="flex flex-col items-center gap-1.5"
             >
               <span
-                className={`flex h-14 w-14 items-center justify-center rounded-full border border-[var(--domi-border)] ${bg} ${color}`}
+                className={`app-home-cats__icon flex items-center justify-center rounded-full border border-[var(--domi-border)] ${bg} ${color}`}
               >
-                <Icon className="h-6 w-6" strokeWidth={1.9} />
+                <Icon className="h-[42%] w-[42%] max-h-7 max-w-7" strokeWidth={1.9} />
               </span>
-              <span className="text-[11px] font-semibold text-[var(--domi-text)]">{label}</span>
+              <span className="w-full truncate text-center text-[10px] font-semibold leading-tight text-[var(--domi-text)] sm:text-xs">
+                {label}
+              </span>
             </button>
           ))}
         </div>
       </section>
 
       <section className="mb-6">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-base font-bold text-white">En curso</h2>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="font-display text-base font-bold text-[var(--domi-text)]">En curso</h2>
           <Link to="/pedidos" className="text-xs font-semibold text-[var(--domi-cyan)]">
             Ver todos
           </Link>
@@ -124,9 +126,10 @@ export function AppHomePage() {
 
         {active.length === 0 ? (
           <div className="glass-panel rounded-2xl px-4 py-5">
-            <p className="text-sm text-[var(--domi-muted)]">
-              No hay pedidos activos. Toca <span className="text-white">Solicitar</span> para el
-              primero; se mantiene aquí hasta la entrega.
+            <p className="text-sm leading-relaxed text-[var(--domi-muted)]">
+              No hay pedidos activos. Toca{' '}
+              <span className="font-bold text-[var(--domi-text)]">Solicitar</span> para el primero;
+              se mantiene aquí hasta la entrega.
             </p>
           </div>
         ) : (
@@ -138,7 +141,9 @@ export function AppHomePage() {
                   className="glass-panel block rounded-2xl border-[rgba(255,87,34,0.3)] px-4 py-3.5 transition active:border-[rgba(0,229,255,0.35)]"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <p className="font-mono text-sm font-bold text-white">{order.trackingCode}</p>
+                    <p className="font-mono text-sm font-bold text-[var(--domi-text)]">
+                      {order.trackingCode}
+                    </p>
                     <span className="shrink-0 text-[11px] font-semibold text-[var(--domi-orange)]">
                       {STATUS_SHORT[order.status] || order.status}
                     </span>
@@ -160,8 +165,8 @@ export function AppHomePage() {
 
       {historyPreview.length > 0 ? (
         <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-display text-base font-bold text-white">Historial</h2>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="font-display text-base font-bold text-[var(--domi-text)]">Historial</h2>
             <Link to="/pedidos" className="text-xs font-semibold text-[var(--domi-cyan)]">
               Ver historial
             </Link>
@@ -174,12 +179,14 @@ export function AppHomePage() {
                   className="glass-panel block rounded-2xl px-4 py-3.5 transition active:border-[rgba(0,229,255,0.35)]"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <p className="font-mono text-sm font-bold text-white">{order.trackingCode}</p>
+                    <p className="font-mono text-sm font-bold text-[var(--domi-text)]">
+                      {order.trackingCode}
+                    </p>
                     <span
                       className={`shrink-0 text-[11px] font-semibold ${
                         order.status === 'delivered'
                           ? 'text-[var(--domi-green)]'
-                          : 'text-red-300'
+                          : 'text-red-500'
                       }`}
                     >
                       {STATUS_SHORT[order.status] || order.status}

@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { CalendarClock, Loader2, Package } from 'lucide-react';
+import { Banknote, CalendarClock, ChevronDown, CreditCard, Loader2, Package, Zap } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { submitOrder } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { uploadPaymentProof } from '../lib/firebase';
+import { findActiveDuplicateOrder, subscribeVipSurcharge } from '../lib/firebase';
+import { openWompiCheckout } from '../lib/wompiCheckout';
 import { rememberRecentOrder } from '../lib/recentOrders';
+import {
+  readPaymentPreference,
+  writePaymentPreference,
+  type SavedPaymentMethod,
+} from '../lib/paymentPreference';
 import {
   estimateRoute,
   estimateRouteWithGoogle,
@@ -14,6 +20,7 @@ import {
 } from '../lib/geo';
 import {
   computeShippingQuote,
+  DEFAULT_VIP_SURCHARGE_COP,
   estimateTravelMinutes,
   formatCOP,
   MIN_SCHEDULE_LEAD_MIN,
@@ -53,8 +60,8 @@ export type OrderFormValues = {
   notes: string;
   scheduledFor: string;
   invoiceNumber: string;
-  paymentMethod: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
-  transferChannel: '' | 'breb' | 'qr';
+  paymentMethod: '' | 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
+  transferChannel: '' | 'breb' | 'qr' | 'pasarela';
   paymentNote: string;
   couponCode: string;
 };
@@ -70,7 +77,7 @@ const INITIAL: OrderFormValues = {
   notes: '',
   scheduledFor: '',
   invoiceNumber: '',
-  paymentMethod: 'efectivo',
+  paymentMethod: '',
   transferChannel: '',
   paymentNote: '',
   couponCode: '',
@@ -93,10 +100,13 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
   const [values, setValues] = useState<OrderFormValues>(() => {
     const { min } = scheduleWindow();
     const tipo = searchParams.get('tipo') || '';
+    const savedPay = readPaymentPreference();
     return {
       ...INITIAL,
       scheduledFor: toDatetimeLocalValue(min),
       description: TIPO_DESC[tipo] || '',
+      paymentMethod: savedPay || '',
+      transferChannel: savedPay === 'transferencia' ? 'pasarela' : '',
     };
   });
   const [pickup, setPickup] = useState<LatLng | null>(null);
@@ -115,11 +125,16 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
   const [pinDragging, setPinDragging] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateCode, setDuplicateCode] = useState<string | null>(null);
+  const [allowDuplicate, setAllowDuplicate] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [acceptedMarketing, setAcceptedMarketing] = useState(false);
-  const [proofFile, setProofFile] = useState<File | null>(null);
   /** now = entrega inmediata (ETA por ruta). later = fecha/hora elegida por el usuario. */
   const [scheduleMode, setScheduleMode] = useState<'now' | 'later'>('now');
+  const [payOpen, setPayOpen] = useState(false);
+  const [payPulse, setPayPulse] = useState(0);
+  const [isVip, setIsVip] = useState(false);
+  const [vipSurchargeCop, setVipSurchargeCop] = useState(DEFAULT_VIP_SURCHARGE_COP);
 
   const routeGenRef = useRef(0);
   const googleRetryRef = useRef<number | null>(null);
@@ -131,10 +146,22 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
     return parseDatetimeLocal(values.scheduledFor) || new Date();
   }, [values.scheduledFor]);
 
+  useEffect(() => subscribeVipSurcharge(setVipSurchargeCop), []);
+
+  useEffect(() => {
+    const vipParam = searchParams.get('vip');
+    if (vipParam === '1' || vipParam === 'true' || vipParam === 'flash') {
+      setIsVip(true);
+    }
+  }, [searchParams]);
+
   const quote: ShippingQuote | null = useMemo(() => {
     if (!pickup || !delivery || routeKm <= 0) return null;
-    return computeShippingQuote(routeKm, whenForPrice);
-  }, [pickup, delivery, routeKm, whenForPrice]);
+    return computeShippingQuote(routeKm, whenForPrice, {
+      isVip,
+      vipSurchargeCop,
+    });
+  }, [pickup, delivery, routeKm, whenForPrice, isVip, vipSurchargeCop]);
 
   /** Minutos ETA (viaje + buffer) según distancia actual. */
   const scheduleLeadMin = useMemo(() => {
@@ -371,6 +398,29 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       setError('Espera a que se calcule la tarifa de la ruta.');
       return;
     }
+    if (values.paymentMethod !== 'efectivo' && values.paymentMethod !== 'transferencia') {
+      setPayOpen(true);
+      setError('Elige cómo quieres pagar: contraentrega o en línea.');
+      return;
+    }
+
+    if (!allowDuplicate) {
+      const dup = await findActiveDuplicateOrder({
+        uid: profile.uid,
+        email: profile.email,
+        pickupAddress: values.pickupAddress,
+        deliveryAddress: values.deliveryAddress,
+        pickup,
+        delivery,
+      });
+      if (dup) {
+        setDuplicateCode(dup.trackingCode);
+        setError(
+          `Ya tienes un pedido activo ${dup.trackingCode} con la misma recogida y entrega. Confirma si quieres crear otro.`,
+        );
+        return;
+      }
+    }
 
     const leadForSubmit =
       scheduleMode === 'now' ? scheduleLeadMin : MIN_SCHEDULE_LEAD_MIN;
@@ -409,23 +459,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       if (!phone) {
         throw new Error('El teléfono es obligatorio');
       }
-      if (values.paymentMethod === 'transferencia') {
-        if (values.transferChannel !== 'breb' && values.transferChannel !== 'qr') {
-          throw new Error('Elige Bre-B o QR');
-        }
-        if (!proofFile) {
-          throw new Error('Sube la foto del comprobante');
-        }
-        if (proofFile.size > 25 * 1024 * 1024) {
-          throw new Error('El comprobante no puede superar 25 MB');
-        }
-      }
       await setPhone(phone);
-
-      let paymentProofUrl: string | undefined;
-      if (values.paymentMethod === 'transferencia' && proofFile) {
-        paymentProofUrl = await uploadPaymentProof(proofFile);
-      }
 
       const result = await submitOrder({
         customerName: values.customerName.trim(),
@@ -450,16 +484,13 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
         pricingBand: quote.band,
         pricePerKm: quote.pricePerKm,
         peakMultiplier: quote.multiplier,
+        isVip,
+        vipSurchargeCop: isVip ? vipSurchargeCop : 0,
         scheduledFor: scheduled.toISOString(),
         invoiceNumber: undefined,
         invoicePhotoUrl: undefined,
         paymentMethod: values.paymentMethod,
-        transferChannel:
-          values.paymentMethod === 'transferencia' &&
-          (values.transferChannel === 'breb' || values.transferChannel === 'qr')
-            ? values.transferChannel
-            : undefined,
-        paymentProofUrl,
+        transferChannel: values.paymentMethod === 'transferencia' ? 'pasarela' : undefined,
         paymentNote: values.paymentNote.trim() || undefined,
         couponCode: undefined,
       });
@@ -469,6 +500,10 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       }
 
       const { min } = scheduleWindow(new Date(), MIN_SCHEDULE_LEAD_MIN);
+      const savedPay = readPaymentPreference() || (values.paymentMethod as SavedPaymentMethod | '');
+      if (savedPay === 'efectivo' || savedPay === 'transferencia') {
+        writePaymentPreference(savedPay);
+      }
       setValues({
         ...INITIAL,
         customerName: profile.displayName || '',
@@ -476,12 +511,14 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
         customerPhone: phone,
         scheduledFor: toDatetimeLocalValue(min),
         invoiceNumber: '',
-        paymentMethod: 'efectivo',
-        transferChannel: '',
+        paymentMethod: savedPay || '',
+        transferChannel: savedPay === 'transferencia' ? 'pasarela' : '',
         paymentNote: '',
         couponCode: '',
       });
-      setProofFile(null);
+      setPayOpen(false);
+      setPayPulse(0);
+      setIsVip(false);
       setPickup(null);
       setDelivery(null);
       setPickupParts({ ...EMPTY_ADDRESS_PARTS });
@@ -497,7 +534,18 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
         status: result.status || 'pending',
         createdAt: new Date().toISOString(),
       });
+      // Pedido ya está en Firestore → torre lo ve al instante. No bloquear UI en Wompi.
       onSuccess(result);
+      if (values.paymentMethod === 'transferencia') {
+        void openWompiCheckout(result.orderId).catch((payErr) => {
+          console.warn('[OrderForm] Wompi checkout', payErr);
+          setError(
+            payErr instanceof Error
+              ? `${payErr.message} El pedido ya llegó a Central; paga desde el seguimiento.`
+              : 'El pedido ya llegó a Central. Abre el pago desde el seguimiento.',
+          );
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al enviar la solicitud');
     } finally {
@@ -777,97 +825,141 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
             )}
           </div>
 
-          <label className="block sm:col-span-2">
+          <div className="block sm:col-span-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isVip}
+              className={`flex w-full items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition ${
+                isVip
+                  ? 'border-emerald-400 bg-emerald-500/15'
+                  : 'border-[var(--domi-border)] bg-[var(--domi-field-bg)]'
+              }`}
+              onClick={() => setIsVip((v) => !v)}
+            >
+              <Zap
+                className={`h-5 w-5 shrink-0 ${isVip ? 'text-emerald-300' : 'text-[var(--domi-muted)]'}`}
+              />
+              <span className="flex-1">
+                <span className="block text-sm font-bold text-[var(--domi-text)]">
+                  Pedido VIP · prioridad 1
+                </span>
+                <span className="mt-0.5 block text-[11px] text-[var(--domi-muted)]">
+                  Se asigna primero al libre · +{formatCOP(vipSurchargeCop)} al recorrido
+                </span>
+              </span>
+              <span
+                className={`rounded-md border px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${
+                  isVip
+                    ? 'border-emerald-400/55 bg-emerald-500/20 text-emerald-300'
+                    : 'border-transparent bg-[rgba(255,255,255,0.06)] text-[var(--domi-muted)]'
+                }`}
+              >
+                {isVip ? 'VIP' : 'Opcional'}
+              </span>
+            </button>
+          </div>
+
+          <div className="block sm:col-span-2">
             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
               Forma de pago *
             </span>
-            <select
-              className="field-input"
-              required
-              value={values.paymentMethod}
-              onChange={(e) =>
-                update('paymentMethod', e.target.value as OrderFormValues['paymentMethod'])
-              }
+            <button
+              type="button"
+              aria-expanded={payOpen}
+              aria-controls="pay-choices"
+              className="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--domi-border)] bg-[var(--domi-field-bg)] px-4 py-3 text-left transition hover:border-[var(--domi-orange)]"
+              onClick={() => setPayOpen((open) => !open)}
             >
-              <option value="efectivo">Efectivo al recibir</option>
-              <option value="transferencia">Transferencia</option>
-              <option value="ya_pagado">Ya pagado en el negocio</option>
-              <option value="otro">Otro</option>
-            </select>
-          </label>
-
-          {values.paymentMethod === 'transferencia' ? (
-            <div className="block space-y-3 sm:col-span-2 rounded-xl border border-[rgba(0,229,255,0.25)] bg-[rgba(0,229,255,0.05)] p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-                Tipo de transferencia *
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {(
-                  [
-                    ['breb', 'Bre-B'],
-                    ['qr', 'QR'],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => update('transferChannel', id)}
-                    className={`rounded-xl border px-3 py-2.5 text-sm font-bold ${
-                      values.transferChannel === id
-                        ? 'border-[var(--domi-cyan)] bg-[rgba(0,229,255,0.16)] text-white'
-                        : 'border-[var(--domi-line)] text-[var(--domi-muted)]'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-                  Foto del comprobante *
+              <span>
+                <span className="block text-sm font-bold text-[var(--domi-text)]">
+                  ¿Cómo quieres pagar?
                 </span>
-                <input
-                  className="field-input file:mr-3 file:rounded-md file:border-0 file:bg-[rgba(0,229,255,0.15)] file:px-3 file:py-1 file:text-xs file:font-semibold file:text-[var(--domi-text)]"
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  required
-                  onChange={(e) => setProofFile(e.target.files?.[0] || null)}
-                />
-                {proofFile ? (
-                  <span className="mt-1 block text-[11px] text-[var(--domi-muted)]">{proofFile.name}</span>
-                ) : null}
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-                  Referencia (opcional)
+                <span className="mt-0.5 block text-[11px] text-[var(--domi-muted)]">
+                  {values.paymentMethod === 'efectivo'
+                    ? 'Contraentrega: pagas en efectivo al recibir'
+                    : values.paymentMethod === 'transferencia'
+                      ? 'En línea: QR, PSE o tarjeta en Wompi'
+                      : 'Elige una opción'}
                 </span>
-                <input
-                  className="field-input"
-                  value={values.paymentNote}
-                  onChange={(e) => update('paymentNote', e.target.value)}
-                  placeholder="Banco, número de referencia…"
-                />
-              </label>
-              <p className="text-[11px] leading-snug text-[var(--domi-muted)]">
-                Central revisa el comprobante. El pedido entra en circulación cuando la secretaría o el administrador den luz verde.
-              </p>
-            </div>
-          ) : null}
-
-          {values.paymentMethod === 'otro' ? (
-            <label className="block sm:col-span-2">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
-                Detalle de pago
               </span>
-              <input
-                className="field-input"
-                value={values.paymentNote}
-                onChange={(e) => update('paymentNote', e.target.value)}
-                placeholder="Banco, referencia…"
+              <ChevronDown
+                className={`h-5 w-5 shrink-0 text-[var(--domi-orange)] transition-transform duration-300 ${
+                  payOpen ? 'rotate-180' : ''
+                }`}
               />
-            </label>
-          ) : null}
+            </button>
+            {payOpen ? (
+              <div
+                id="pay-choices"
+                className="pay-choice-grid mt-3 grid gap-2 sm:grid-cols-2"
+                role="radiogroup"
+                aria-label="Cómo quieres pagar"
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={values.paymentMethod === 'efectivo'}
+                  className={`pay-choice-btn flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left ${
+                    values.paymentMethod === 'efectivo'
+                      ? 'is-on border-[var(--domi-orange)] bg-[rgba(255,87,34,0.12)]'
+                      : 'border-[var(--domi-border)] bg-[var(--domi-field-bg)]'
+                  }`}
+                  key={values.paymentMethod === 'efectivo' ? `cash-${payPulse}` : 'cash'}
+                  onClick={() => {
+                    const method: SavedPaymentMethod = 'efectivo';
+                    update('paymentMethod', method);
+                    update('transferChannel', '');
+                    writePaymentPreference(method);
+                    setPayPulse((n) => n + 1);
+                  }}
+                >
+                  <Banknote className="h-5 w-5 shrink-0 text-[var(--domi-orange)]" />
+                  <span>
+                    <span className="block text-sm font-bold text-[var(--domi-text)]">
+                      Pago contraentrega
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-[var(--domi-muted)]">
+                      Pagas en efectivo al recibir
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={values.paymentMethod === 'transferencia'}
+                  className={`pay-choice-btn flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left ${
+                    values.paymentMethod === 'transferencia'
+                      ? 'is-on-cyan border-[var(--domi-cyan)] bg-[rgba(0,229,255,0.1)]'
+                      : 'border-[var(--domi-border)] bg-[var(--domi-field-bg)]'
+                  }`}
+                  key={values.paymentMethod === 'transferencia' ? `online-${payPulse}` : 'online'}
+                  onClick={() => {
+                    const method: SavedPaymentMethod = 'transferencia';
+                    update('paymentMethod', method);
+                    update('transferChannel', 'pasarela');
+                    writePaymentPreference(method);
+                    setPayPulse((n) => n + 1);
+                  }}
+                >
+                  <CreditCard className="h-5 w-5 shrink-0 text-[var(--domi-cyan)]" />
+                  <span>
+                    <span className="block text-sm font-bold text-[var(--domi-text)]">
+                      Pago en línea
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-[var(--domi-muted)]">
+                      QR, PSE o tarjeta en Wompi
+                    </span>
+                  </span>
+                </button>
+              </div>
+            ) : null}
+            {values.paymentMethod === 'efectivo' || values.paymentMethod === 'transferencia' ? (
+              <p className="mt-2 text-[11px] leading-snug text-[var(--domi-muted)]">
+                Preferencia guardada en este dispositivo hasta borrar la caché.
+              </p>
+            ) : null}
+          </div>
 
           <label className="block sm:col-span-2">
             <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-[var(--domi-muted)]">
@@ -887,7 +979,7 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
       {(!wizard || step === 'details') && quote ? (
         <div className="rounded-xl border border-[rgba(0,230,118,0.3)] bg-[rgba(0,230,118,0.08)] px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--domi-green)]">
-            Cotización
+            Cotización{isVip ? ' · VIP' : ''}
           </p>
           <p className="mt-1 font-display text-2xl font-extrabold text-[var(--domi-text)]">
             {formatCOP(quote.shippingFee)}
@@ -897,17 +989,33 @@ export function OrderForm({ onSuccess, wizard = false }: OrderFormProps) {
             {scheduleMode === 'now'
               ? ` · llegada estimada ~${quote.durationMin} min`
               : ' · entrega programada'}
+            {isVip && quote.vipSurchargeCop
+              ? ` · incluye VIP ${formatCOP(quote.vipSurchargeCop)}`
+              : ''}
           </p>
         </div>
       ) : null}
 
       {error ? (
-        <p
+        <div
           className="form-alert-error rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm"
           role="alert"
         >
-          {error}
-        </p>
+          <p>{error}</p>
+          {duplicateCode ? (
+            <button
+              type="button"
+              className="mt-2 text-xs font-bold text-[var(--domi-orange)] underline"
+              onClick={() => {
+                setAllowDuplicate(true);
+                setDuplicateCode(null);
+                setError(null);
+              }}
+            >
+              Sí, crear otro pedido además de {duplicateCode}
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {(!wizard || step === 'details') && (

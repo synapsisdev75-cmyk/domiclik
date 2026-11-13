@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from 'react';
-import { MotorizadoDriver } from '../../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ChatRoom, MotorizadoDriver } from '../../types';
 import { ChatWindow } from '../chat/ChatWindow';
 import { DomiHelmetIcon } from '../ui/CustomIcons';
-import { MessageSquare, Search, Radio } from 'lucide-react';
+import { Search } from 'lucide-react';
+import { FleetMailState, unreadForDriver } from './FleetMailState';
 import type { StaffRole } from '../../types';
+import { subscribeChatRooms, subscribeMessages, ackChatMessages } from '../../lib/firebase';
 
 interface Props {
   drivers: MotorizadoDriver[];
@@ -18,6 +20,7 @@ export const SecretaryChatsPanel: React.FC<Props> = ({
 }) => {
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [rooms, setRooms] = useState<ChatRoom[]>([]);
 
   const approved = useMemo(
     () =>
@@ -35,8 +38,24 @@ export const SecretaryChatsPanel: React.FC<Props> = ({
     [drivers, search]
   );
 
-  const selected =
-    approved.find((d) => d.id === selectedId) || approved[0] || null;
+  const selected = approved.find((d) => d.id === selectedId) || null;
+
+  useEffect(() => subscribeChatRooms(setRooms), []);
+
+  const approvedIds = approved.map((driver) => driver.id).join('|');
+
+  useEffect(() => {
+    if (!approvedIds) return;
+    const unsubs = approvedIds.split('|').map((driverId) =>
+      subscribeMessages(`chat_${driverId}`, (msgs) => {
+        const pending = msgs.some(
+          (msg) => msg.senderRole === 'driver' && msg.receipt !== 'delivered' && msg.receipt !== 'seen',
+        );
+        if (pending) void ackChatMessages(`chat_${driverId}`, 'admin', 'delivered');
+      }),
+    );
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [approvedIds]);
 
   const chatRole = staffRole === 'secretary' ? 'secretary' : 'admin';
   const senderLabel =
@@ -49,7 +68,11 @@ export const SecretaryChatsPanel: React.FC<Props> = ({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#142340] pb-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-black text-white font-display italic tracking-tight flex items-center gap-2">
-            <Radio className="w-5 h-5 text-[#00E5FF]" />
+            <FleetMailState
+              count={drivers
+                .filter((drv) => drv.status === 'approved')
+                .reduce((sum, drv) => sum + unreadForDriver(rooms, drv.id), 0)}
+            />
             Radios y chats
           </h2>
           <p className="text-xs text-slate-400 font-tech mt-1">
@@ -118,7 +141,7 @@ export const SecretaryChatsPanel: React.FC<Props> = ({
                         })()}
                       </div>
                     </div>
-                    <MessageSquare className="w-4 h-4 text-[#00E5FF] shrink-0" />
+                    <FleetMailState count={unreadForDriver(rooms, drv.id)} />
                   </button>
                 );
               })
@@ -136,7 +159,7 @@ export const SecretaryChatsPanel: React.FC<Props> = ({
             />
           ) : (
             <div className="h-full min-h-[520px] rounded-2xl border border-dashed border-[#1a2744] bg-[#0A1020]/50 flex flex-col items-center justify-center text-center px-6">
-              <MessageSquare className="w-10 h-10 text-slate-600 mb-3" />
+              <FleetMailState count={0} />
               <p className="font-bold text-white">Selecciona un transportista</p>
               <p className="text-xs text-slate-400 mt-1 max-w-sm">
                 Abre el canal de radio para atender solicitudes y coordinar entregas con la flota.

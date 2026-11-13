@@ -1,0 +1,5 @@
+DomiClick 1.0.70 (versionCode 71) — APK de prueba
+
+- Aviso al transportista si 2+ recogidas o 2+ entregas quedan en el mismo lugar (radio interno 150 m).
+- Texto visible + pitido corto (sin mostrar metros).
+- Incluye preferencia de pago, confirmar R/E en menú +, R1–E3, menú ocultable.

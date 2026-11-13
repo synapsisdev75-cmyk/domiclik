@@ -1,0 +1,5 @@
+DomiClick 1.0.68 (versionCode 69)
+
+- Menú + del mapa: Confirmar recogida y Confirmar entrega / PIN.
+- Mapa con R1–R3 y E1–E3 visibles cuando hay hasta 3 pedidos.
+- Incluye menú ocultable, silencio al asignar y contraste/safe-area previos.

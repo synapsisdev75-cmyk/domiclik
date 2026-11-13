@@ -36,6 +36,7 @@ import {
   deleteObject,
 } from 'firebase/storage';
 import { getFirebaseConfig } from './firebaseConfig';
+import { compressImageFile, withUploadTimeout } from './imageUpload';
 import {
   MotorizadoDriver,
   DeliveryOrder,
@@ -209,6 +210,24 @@ export async function uploadOrderPhoto(file: File, orderId: string): Promise<str
   return getDownloadURL(storageRef);
 }
 
+async function uploadDriverImage(
+  file: File,
+  path: string,
+  label: string,
+): Promise<string> {
+  const compressed = await compressImageFile(file, {
+    name: file.name || 'foto.jpg',
+    maxEdge: 1280,
+    quality: 0.72,
+  });
+  const storageRef = ref(storage, path);
+  await withUploadTimeout(
+    uploadBytes(storageRef, compressed, { contentType: 'image/jpeg' }),
+    label,
+  );
+  return withUploadTimeout(getDownloadURL(storageRef), `${label} (URL)`);
+}
+
 /** Foto del odómetro al entrar / salir (uso empresa). */
 export async function uploadOdometerPhoto(
   file: File,
@@ -217,9 +236,7 @@ export async function uploadOdometerPhoto(
 ): Promise<string> {
   const safeName = (file.name || 'odometro.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `drivers/${driverId}/odometer/${punchType}_${Date.now()}_${safeName}`;
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
-  return getDownloadURL(storageRef);
+  return uploadDriverImage(file, path, 'Subida odómetro');
 }
 
 /** Selfie de llegada a sede (desbloquea el PIN del día en la tablet). */
@@ -229,9 +246,7 @@ export async function uploadAttendanceFacePhoto(
 ): Promise<string> {
   const safeName = (file.name || 'rostro.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `drivers/${driverId}/attendance-face/${Date.now()}_${safeName}`;
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
-  return getDownloadURL(storageRef);
+  return uploadDriverImage(file, path, 'Subida foto de asistencia');
 }
 
 /** Placa de la moto (celular vía QR del kiosco). */
@@ -242,9 +257,7 @@ export async function uploadPlatePhoto(
 ): Promise<string> {
   const safeName = (file.name || 'placa.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `drivers/${driverId}/plate/${punchType}_${Date.now()}_${safeName}`;
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
-  return getDownloadURL(storageRef);
+  return uploadDriverImage(file, path, 'Subida foto de placa');
 }
 
 export async function uploadBrandLogoFromUrl(localPath: string, storagePath: string): Promise<string> {
@@ -464,35 +477,66 @@ function subscribeCollection<T>(
 export function subscribeDrivers(callback: (drivers: MotorizadoDriver[]) => void) {
   return subscribeCollection<MotorizadoDriver>(
     'drivers',
-    (id, data) => ({ id, ...data }) as MotorizadoDriver,
-    null,
+    (id, data) => {
+      const statusRaw = String(data.status || '')
+        .trim()
+        .toLowerCase();
+      return {
+        id,
+        ...data,
+        // Fuerza string estable para que la torre filtre pendientes en vivo
+        status: (statusRaw || 'pending') as MotorizadoDriver['status'],
+        email: String(data.email || '')
+          .trim()
+          .toLowerCase(),
+      } as MotorizadoDriver;
+    },
+    (a, b) =>
+      String(b.updatedAt || b.createdAt || '').localeCompare(
+        String(a.updatedAt || a.createdAt || ''),
+      ),
     (drivers) => {
+      // Solo lectura: el historial GPS se escribe en updateDriverLocation.
+      // Escribir aquí desde torre/kiosco quemaba la cuota free de Firestore.
       callback(drivers);
-      for (const driver of drivers) {
-        void saveDriverLocationHistory(driver).catch(() => undefined);
-      }
-    }
+    },
   );
 }
 
-const historySeen = new Map<string, string>();
+const historySeen = new Map<string, { at: string; lat: number; lng: number; savedAt: number }>();
 
-/** Copia el GPS del motorizado al historial del día. El id es la hora del punto, así no se duplica. */
+function movedKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function historyDay(data: { dateKey?: string; timestamp?: string }) {
+  const fromStamp = data.timestamp ? toDateKey(data.timestamp) : '';
+  return fromStamp || (data.dateKey ? String(data.dateKey).slice(0, 10) : '');
+}
+
+/** Copia el GPS del motorizado al historial del día. Cada tramo distinto queda guardado. */
 export async function saveDriverLocationHistory(driver: MotorizadoDriver) {
   const loc = driver.location;
   if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return;
   if (loc.lat === 0 && loc.lng === 0) return;
-  const at = loc.updatedAt || '';
-  if (!at) return;
-  const seen = historySeen.get(driver.id);
-  if (seen === at) return;
-  historySeen.set(driver.id, at);
+  const at = loc.updatedAt || new Date().toISOString();
+  const prev = historySeen.get(driver.id);
+  const moved = !prev || movedKm(prev, loc) >= 0.05;
+  // Heartbeat cada 2 min (antes 20s) — menos escrituras en cuota free
+  const heartbeat = !prev || Date.now() - prev.savedAt >= 120_000;
+  if (prev && !moved && !heartbeat) return;
+  historySeen.set(driver.id, { at, lat: loc.lat, lng: loc.lng, savedAt: Date.now() });
   const speedMps = loc.speedMps;
   const speed =
     speedMps != null && Number.isFinite(speedMps) && speedMps >= 0
       ? Math.round(speedMps * 3.6)
       : undefined;
-  const pointId = `loc_${driver.id}_${at.replace(/[^\d]/g, '')}`;
+  const pointId = `loc_${driver.id}_${at.replace(/[^\d]/g, '')}_${Math.round(loc.lat * 10000)}_${Math.round(loc.lng * 10000)}`;
   await setDoc(
     doc(db, 'location_history', pointId),
     omitUndefined({
@@ -519,17 +563,42 @@ export async function createDriverPreregistration(
   >,
   preferredId?: string
 ): Promise<string> {
-  const newId = preferredId || 'drv_' + Date.now();
-  const fullDriver: MotorizadoDriver = {
-    ...driverData,
-    id: newId,
-    status: 'pending',
-    isActive: false,
-    rating: 5.0,
-    completedDeliveries: 0,
-    createdAt: new Date().toISOString(),
-  };
-  await setDoc(doc(db, 'drivers', newId), fullDriver);
+  const email = String(driverData.email || '').trim().toLowerCase();
+  let newId = preferredId || 'drv_' + Date.now();
+  if (email) {
+    const existingSnap = await getDocs(
+      query(collection(db, 'drivers'), where('email', '==', email), limit(5)),
+    );
+    const approved = existingSnap.docs.find(
+      (d) => String(d.data().status || '').trim().toLowerCase() === 'approved',
+    );
+    if (approved) {
+      throw new Error('Este correo ya está aprobado como transportista.');
+    }
+    const reusable = existingSnap.docs.find((d) => {
+      const st = String(d.data().status || '').trim().toLowerCase();
+      return st === 'pending' || st === 'rejected' || st === '' || st === 'pendiente';
+    });
+    if (reusable) newId = reusable.id;
+  }
+  const now = new Date().toISOString();
+  await setDoc(
+    doc(db, 'drivers', newId),
+    {
+      ...driverData,
+      email,
+      id: newId,
+      status: 'pending',
+      isActive: false,
+      rating: 5.0,
+      completedDeliveries: 0,
+      applicationKind: 'transportista',
+      pendingAt: now,
+      createdAt: now,
+      updatedAt: now,
+    },
+    { merge: true },
+  );
   return newId;
 }
 
@@ -539,12 +608,65 @@ export async function updateDriverApprovalStatus(
   adminName: string,
   reason?: string
 ) {
-  await updateDoc(doc(db, 'drivers', driverId), {
+  const ref = doc(db, 'drivers', driverId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    throw new Error('No encontré esa solicitud de transportista.');
+  }
+  const prev = snap.data() as MotorizadoDriver;
+  const email = String(prev?.email || '').trim().toLowerCase();
+  if (status === 'approved' && !email) {
+    throw new Error(
+      'Esa solicitud no tiene correo. Pide al transportista registrarse de nuevo con Google.',
+    );
+  }
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = {
     status,
-    approvedBy: adminName,
-    rejectionReason: reason || '',
-    updatedAt: new Date().toISOString(),
-  });
+    approvedBy: adminName || 'torre',
+    rejectionReason: status === 'rejected' ? String(reason || '').trim() : '',
+    updatedAt: now,
+  };
+  if (email) patch.email = email;
+  if (status === 'approved') {
+    patch.approvedAt = now;
+    patch.rejectionReason = '';
+    patch.isActive = false;
+  }
+  if (status === 'rejected') {
+    patch.rejectedAt = now;
+    patch.isActive = false;
+  }
+  // merge: evita fallos si el doc tiene campos parciales / tipados distintos
+  await setDoc(ref, patch, { merge: true });
+
+  if ((status === 'approved' || status === 'rejected') && email) {
+    try {
+      const twins = await getDocs(
+        query(collection(db, 'drivers'), where('email', '==', email), limit(8)),
+      );
+      await Promise.all(
+        twins.docs
+          .filter((d) => {
+            if (d.id === driverId) return false;
+            const st = String(d.data().status || '')
+              .trim()
+              .toLowerCase();
+            return st === 'pending' || st === 'pendiente' || st === '';
+          })
+          .map(async (d) => {
+            try {
+              await setDoc(d.ref, patch, { merge: true });
+            } catch (err) {
+              console.warn('[approve] twin sync', d.id, err);
+            }
+          }),
+      );
+    } catch (err) {
+      // La decisión principal ya quedó; no tumbar la UI por gemelos
+      console.warn('[approve] no se sincronizaron solicitudes gemelas', err);
+    }
+  }
 }
 
 export async function toggleDriverActiveState(
@@ -633,7 +755,7 @@ export async function fetchDriverLocationHistory(
   const points: DriverLocationHistoryPoint[] = [];
   querySnapshot.forEach((docSnap) => {
     const data = docSnap.data() as DriverLocationHistoryPoint;
-    const day = data.dateKey || (data.timestamp ? toDateKey(data.timestamp) : '');
+    const day = historyDay(data);
     if (day === targetDate) {
       points.push({ id: docSnap.id, ...data });
     }
@@ -655,7 +777,7 @@ export function subscribeDriverLocationHistory(
       const points: DriverLocationHistoryPoint[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as DriverLocationHistoryPoint;
-        const day = data.dateKey || (data.timestamp ? toDateKey(data.timestamp) : '');
+        const day = historyDay(data);
         if (day === dateKey) {
           points.push({ id: docSnap.id, ...data });
         }
@@ -739,6 +861,7 @@ export async function confirmDeliveryWithCode(
   const now = new Date().toISOString();
   await updateDoc(doc(db, 'orders', orderId), {
     status: 'delivered',
+    deliveryConfirmCode: '',
     deliveryConfirmedAt: now,
     updatedAt: now,
     timeline: arrayUnion({
@@ -748,6 +871,14 @@ export async function confirmDeliveryWithCode(
       byRole: 'driver',
       note: 'PIN validado',
     }),
+  });
+  const { notifyCustomerOrderEvent } = await import('./orderNotify');
+  await notifyCustomerOrderEvent({
+    orderId,
+    trackingCode: order.trackingCode,
+    customerUid: order.customerUid,
+    customerEmail: order.customerEmail,
+    kind: 'delivered',
   });
 
   if (order.assignedDriverId) {
@@ -786,16 +917,51 @@ export async function updateOrderStatus(
   if (driverId !== undefined) updateData.assignedDriverId = driverId;
   if (driverName !== undefined) updateData.assignedDriverName = driverName;
   await updateDoc(doc(db, 'orders', orderId), updateData);
+
+  const snap = await getDoc(doc(db, 'orders', orderId));
+  if (snap.exists()) {
+    const order = snap.data() as DeliveryOrder;
+    const { notifyCustomerOrderEvent, notifyKindForStatus } = await import('./orderNotify');
+    const kind = notifyKindForStatus(status);
+    if (kind) {
+      await notifyCustomerOrderEvent({
+        orderId,
+        trackingCode: order.trackingCode,
+        customerUid: order.customerUid,
+        customerEmail: order.customerEmail,
+        kind,
+      });
+    }
+  }
 }
 
 /** Luz verde de comprobante: el pedido pending queda listo para circulación. */
 export async function approveTransferPayment(orderId: string, reviewer: string): Promise<void> {
   const now = new Date().toISOString();
-  await updateDoc(doc(db, 'orders', orderId), {
+  const ref = doc(db, 'orders', orderId);
+  const snap = await getDoc(ref);
+  const order = (snap.data() || {}) as DeliveryOrder;
+  const amount = Math.round(Number(order.shippingFee || order.routePrice || 0));
+  const alreadyPaid = Number(order.amountPaid || 0) > 0;
+  await updateDoc(ref, {
     paymentReviewStatus: 'approved',
     paymentReviewedAt: now,
     paymentReviewedBy: reviewer || 'torre',
     updatedAt: now,
+    ...(alreadyPaid
+      ? {}
+      : {
+          amountPaid: amount,
+          payments: arrayUnion({
+            id: `proof_${Date.now()}`,
+            at: now,
+            amount,
+            method: 'transferencia' as const,
+            channel: order.transferChannel || 'breb',
+            status: 'approved' as const,
+            source: 'comprobante' as const,
+          }),
+        }),
     timeline: arrayUnion({
       at: now,
       to: 'pending',
@@ -820,12 +986,57 @@ export async function updateOrderFields(
   await updateDoc(doc(db, 'orders', orderId), payload);
 }
 
-/** Solo admin (UI): cancela el pedido sin borrarlo. */
+/** Solo admin (UI): cancela el pedido sin borrarlo y avisa al cliente una sola vez. */
 export async function cancelOrder(orderId: string): Promise<void> {
-  await updateDoc(doc(db, 'orders', orderId), {
+  const ref = doc(db, 'orders', orderId);
+  const snap = await getDoc(ref);
+  const now = new Date().toISOString();
+  const prev = snap.exists() ? (snap.data() as DeliveryOrder) : null;
+  await updateDoc(ref, {
     status: 'cancelled',
-    updatedAt: new Date().toISOString(),
+    assignedDriverId: null,
+    assignedDriverName: '',
+    assignedDriverPhone: '',
+    deliveryConfirmCode: '',
+    updatedAt: now,
+    cancelledAt: now,
+    cancelledBy: 'admin',
+    timeline: arrayUnion({
+      at: now,
+      from: prev?.status,
+      to: 'cancelled',
+      byRole: 'admin',
+      note: 'Cancelado por torre · motorizado liberado',
+    }),
   });
+  if (prev && prev.status !== 'cancelled') {
+    const { notifyCustomerOrderEvent } = await import('./orderNotify');
+    await notifyCustomerOrderEvent({
+      orderId,
+      trackingCode: prev.trackingCode,
+      customerUid: prev.customerUid,
+      customerEmail: prev.customerEmail,
+      kind: 'cancelled',
+    });
+  }
+}
+
+/** Torre: borra el perfil del transportista y suelta la moto de flota. */
+export async function deleteDriverFromTower(driverId: string): Promise<void> {
+  const id = String(driverId || '').trim();
+  if (!id) throw new Error('Falta el transportista.');
+  const ref = doc(db, 'drivers', id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('No encontré ese transportista.');
+  const prev = snap.data() as MotorizadoDriver;
+  if (prev.assignedMotoId) {
+    try {
+      await unlinkFleetMoto(prev.assignedMotoId);
+    } catch (err) {
+      console.warn('[torre] no se pudo desvincular la moto', err);
+    }
+  }
+  await deleteDoc(ref);
 }
 
 /** Solo admin (UI): elimina el pedido de Firestore. */
@@ -894,26 +1105,68 @@ export async function sendChatMessage(msgData: Omit<ChatMessage, 'id' | 'timesta
     ...msgData,
     id: 'msg_' + Date.now(),
     timestamp: new Date().toISOString(),
+    receipt: 'sent',
   };
   await setDoc(doc(db, 'messages', newMsg.id), newMsg);
   const driverId =
     msgData.senderRole === 'driver'
       ? msgData.senderId
       : msgData.chatId.replace(/^chat_/, '');
+  const fromDriver = msgData.senderRole === 'driver';
   await setDoc(
     doc(db, 'chats', msgData.chatId),
     {
       id: msgData.chatId,
       driverId,
-      driverName: msgData.senderRole === 'driver' ? msgData.senderName : undefined,
+      driverName: fromDriver ? msgData.senderName : undefined,
       lastMessage: msgData.text,
       lastMessageTime: newMsg.timestamp,
-      unreadByAdmin: msgData.senderRole === 'driver',
-      unreadByDriver: msgData.senderRole === 'admin',
+      unreadByAdmin: fromDriver,
+      unreadByDriver: !fromDriver,
+      ...(fromDriver
+        ? { unreadCountAdmin: increment(1) }
+        : { unreadCountDriver: increment(1) }),
     },
     { merge: true }
   );
   return newMsg;
+}
+
+/** El otro lado confirma entrega o visto. No baja un visto a entregado. */
+export async function ackChatMessages(
+  chatId: string,
+  viewer: 'admin' | 'driver',
+  level: 'delivered' | 'seen',
+) {
+  const snap = await getDocs(query(collection(db, 'messages'), where('chatId', '==', chatId)));
+  const now = new Date().toISOString();
+  const other = viewer === 'admin' ? 'driver' : 'admin';
+  const batch = writeBatch(db);
+  let changed = 0;
+  snap.forEach((docSnap) => {
+    const data = docSnap.data() as ChatMessage;
+    if (data.senderRole !== other) return;
+    const cur = data.receipt;
+    if (cur === 'seen') return;
+    if (level === 'delivered' && cur === 'delivered') return;
+    const patch: Record<string, string> = { receipt: level };
+    if (!data.deliveredAt) patch.deliveredAt = now;
+    if (level === 'seen') patch.seenAt = now;
+    batch.update(docSnap.ref, patch);
+    changed += 1;
+  });
+  if (level === 'seen') {
+    batch.set(
+      doc(db, 'chats', chatId),
+      viewer === 'admin'
+        ? { unreadByAdmin: false, unreadCountAdmin: 0 }
+        : { unreadByDriver: false, unreadCountDriver: 0 },
+      { merge: true },
+    );
+    changed += 1;
+  }
+  if (!changed) return;
+  await batch.commit();
 }
 
 /** Solo admin (UI): borra un mensaje de chat. */
@@ -1097,13 +1350,46 @@ export function subscribePayrollSettings(callback: (settings: PayrollSettings) =
   );
 }
 
+function finiteNumber(value: unknown, fallback: number, min = 0): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, n);
+}
+
+async function withWriteTimeout<T>(promise: Promise<T>, ms = 18000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new Error(
+                'La red tardó demasiado al guardar. Revisa la conexión e intenta de nuevo.',
+              ),
+            ),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function savePayrollSettings(settings: Omit<PayrollSettings, 'id' | 'updatedAt'>) {
   const full: PayrollSettings = {
     ...settings,
     id: 'payroll',
     updatedAt: new Date().toISOString(),
   };
-  await setDoc(doc(db, 'settings', 'payroll'), full, { merge: true });
+  try {
+    await enableNetwork(db);
+  } catch {
+    /* ignore */
+  }
+  await withWriteTimeout(setDoc(doc(db, 'settings', 'payroll'), full, { merge: true }));
   return full;
 }
 
@@ -1137,15 +1423,26 @@ export async function fetchDispatchSettings(): Promise<DispatchSettings> {
   };
 }
 
+/** Guarda radio, tarifas, VIP y auto-asignar. Sanea NaN y no deja colgado el botón. */
 export async function saveDispatchSettings(
   settings: Omit<DispatchSettings, 'id' | 'updatedAt'>
 ) {
+  const d = DEFAULT_DISPATCH_SETTINGS;
   const full: DispatchSettings = {
-    ...settings,
     id: 'dispatch',
+    searchRadiusKm: finiteNumber(settings.searchRadiusKm, d.searchRadiusKm, 1),
+    baseFee: Math.round(finiteNumber(settings.baseFee, d.baseFee)),
+    perKmRate: Math.round(finiteNumber(settings.perKmRate, d.perKmRate)),
+    vipSurchargeCop: Math.round(finiteNumber(settings.vipSurchargeCop, d.vipSurchargeCop)),
+    autoAssignEnabled: Boolean(settings.autoAssignEnabled),
     updatedAt: new Date().toISOString(),
   };
-  await setDoc(doc(db, 'settings', 'dispatch'), full, { merge: true });
+  try {
+    await enableNetwork(db);
+  } catch {
+    /* ignore */
+  }
+  await withWriteTimeout(setDoc(doc(db, 'settings', 'dispatch'), full, { merge: true }));
   return full;
 }
 
@@ -1179,13 +1476,33 @@ export async function saveFleetSettings(
   settings: Omit<FleetSettings, 'id' | 'updatedAt'>
 ): Promise<FleetSettings> {
   const existing = await fetchFleetSettings();
+  const merged = { ...existing, ...settings };
   const full: FleetSettings = {
-    ...existing,
-    ...settings,
+    ...merged,
     id: 'fleet',
+    fuelPricePerGallonCop: Math.round(
+      finiteNumber(merged.fuelPricePerGallonCop, DEFAULT_FLEET_SETTINGS.fuelPricePerGallonCop),
+    ),
+    defaultKmPerGallon: finiteNumber(
+      merged.defaultKmPerGallon,
+      DEFAULT_FLEET_SETTINGS.defaultKmPerGallon,
+      1,
+    ),
+    oilChangeIntervalKm: Math.round(
+      finiteNumber(merged.oilChangeIntervalKm, DEFAULT_FLEET_SETTINGS.oilChangeIntervalKm, 1),
+    ),
+    oilChangeIntervalDays: Math.round(
+      finiteNumber(merged.oilChangeIntervalDays, DEFAULT_FLEET_SETTINGS.oilChangeIntervalDays, 1),
+    ),
+    customVehicles: Array.isArray(merged.customVehicles) ? merged.customVehicles : [],
     updatedAt: new Date().toISOString(),
   };
-  await setDoc(doc(db, 'settings', 'fleet'), full, { merge: true });
+  try {
+    await enableNetwork(db);
+  } catch {
+    /* ignore */
+  }
+  await withWriteTimeout(setDoc(doc(db, 'settings', 'fleet'), full, { merge: true }));
   return full;
 }
 
@@ -1843,13 +2160,30 @@ export async function recordAttendancePunch(params: {
     // Entrada → disponible para asignación; salida → cabina OFF
     isActive: params.type === 'in',
     updatedAt: at,
-  });
+  }) as Record<string, unknown>;
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    driverPatch.location = {
+      lat,
+      lng,
+      heading: 0,
+      addressName: params.type === 'in' ? 'Entrada al turno' : 'Salida del turno',
+      neighborhood: 'Villavicencio',
+      updatedAt: at,
+    };
+  }
   await updateDoc(doc(db, 'drivers', params.driverId), driverPatch);
 
   if (params.type === 'in') {
-    void assignPendingOrdersAfterClockIn().catch((err) => {
-      console.warn('[dispatch] entrada', err);
-    });
+    void (async () => {
+      for (const wait of [400, 2500, 8000]) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        try {
+          await assignPendingOrdersAfterClockIn();
+        } catch (err) {
+          console.warn('[dispatch] entrada', err);
+        }
+      }
+    })();
   }
 
   if (params.odometerKm) {
@@ -2108,6 +2442,47 @@ async function listAdminsOnce(): Promise<AdminAccount[]> {
 }
 
 /** Login/registro como admin: primer admin se auto-activa; los demás quedan pendientes. */
+/** Solicitudes pendientes de admin/secretaría caducan a los 20 minutos sin respuesta. */
+export const STAFF_REQUEST_TTL_MS = 20 * 60 * 1000;
+
+export function staffRequestRemainingMs(
+  acc: Pick<AdminAccount, 'status' | 'requestedAt'>,
+  now = Date.now(),
+): number {
+  if (acc.status !== 'pending') return 0;
+  const started = Date.parse(String(acc.requestedAt || ''));
+  if (!Number.isFinite(started)) return 0;
+  return Math.max(0, STAFF_REQUEST_TTL_MS - (now - started));
+}
+
+export function isStaffRequestExpired(
+  acc: Pick<AdminAccount, 'status' | 'requestedAt'>,
+  now = Date.now(),
+): boolean {
+  if (acc.status !== 'pending') return false;
+  if (!acc.requestedAt) return true;
+  return staffRequestRemainingMs(acc, now) <= 0;
+}
+
+/** Borra por completo solicitudes pending sin respuesta en 20 minutos. */
+export async function purgeExpiredStaffRequests(
+  admins: AdminAccount[],
+  now = Date.now(),
+): Promise<number> {
+  const expired = admins.filter((a) => isStaffRequestExpired(a, now));
+  if (!expired.length) return 0;
+  await Promise.all(
+    expired.map(async (a) => {
+      try {
+        await deleteDoc(doc(db, 'admins', a.id));
+      } catch (err) {
+        console.warn('[admin] no se pudo borrar solicitud caducada', a.id, err);
+      }
+    }),
+  );
+  return expired.length;
+}
+
 export async function requestAdminAccess(params: {
   email: string;
   uid?: string;

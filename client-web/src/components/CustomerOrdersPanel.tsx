@@ -8,7 +8,7 @@ import {
   subscribeCustomerOrders,
   type CustomerOrderSummary,
 } from '../lib/firebase';
-import { listRecentOrdersLocal, type RecentOrderLocal } from '../lib/recentOrders';
+import { forgetRecentOrder, listActiveRecentOrders, type RecentOrderLocal } from '../lib/recentOrders';
 import { useAuth } from '../lib/auth';
 
 const STATUS_SHORT: Record<string, string> = {
@@ -67,7 +67,7 @@ export function CustomerOrdersPanel({ highlightCode, className = '' }: Props) {
 
   // Respaldo: códigos guardados en este dispositivo + refresco de estado
   useEffect(() => {
-    const locals = listRecentOrdersLocal();
+    const locals = listActiveRecentOrders();
     if (!locals.length) {
       setLocalExtras([]);
       return;
@@ -85,6 +85,10 @@ export function CustomerOrdersPanel({ highlightCode, className = '' }: Props) {
         try {
           const live = await findOrderByTrackingCode(m.trackingCode);
           if (live) {
+            if (!isCustomerOrderActive(live.status)) {
+              forgetRecentOrder(live.trackingCode);
+              continue;
+            }
             resolved.push({
               orderId: live.orderId,
               trackingCode: live.trackingCode,
@@ -203,6 +207,11 @@ export function CustomerOrdersPanel({ highlightCode, className = '' }: Props) {
                     {o.deliveryAddress ? (
                       <p className="mt-1 line-clamp-1 text-xs text-[var(--domi-muted)]">
                         {o.deliveryAddress}
+                      </p>
+                    ) : null}
+                    {o.deliveryConfirmCode ? (
+                      <p className="mt-1 font-mono text-[11px] font-bold tracking-[0.22em] text-[var(--domi-orange)]">
+                        PIN {o.deliveryConfirmCode}
                       </p>
                     ) : null}
                   </Link>

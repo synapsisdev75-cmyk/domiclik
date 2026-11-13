@@ -9,14 +9,20 @@ import {
   Loader2,
   LogOut,
   MapPin,
-  Moon,
-  Sun,
   User,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { EmailAuthForm } from '../components/EmailAuthForm';
-import { getCurrentTheme, THEME_CHANGE_EVENT, toggleTheme, type ThemeMode } from '../lib/theme';
+import { ThemeToggle } from '../components/ThemeToggle';
+import { getCurrentTheme, THEME_CHANGE_EVENT, type ThemeMode } from '../lib/theme';
+import {
+  clearPaymentPreference,
+  paymentPreferenceLabel,
+  readPaymentPreference,
+  writePaymentPreference,
+  type SavedPaymentMethod,
+} from '../lib/paymentPreference';
 
 type MenuItem = {
   label: string;
@@ -27,7 +33,6 @@ type MenuItem = {
 
 const MENU: MenuItem[] = [
   { label: 'Mis direcciones', icon: MapPin, action: 'soon' },
-  { label: 'Métodos de pago', icon: CreditCard, action: 'soon' },
   { label: 'Notificaciones', icon: Bell, action: 'link', to: '/notificaciones' },
   { label: 'Ayuda', icon: HelpCircle, action: 'link', to: '/ayuda' },
   { label: 'Términos y Condiciones', icon: FileText, action: 'external', to: '/terms.html' },
@@ -52,27 +57,76 @@ function AppearanceControl() {
   const light = mode === 'light';
 
   return (
-    <button
-      type="button"
-      onClick={() => setMode(toggleTheme())}
-      className="flex w-full items-center gap-3 px-4 py-3.5 text-left text-[var(--domi-text)]"
-      aria-label={light ? 'Activar modo oscuro' : 'Activar modo claro'}
-    >
-      {light ? (
-        <Sun className="h-5 w-5 shrink-0 text-[var(--domi-orange)]" aria-hidden />
-      ) : (
-        <Moon className="h-5 w-5 shrink-0 text-[var(--domi-cyan)]" aria-hidden />
-      )}
+    <div className="flex w-full items-center gap-3 px-4 py-3.5 text-left text-[var(--domi-text)]">
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-semibold">Apariencia</span>
         <span className="block text-xs text-[var(--domi-muted)]">
           {light ? 'Modo claro' : 'Modo oscuro'}
         </span>
       </span>
-      <span className="rounded-full border border-[var(--domi-border)] bg-[var(--domi-surface)] px-2.5 py-1 text-[11px] font-bold text-[var(--domi-text)]">
-        {light ? 'Oscuro' : 'Claro'}
-      </span>
-    </button>
+      <ThemeToggle />
+    </div>
+  );
+}
+
+function PaymentPreferenceControl() {
+  const [method, setMethod] = useState<SavedPaymentMethod | ''>(() => readPaymentPreference());
+
+  function choose(next: SavedPaymentMethod) {
+    writePaymentPreference(next);
+    setMethod(next);
+  }
+
+  function clear() {
+    clearPaymentPreference();
+    setMethod('');
+  }
+
+  return (
+    <div className="px-4 py-3.5 text-[var(--domi-text)]">
+      <div className="mb-2.5 flex items-start gap-3">
+        <CreditCard className="mt-0.5 h-5 w-5 shrink-0 text-[var(--domi-muted)]" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold">Preferencia de pago</span>
+          <span className="block text-xs text-[var(--domi-muted)]">
+            {paymentPreferenceLabel(method)}. Se guarda en este dispositivo hasta borrar la caché.
+          </span>
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => choose('efectivo')}
+          className={`rounded-xl border px-3 py-2 text-left text-[11px] font-bold ${
+            method === 'efectivo'
+              ? 'border-[var(--domi-orange)] bg-[rgba(255,87,34,0.12)] text-[var(--domi-orange)]'
+              : 'border-[var(--domi-border)] text-[var(--domi-muted)]'
+          }`}
+        >
+          Contraentrega
+        </button>
+        <button
+          type="button"
+          onClick={() => choose('transferencia')}
+          className={`rounded-xl border px-3 py-2 text-left text-[11px] font-bold ${
+            method === 'transferencia'
+              ? 'border-[var(--domi-cyan)] bg-[rgba(0,229,255,0.1)] text-[var(--domi-cyan)]'
+              : 'border-[var(--domi-border)] text-[var(--domi-muted)]'
+          }`}
+        >
+          En línea
+        </button>
+      </div>
+      {method ? (
+        <button
+          type="button"
+          onClick={clear}
+          className="mt-2 text-[10px] font-semibold text-[var(--domi-muted)] underline"
+        >
+          Quitar preferencia
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -240,6 +294,8 @@ export function ProfilePage() {
 
       <nav className="mt-8 overflow-hidden rounded-2xl border border-[var(--domi-border)] bg-[var(--domi-panel)]">
         <AppearanceControl />
+        <div className="border-t border-[var(--domi-border)]" />
+        <PaymentPreferenceControl />
         <div className="border-t border-[var(--domi-border)]" />
         {MENU.map((item, idx) => {
           const Icon = item.icon;

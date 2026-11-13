@@ -1,0 +1,6 @@
+DomiClick 1.0.71 (versionCode 72) — APK de prueba cliente
+
+- Header bajo la barra de estado / cámara (safe area Android más fuerte).
+- Menú inferior: 5 iconos visibles y alineados en pantallas angostas.
+- Chat flotante movido a la izquierda para no tapar Perfil.
+- Categorías Comida/Paquetes/Compras/Otros responsivas.

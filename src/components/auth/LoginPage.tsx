@@ -40,13 +40,11 @@ interface LoginPageProps {
 
 type LoginRole = 'admin' | 'secretary' | 'driver' | 'pending_driver';
 
-function readLoginRoleFromUrl(): LoginRole {
-  if (typeof window === 'undefined') return 'admin';
+function readLoginRoleFromUrl(): LoginRole | null {
+  if (typeof window === 'undefined') return null;
   const role = new URLSearchParams(window.location.search).get('role');
-  if (role === 'driver' || role === 'pending_driver' || role === 'admin' || role === 'secretary') {
-    return role;
-  }
-  return 'admin';
+  if (role === 'driver' || role === 'pending_driver') return role;
+  return null;
 }
 
 function isDriverEntryFromLanding() {
@@ -200,7 +198,7 @@ function VillavicencioGpsBackdrop() {
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const driverEntry = isDriverEntryFromLanding();
-  const [role, setRole] = useState<LoginRole>(() => readLoginRoleFromUrl());
+  const [role, setRole] = useState<LoginRole | null>(() => readLoginRoleFromUrl());
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -242,9 +240,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         const user = await completeGoogleSignInFromRedirect();
         if (cancelled) return;
         if (user?.email) {
-          const saved = (readLoginRole() as LoginRole) || role;
-          clearAuthQueryParams();
-          onLoginSuccess(user.email, saved);
+          const saved = ((readLoginRole() as LoginRole | null) || role);
+          if (saved) {
+            clearAuthQueryParams();
+            onLoginSuccess(user.email, saved);
+          }
           return;
         }
       } catch (err: unknown) {
@@ -256,7 +256,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         }
       }
 
-      if (!cancelled && shouldAutoGoogle() && !isGoogleOAuthReturn()) {
+      if (!cancelled && shouldAutoGoogle() && !isGoogleOAuthReturn() && role) {
         clearAuthQueryParams();
         saveLoginRole(role);
         setGoogleBusy(true);
@@ -281,6 +281,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setLoading(true);
     setAuthError('');
     setInfoMsg('');
+
+    if (!role) {
+      setAuthError('Elige Administrador o Secretaría.');
+      setLoading(false);
+      return;
+    }
 
     try {
       if (isRegisterMode) {
@@ -326,6 +332,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   };
 
   const handleGoogleSignIn = async () => {
+    if (!role) {
+      setAuthError('Elige Administrador o Secretaría.');
+      return;
+    }
     setGoogleBusy(true);
     setAuthError('');
     setInfoMsg('');
@@ -536,11 +546,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   <button
                     key={tab.id}
                     type="button"
-                    onClick={() => setRole(tab.id)}
-                    className={`flex items-center justify-center gap-1 sm:gap-1.5 py-2.5 px-1 rounded-xl text-[10px] sm:text-[12px] font-semibold transition-all duration-200 ${
+                    onClick={() => {
+                      setRole(tab.id);
+                      setAuthError('');
+                    }}
+                    className={`flex items-center justify-center gap-1 sm:gap-1.5 py-2.5 px-1 rounded-xl text-[10px] sm:text-[12px] font-semibold transition-colors duration-200 ${
                       active
-                        ? 'bg-[#2B6CFF] text-white shadow-[0_8px_20px_rgba(43,108,255,0.28)]'
-                        : 'text-slate-500 hover:text-slate-200'
+                        ? 'login-role-selected bg-[#2B6CFF]/20 text-white'
+                        : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
                     {tab.icon}
@@ -549,13 +562,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 );
               })}
             </div>
-            {role === 'admin' && (
-              <p className="-mt-5 mb-5 text-[11px] text-slate-500 leading-relaxed">
-                {isRegisterMode
-                  ? 'Al registrarte como administrador, el primer usuario se activa solo. Los siguientes requieren aprobación en Usuarios.'
-                  : 'El primer administrador se activa solo. Después, otro admin activo debe autorizarte en Usuarios.'}
-              </p>
-            )}
             {role === 'secretary' && (
               <p className="-mt-5 mb-5 text-[11px] text-slate-500 leading-relaxed">
                 {isRegisterMode
@@ -595,13 +601,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               </svg>
               {isRegisterMode ? 'Registrarse con Google' : 'Continuar con Google'}
             </button>
-            {role === 'admin' ? (
-              <p className="-mt-3 mb-5 text-[10px] text-slate-500 leading-relaxed text-center">
-                iPhone: deja abierta la pestaña de Google hasta terminar. Si vuelve aquí sin
-                entrar, usa correo y contraseña o pulsa Google otra vez (Safari sin modo
-                privado).
-              </p>
-            ) : null}
 
             <div className="relative mb-5">
               <div className="absolute inset-0 flex items-center">

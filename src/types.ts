@@ -139,12 +139,24 @@ export interface SalesInboundOrderPayload {
   notes?: string;
 }
 
+export type OrderPayment = {
+  id: string;
+  at: string;
+  amount: number;
+  method: 'transferencia';
+  channel?: 'pasarela' | 'breb' | 'qr';
+  status: 'approved';
+  source: 'wompi' | 'comprobante';
+  transactionId?: string;
+};
+
 export interface DeliveryOrder {
   id: string;
   trackingCode: string;
   customerName: string;
   customerPhone: string;
   customerEmail?: string;
+  customerUid?: string;
   /** Foto de perfil / selfie del cliente al solicitar */
   customerPhotoURL?: string;
   pickupAddress: string;
@@ -166,6 +178,10 @@ export interface DeliveryOrder {
   declaredValue: number;
   /** Precio del recorrido — solo visible al administrador */
   shippingFee: number;
+  /** Pedido flash / VIP con prioridad y recargo. */
+  isVip?: boolean;
+  /** Recargo VIP cobrado al cliente (COP). */
+  vipSurchargeCop?: number;
   /** Copia explícita del precio calculado (admin-only en UI) */
   routePrice?: number;
   routeDistanceKm?: number;
@@ -179,11 +195,19 @@ export interface DeliveryOrder {
   assignedDriverName: string | null;
   assignedDriverPhone?: string | null;
   notes?: string;
-  /** Forma de pago informada por el cliente (sin pasarela). */
+  /** Forma de pago informada por el cliente. */
   paymentMethod?: 'efectivo' | 'transferencia' | 'ya_pagado' | 'otro';
-  /** Bre-B o QR cuando el pago es transferencia. */
-  transferChannel?: 'breb' | 'qr';
-  /** Foto del comprobante de transferencia. */
+  /** Comprobante por fuera (breb) o pasarela Wompi. */
+  transferChannel?: 'breb' | 'qr' | 'pasarela';
+  paymentGateway?: 'wompi';
+  paymentGatewayStatus?: string;
+  paymentReference?: string;
+  paymentCheckoutUrl?: string;
+  paymentTransactionId?: string;
+  /** Pagos de transferencia confirmados, sumados al pedido. */
+  payments?: OrderPayment[];
+  amountPaid?: number;
+  /** Foto del comprobante si pagó por fuera. */
   paymentProofUrl?: string;
   /** pending_review = no circula hasta luz verde de torre. */
   paymentReviewStatus?: 'pending_review' | 'approved';
@@ -211,6 +235,11 @@ export interface DeliveryOrder {
    */
   deliveryConfirmCode?: string;
   deliveryConfirmedAt?: string;
+  /** Foto de evidencia al entregar. */
+  deliveryProofUrl?: string;
+  cancelledAt?: string;
+  /** Criterio de auto-asignación aplicado (más cercano al pickup). */
+  dispatchCriterion?: string;
   /** Entrega programada (ISO). Hasta 15 días desde la solicitud. */
   scheduledFor?: string;
   pricingBand?: 'peak' | 'normal';
@@ -241,6 +270,8 @@ export interface DispatchSettings {
   searchRadiusKm: number;
   baseFee: number;
   perKmRate: number;
+  /** Recargo pedido VIP / flash (COP), configurable en torre. */
+  vipSurchargeCop: number;
   autoAssignEnabled: boolean;
   updatedAt: string;
 }
@@ -511,6 +542,10 @@ export interface ChatMessage {
   senderRole: 'admin' | 'driver';
   text: string;
   timestamp: string;
+  /** enviado → entregado al otro lado → visto al abrir el radio */
+  receipt?: 'sent' | 'delivered' | 'seen';
+  deliveredAt?: string;
+  seenAt?: string;
 }
 
 export interface ChatRoom {
@@ -523,6 +558,8 @@ export interface ChatRoom {
   lastMessageTime: string;
   unreadByAdmin: boolean;
   unreadByDriver: boolean;
+  unreadCountAdmin?: number;
+  unreadCountDriver?: number;
 }
 
 /** Incidencia operativa (retraso, cliente ausente, etc.). Solo admin resuelve. */

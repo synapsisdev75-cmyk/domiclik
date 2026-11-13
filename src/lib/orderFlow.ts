@@ -20,6 +20,28 @@ export function isPaymentOnHold(order: { paymentReviewStatus?: string } | null |
   return order?.paymentReviewStatus === 'pending_review';
 }
 
+export function orderTransferPaid(order: {
+  amountPaid?: number;
+  payments?: Array<{ amount?: number; status?: string }>;
+} | null | undefined): number {
+  if (typeof order?.amountPaid === 'number' && order.amountPaid > 0) return order.amountPaid;
+  return (order?.payments || [])
+    .filter((p) => !p.status || p.status === 'approved')
+    .reduce((sum, p) => sum + Math.round(Number(p.amount || 0)), 0);
+}
+
+export function paymentMethodLabel(order: {
+  paymentMethod?: string;
+  transferChannel?: string;
+} | null | undefined): string {
+  const method = String(order?.paymentMethod || '');
+  if (method === 'transferencia' || order?.transferChannel === 'pasarela') return 'Pago en línea';
+  if (method === 'efectivo') return 'Contraentrega';
+  if (method === 'ya_pagado') return 'Ya pagado en el negocio';
+  if (method === 'otro') return 'Otro';
+  return '';
+}
+
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   pending: 'Pendiente de gestión',
   assigned: 'Asignado',

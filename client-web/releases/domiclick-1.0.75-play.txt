@@ -1,0 +1,7 @@
+Mejoramos tu experiencia de entrega en DomiClick.
+
+• Nueva función Optimizar ruta: con varios pedidos, un toque reorganiza el recorrido de la más cercana a la más lejana, recogiendo lo que quede de camino.
+• El mapa del transportista se ve más fluido y estable, con menos saltos raros de ubicación.
+• Las rutas unidas (hasta 3 pedidos) se planean pensando en el trayecto real por calles, para llegar más rápido y ordenado.
+
+Actualiza y sigue entregando con DomiClick: excelencia a un click de ti.

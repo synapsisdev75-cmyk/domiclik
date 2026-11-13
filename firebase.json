@@ -49,6 +49,14 @@
           "function": "googleOAuthToken"
         },
         {
+          "source": "/api/wompi-checkout",
+          "function": "createWompiCheckout"
+        },
+        {
+          "source": "/api/wompi-webhook",
+          "function": "wompiWebhook"
+        },
+        {
           "source": "/privacy.html",
           "destination": "/privacy.html"
         },
@@ -115,6 +123,14 @@
         {
           "source": "/api/google-oauth-token",
           "function": "googleOAuthToken"
+        },
+        {
+          "source": "/api/wompi-checkout",
+          "function": "createWompiCheckout"
+        },
+        {
+          "source": "/api/wompi-webhook",
+          "function": "wompiWebhook"
         },
         {
           "source": "**",

@@ -1,15 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, KeyRound, Loader2, MessageCircle, PackageSearch, Phone, RefreshCw } from 'lucide-react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, Loader2, MessageCircle, PackageSearch, Phone, RefreshCw } from 'lucide-react';
 import type { TrackingStatus } from '../contracts/salesIngest';
 import { BrandLogo } from '../components/BrandLogo';
 import { LiveTripMap } from '../components/LiveTripMap';
 import { RatingForm } from '../components/RatingForm';
+import { DeliveryPinCard } from '../components/DeliveryPinCard';
 import { subscribeOrderTracking, type PublicOrderTracking } from '../lib/firebase';
+import { PaymentReturnBanner } from '../components/PaymentReturnBanner';
 import { useAuth } from '../lib/auth';
 import { pushForStatus } from '../lib/brandCopy';
 import { CustomerOrdersPanel } from '../components/CustomerOrdersPanel';
-import { rememberRecentOrder } from '../lib/recentOrders';
+import { forgetRecentOrder, rememberRecentOrder } from '../lib/recentOrders';
+import { DeliveryProofCard, OrderLifecycleNotice } from '../components/OrderLifecycleNotice';
 
 const STATUS_LABEL: Record<TrackingStatus, string> = {
   pending: 'Pendiente de asignación',
@@ -53,6 +56,8 @@ function stepIndex(status: TrackingStatus): number {
 
 export function AppTrackingPage() {
   const { code } = useParams<{ code?: string }>();
+  const [searchParams] = useSearchParams();
+  const returningPay = searchParams.get('pago') === '1';
   const navigate = useNavigate();
   const { profile, signIn, loading: authLoading } = useAuth();
   const [lookup, setLookup] = useState(code?.toUpperCase() || '');
@@ -86,13 +91,17 @@ export function AppTrackingPage() {
       }
       setData(res);
       setError(null);
-      rememberRecentOrder({
-        trackingCode: res.trackingCode,
-        orderId: res.orderId,
-        deliveryAddress: res.deliveryAddress,
-        status: res.status,
-        createdAt: res.createdAt || new Date().toISOString(),
-      });
+      if (res.status === 'cancelled' || res.status === 'canceled' || res.status === 'cancelado') {
+        forgetRecentOrder(res.trackingCode);
+      } else {
+        rememberRecentOrder({
+          trackingCode: res.trackingCode,
+          orderId: res.orderId,
+          deliveryAddress: res.deliveryAddress,
+          status: res.status,
+          createdAt: res.createdAt || new Date().toISOString(),
+        });
+      }
     });
     return () => unsub();
   }, [code, profile, authLoading, refreshToken]);
@@ -114,7 +123,7 @@ export function AppTrackingPage() {
   const phone = data?.assignedDriverPhone?.replace(/\D/g, '') || '';
 
   return (
-    <div className="app-screen mx-auto min-h-[100svh] max-w-lg px-4 pb-8">
+    <div className="app-screen mx-auto min-h-[100svh] px-4 pb-8">
       <header className="mb-4 flex items-center justify-between gap-3">
         <Link to="/" aria-label="Inicio" className="inline-flex items-center gap-2">
           <BrandLogo variant="optimized" height={32} />
@@ -169,18 +178,15 @@ export function AppTrackingPage() {
           <div className="flex items-center justify-between gap-2">
             <p className="font-mono text-lg font-bold tracking-wider text-white">{data.trackingCode}</p>
             <span className={`text-xs font-bold ${STATUS_COLOR[status]}`}>
-              {data.paymentReviewStatus === 'pending_review'
-                ? 'Comprobante en revisión'
+              {data.paymentReviewStatus === 'pending_review' && data.transferChannel === 'pasarela'
+                ? 'Esperando pago'
                 : STATUS_LABEL[status]}
             </span>
           </div>
-          {data.paymentReviewStatus === 'pending_review' ? (
-            <div className="rounded-2xl border border-emerald-500/35 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-              Central está revisando tu transferencia. Aún no hay Domiclick asignado.
-            </div>
-          ) : null}
+          <PaymentReturnBanner data={data} returning={returningPay} />
+          <OrderLifecycleNotice order={data} />
 
-          {push ? (
+          {push && status !== 'cancelled' ? (
             <div className="rounded-2xl border border-[rgba(43,108,255,0.35)] bg-[rgba(43,108,255,0.08)] px-4 py-3">
               <p className="font-bold text-white">{push.title}</p>
               <p className="mt-1 text-sm text-[var(--domi-muted)]">{push.body}</p>
@@ -289,17 +295,7 @@ export function AppTrackingPage() {
             </div>
           ) : null}
 
-          {data.deliveryConfirmCode && status !== 'delivered' && status !== 'cancelled' ? (
-            <div className="rounded-2xl border border-[rgba(255,87,34,0.35)] bg-[rgba(255,87,34,0.08)] px-4 py-4 text-center">
-              <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--domi-orange)]">
-                <KeyRound className="h-3.5 w-3.5" aria-hidden />
-                PIN de entrega
-              </p>
-              <p className="font-mono mt-2 text-3xl font-bold tracking-[0.35em] text-white">
-                {data.deliveryConfirmCode}
-              </p>
-            </div>
-          ) : null}
+          <DeliveryPinCard code={data.deliveryConfirmCode} status={status} sticky />
 
           <button
             type="button"
@@ -310,6 +306,7 @@ export function AppTrackingPage() {
             Actualizar
           </button>
 
+          <DeliveryProofCard url={data.deliveryProofUrl} />
           <RatingForm order={data} onRated={() => setRefreshToken((n) => n + 1)} />
         </div>
       ) : null}

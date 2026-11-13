@@ -1,0 +1,4 @@
+DomiClick 1.0.72 (versionCode 73) — APK de prueba
+
+- Aviso “mismo lugar”: radio interno reajustado de 150 m a 40 m.
+- Incluye responsividad cliente (safe area, menú, chat) y demás cambios previos.

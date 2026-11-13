@@ -1,0 +1,8 @@
+Novedades de esta versión (pégalas en Google Play → Notas de la versión):
+
+Modo claro y modo oscuro desde Perfil, con un interruptor que se desliza.
+El ojo junto a la contraseña permite verla u ocultarla al entrar.
+Más contraste para leer textos en claro y en oscuro.
+La radio con la torre llega en tiempo real y se puede leer.
+Al cerrar Google Maps vuelves a la cabina para confirmar el envío.
+En el mapa, la ruta sigue las calles y, si llevas varios pedidos, R1/E1, R2/E2 y R3/E3 abren el detalle de cada uno.

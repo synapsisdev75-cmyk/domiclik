@@ -1,0 +1,7 @@
+﻿Nueva actualización DomiClick para una navegación multi-parada más clara.
+
+• El mapa de la cabina muestra la ruta optimizada con paradas numeradas y distintivos de recogida/entrega.
+• Puedes abrir el tour completo en Google Maps con todas las paradas.
+• Mejoras de usabilidad en el panel de ruta y en la barra inferior.
+
+Actualiza y sigue entregando con DomiClick.

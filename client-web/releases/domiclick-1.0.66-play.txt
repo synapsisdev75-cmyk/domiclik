@@ -1,0 +1,1 @@
+La app ya no se mete bajo la hora ni la cámara del teléfono. En modo claro el buscador y los textos del cliente se leen bien. El ancho se adapta a móvil y tablet. Cabina del transportista y menú inferior respetan la zona segura de la pantalla.

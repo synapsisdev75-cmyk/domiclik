@@ -40,3 +40,15 @@ export function rememberRecentOrder(entry: RecentOrderLocal): void {
 export function listRecentOrdersLocal(): RecentOrderLocal[] {
   return readAll();
 }
+
+const CLOSED = new Set(['delivered', 'cancelled', 'canceled', 'cancelado']);
+
+export function forgetRecentOrder(trackingCode: string): void {
+  const code = trackingCode.trim().toUpperCase();
+  if (!code) return;
+  writeAll(readAll().filter((r) => r.trackingCode.toUpperCase() !== code));
+}
+
+export function listActiveRecentOrders(): RecentOrderLocal[] {
+  return readAll().filter((r) => !CLOSED.has(String(r.status || '').toLowerCase()));
+}

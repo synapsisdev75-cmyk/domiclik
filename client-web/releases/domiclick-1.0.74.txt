@@ -1,0 +1,6 @@
+DomiClick 1.0.74 (versionCode 75)
+
+- Filtro de trayectoria GPS en cabina: evita saltos esquina↔esquina y el rebote native↔browser.
+- Heading estable por movimiento real; si el regreso es real, sí se refleja.
+- Optimización de ruta unida R/E por tiempo de calles (plan previo).
+- Radar operativo (hosting ops): suavizado EMA + anti-teleport + along sin ir/volver por ruido.

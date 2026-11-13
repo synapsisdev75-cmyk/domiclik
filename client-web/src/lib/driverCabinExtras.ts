@@ -6,6 +6,8 @@ import {
   onSnapshot,
   query,
   setDoc,
+  writeBatch,
+  increment,
   where,
   limit,
   getDocs,
@@ -21,6 +23,7 @@ export type CabinChatMessage = {
   senderRole: 'admin' | 'driver';
   text: string;
   timestamp: string;
+  receipt?: 'sent' | 'delivered' | 'seen';
 };
 
 export type PreRouteCheckItem = {
@@ -123,10 +126,11 @@ export function rankPosition(board: DriverRankRow[], driverId: string): number |
 export function subscribeCabinChat(
   chatId: string,
   callback: (msgs: CabinChatMessage[]) => void,
-  onLive?: (live: boolean) => void,
+  onLive?: (live: boolean, error?: string) => void,
 ): Unsubscribe {
   return onSnapshot(
     query(collection(db, 'messages'), where('chatId', '==', chatId)),
+    { includeMetadataChanges: true },
     (snap) => {
       const list: CabinChatMessage[] = snap.docs.map((d) => {
         const data = d.data() as Record<string, unknown>;
@@ -135,16 +139,23 @@ export function subscribeCabinChat(
           chatId: String(data.chatId || chatId),
           senderId: String(data.senderId || ''),
           senderName: String(data.senderName || ''),
-          senderRole: data.senderRole === 'admin' ? 'admin' : 'driver',
+          senderRole: data.senderRole === 'driver' ? 'driver' : 'admin',
           text: String(data.text || ''),
           timestamp: String(data.timestamp || ''),
+          receipt:
+            data.receipt === 'seen' || data.receipt === 'delivered' || data.receipt === 'sent'
+              ? data.receipt
+              : undefined,
         };
       });
       list.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-      onLive?.(true);
+      onLive?.(!snap.metadata.fromCache || list.length > 0, undefined);
       callback(list);
     },
-    () => onLive?.(false),
+    (err) => {
+      console.error('[DomiClick radio]', err);
+      onLive?.(false, err instanceof Error ? err.message : 'Sin radio en vivo');
+    },
   );
 }
 
@@ -166,6 +177,7 @@ export async function sendCabinChatMessage(params: {
     senderRole: 'driver',
     text,
     timestamp: now,
+    receipt: 'sent',
   });
   await setDoc(
     doc(db, 'chats', params.chatId),
@@ -177,9 +189,39 @@ export async function sendCabinChatMessage(params: {
       lastMessageTime: now,
       unreadByAdmin: true,
       unreadByDriver: false,
+      unreadCountAdmin: increment(1),
     },
     { merge: true },
   );
+}
+
+export async function ackCabinChat(chatId: string, level: 'delivered' | 'seen') {
+  const snap = await getDocs(query(collection(db, 'messages'), where('chatId', '==', chatId)));
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  let changed = 0;
+  snap.forEach((docSnap) => {
+    const data = docSnap.data() as Record<string, unknown>;
+    if (data.senderRole !== 'admin') return;
+    const cur = String(data.receipt || '');
+    if (cur === 'seen') return;
+    if (level === 'delivered' && cur === 'delivered') return;
+    const patch: Record<string, string> = { receipt: level };
+    if (!data.deliveredAt) patch.deliveredAt = now;
+    if (level === 'seen') patch.seenAt = now;
+    batch.update(docSnap.ref, patch);
+    changed += 1;
+  });
+  if (level === 'seen') {
+    batch.set(
+      doc(db, 'chats', chatId),
+      { unreadByDriver: false, unreadCountDriver: 0 },
+      { merge: true },
+    );
+    changed += 1;
+  }
+  if (!changed) return;
+  await batch.commit();
 }
 
 let radioUnread = 0;

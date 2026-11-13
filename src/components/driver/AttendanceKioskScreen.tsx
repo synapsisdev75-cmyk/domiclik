@@ -13,6 +13,7 @@ import {
   uploadPlatePhoto,
   verifyDailyAttendancePin,
 } from '../../lib/firebase';
+import { firebaseFriendlyError } from '../../lib/imageUpload';
 import {
   ATTENDANCE_PIN_RESET_HOUR,
   getAttendancePinDayKey,
@@ -124,19 +125,21 @@ function FrontFaceCamera({
   function shoot() {
     const video = videoRef.current;
     if (!video?.videoWidth) return;
+    const maxEdge = 1280;
+    const scale = Math.min(1, maxEdge / Math.max(video.videoWidth, video.videoHeight));
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(
       (blob) => {
         if (!blob) return;
         useFile(new File([blob], `rostro-${Date.now()}.jpg`, { type: 'image/jpeg' }));
       },
       'image/jpeg',
-      0.9,
+      0.72,
     );
   }
 
@@ -252,8 +255,13 @@ export const AttendanceKioskScreen: React.FC = () => {
 
   useEffect(() => {
     document.title = 'DomiClick · Terminal asistencia';
+    const root = document.documentElement;
+    const prevTheme = root.getAttribute('data-theme');
+    root.setAttribute('data-theme', 'dark');
     return () => {
       document.title = 'DomiClick Ops — Administración';
+      if (prevTheme) root.setAttribute('data-theme', prevTheme);
+      else root.removeAttribute('data-theme');
     };
   }, []);
 
@@ -368,6 +376,7 @@ export const AttendanceKioskScreen: React.FC = () => {
     try {
       if (!faceFile) throw new Error('Sin foto de rostro no se revela el PIN.');
       const url = await uploadAttendanceFacePhoto(faceFile, selected.id);
+      if (!url) throw new Error('La foto no devolvió URL. Intenta otra vez.');
       const pinDoc = await revealDailyAttendancePin({
         driverId: selected.id,
         driverName: selected.fullName,
@@ -380,7 +389,8 @@ export const AttendanceKioskScreen: React.FC = () => {
       setStep('punch');
       setMsg('PIN revelado. Anota el km y digita el PIN. Las fotos del odómetro y placa van por celular.');
     } catch (err: unknown) {
-      setMsg(err instanceof Error ? err.message : 'No se pudo revelar el PIN.');
+      console.error('[kiosk] revelar PIN', err);
+      setMsg(firebaseFriendlyError(err, 'No se pudo revelar el PIN.'));
     } finally {
       setBusy(false);
     }
@@ -438,7 +448,8 @@ export const AttendanceKioskScreen: React.FC = () => {
       );
       setStep('done');
     } catch (err: unknown) {
-      setMsg(err instanceof Error ? err.message : 'No se pudo marcar asistencia.');
+      console.error('[kiosk] marcar asistencia', err);
+      setMsg(firebaseFriendlyError(err, 'No se pudo marcar asistencia.'));
     } finally {
       setBusy(false);
     }
@@ -502,14 +513,22 @@ export const AttendanceKioskScreen: React.FC = () => {
       );
       setStep('done');
     } catch (err: unknown) {
-      setMsg(err instanceof Error ? err.message : 'No se pudo marcar la salida.');
+      console.error('[kiosk] salida', err);
+      setMsg(firebaseFriendlyError(err, 'No se pudo marcar la salida.'));
     } finally {
       setBusy(false);
     }
   };
 
+  const kioskFieldStyle: React.CSSProperties = {
+    color: '#ffffff',
+    WebkitTextFillColor: '#ffffff',
+    caretColor: '#00E5FF',
+    backgroundColor: '#070B16',
+  };
+
   return (
-    <div className="min-h-screen min-h-dvh bg-[#05080f] text-[#e8eef9] flex flex-col">
+    <div className="attendance-kiosk min-h-screen min-h-dvh bg-[#05080f] text-[#e8eef9] flex flex-col">
       <header className="shrink-0 border-b border-[#1a2744] bg-[#0B101D]/95 backdrop-blur px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <BrandLogo variant="optimized" height={36} />
@@ -555,7 +574,8 @@ export const AttendanceKioskScreen: React.FC = () => {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Buscar por nombre o placa…"
-                className="w-full bg-[#0B101D] border border-[#1a2744] rounded-2xl pl-10 pr-4 py-3.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-[#00E5FF]/50"
+                style={kioskFieldStyle}
+                className="kiosk-field w-full bg-[#0B101D] border border-[#1a2744] rounded-2xl pl-10 pr-4 py-3.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-[#00E5FF]/50"
               />
             </div>
 
@@ -820,7 +840,7 @@ export const AttendanceKioskScreen: React.FC = () => {
                     <Gauge className="w-4 h-4" /> Kilometraje del tablero *
                   </span>
                   <input
-                    className="w-full rounded-xl border border-[#1a2744] bg-[#070B16] px-4 py-4 font-mono text-lg text-white"
+                    className="kiosk-field w-full rounded-xl border border-[#1a2744] bg-[#070B16] px-4 py-4 font-mono text-lg text-white"
                     inputMode="numeric"
                     value={odometerKm}
                     onChange={(e) => setOdometerKm(e.target.value.replace(/[^\d]/g, ''))}
@@ -829,6 +849,7 @@ export const AttendanceKioskScreen: React.FC = () => {
                         ? `≥ ${todayShift.kmIn.toLocaleString('es-CO')}`
                         : 'Ej. 45280'
                     }
+                    style={kioskFieldStyle}
                   />
                 </label>
                 <label className="block">
@@ -836,12 +857,13 @@ export const AttendanceKioskScreen: React.FC = () => {
                     <KeyRound className="w-4 h-4" /> PIN del día
                   </span>
                   <input
-                    className="w-full rounded-xl border border-[#1a2744] bg-[#070B16] px-4 py-4 text-center font-mono text-2xl tracking-[0.35em] text-white"
+                    className="kiosk-field w-full rounded-xl border border-[#1a2744] bg-[#070B16] px-4 py-4 text-center font-mono text-2xl tracking-[0.35em] text-white"
                     inputMode="numeric"
                     maxLength={6}
                     value={typedPin}
                     onChange={(e) => setTypedPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     placeholder="••••••"
+                    style={kioskFieldStyle}
                   />
                 </label>
                 <button
@@ -892,14 +914,32 @@ export const AttendanceKioskScreen: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="rounded-2xl border border-[#00E5FF]/40 bg-[#00E5FF]/10 p-5 text-center space-y-2">
-                  <p className="text-[11px] text-[#00E5FF] font-bold uppercase tracking-wide">
+                <div className="rounded-2xl border-2 border-white bg-white p-5 text-center space-y-3 shadow-[0_8px_32px_rgba(0,0,0,0.45)]">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-black">
                     Tu PIN de hoy (rota {ATTENDANCE_PIN_RESET_HOUR.toString().padStart(2, '0')}:00)
                   </p>
-                  <p className="text-4xl sm:text-5xl font-black text-white font-mono tracking-[0.35em]">
+                  <div
+                    className="flex flex-wrap items-center justify-center gap-2 sm:gap-2.5"
+                    aria-label={`PIN ${revealedPin}`}
+                  >
+                    {String(revealedPin || '')
+                      .split('')
+                      .map((digit, i) => (
+                        <span
+                          key={`${digit}-${i}`}
+                          className="inline-flex h-16 w-12 items-center justify-center rounded-xl border-2 border-black bg-white font-mono text-4xl font-black leading-none text-black sm:h-[4.5rem] sm:w-14 sm:text-5xl"
+                          style={{ textShadow: 'none', filter: 'none', opacity: 1 }}
+                        >
+                          {digit}
+                        </span>
+                      ))}
+                  </div>
+                  <p className="font-mono text-2xl font-black tracking-[0.35em] text-black sm:text-3xl">
                     {revealedPin}
                   </p>
-                  <p className="text-[10px] text-slate-400">Jornada PIN · {pinDayKey || activePinDay}</p>
+                  <p className="text-[11px] font-bold text-black/70">
+                    Jornada PIN · {pinDayKey || activePinDay}
+                  </p>
                 </div>
 
                 <div className="rounded-2xl border border-[#162748] bg-[#0B101D] p-5 space-y-4">
@@ -913,7 +953,7 @@ export const AttendanceKioskScreen: React.FC = () => {
                       Kilometraje del tablero
                     </span>
                     <input
-                      className="w-full bg-[#070B16] border border-[#1a2744] rounded-xl px-4 py-4 text-lg text-white font-mono"
+                      className="kiosk-field w-full bg-[#070B16] border border-[#1a2744] rounded-xl px-4 py-4 text-lg text-white font-mono"
                       inputMode="numeric"
                       value={odometerKm}
                       onChange={(e) => setOdometerKm(e.target.value.replace(/[^\d]/g, ''))}
@@ -922,6 +962,7 @@ export const AttendanceKioskScreen: React.FC = () => {
                           ? `≥ ${(todayShift?.kmOut || todayShift?.kmIn || selected.lastOdometerKm)?.toLocaleString('es-CO')}`
                           : 'Ej. 45280'
                       }
+                      style={kioskFieldStyle}
                     />
                   </label>
                   <label className="block">
@@ -930,13 +971,14 @@ export const AttendanceKioskScreen: React.FC = () => {
                       Digita el PIN revelado
                     </span>
                     <input
-                      className="w-full bg-[#070B16] border border-[#1a2744] rounded-xl px-4 py-4 text-2xl text-white font-mono tracking-[0.35em] text-center"
+                      className="kiosk-field w-full bg-[#070B16] border border-[#1a2744] rounded-xl px-4 py-4 text-2xl text-white font-mono tracking-[0.35em] text-center"
                       inputMode="numeric"
                       autoComplete="one-time-code"
                       maxLength={6}
                       value={typedPin}
                       onChange={(e) => setTypedPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       placeholder="••••••"
+                      style={kioskFieldStyle}
                     />
                   </label>
                   <button

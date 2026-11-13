@@ -13,7 +13,9 @@ import {
   increment,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from './firebase';
+import { VILLAVICENCIO_CENTER } from './geo';
 import {
   enqueueAdvance,
   isBrowserOnline,
@@ -38,6 +40,9 @@ export type DriverProfile = {
   status: string;
   isActive: boolean;
   completedDeliveries?: number;
+  rejectionReason?: string;
+  /** Última ubicación conocida en Firestore (sirve de semilla en local / sin GPS aún). */
+  lastLocation?: { lat: number; lng: number; heading?: number } | null;
 };
 
 export type LatLng = { lat: number; lng: number };
@@ -58,16 +63,90 @@ export type DriverOrder = {
   description?: string;
   notes?: string;
   paymentMethod?: string;
+  /** pasarela | comprobante | … */
+  transferChannel?: string;
+  paymentReviewStatus?: string;
+  paymentGatewayStatus?: string;
+  amountPaid?: number | null;
   invoiceNumber?: string;
   invoicePhotoUrl?: string;
   assignedDriverId?: string | null;
   deliveryConfirmCode?: string;
   routeDistanceKm?: number | null;
   routeDurationMin?: number | null;
+  shippingFee?: number | null;
+  isVip?: boolean;
+  vipSurchargeCop?: number;
   createdAt?: string;
   updatedAt?: string;
   scheduledFor?: string;
 };
+
+/** Dos detalles claros de pago para la cabina del transportista. */
+export type DriverPaymentDetail = {
+  /** Forma: efectivo / en línea / ya pagado / otro */
+  methodLabel: string;
+  /** Estado operativo: cobrar o no cobrar */
+  statusLabel: string;
+  /** true = el cliente ya pagó; no cobrar en entrega */
+  alreadyPaid: boolean;
+  /** true = cobrar flete/paquete en efectivo al entregar */
+  collectCash: boolean;
+};
+
+export function driverPaymentDetail(order: {
+  paymentMethod?: string;
+  transferChannel?: string;
+  paymentReviewStatus?: string;
+  paymentGatewayStatus?: string;
+  amountPaid?: number | null;
+}): DriverPaymentDetail {
+  const method = String(order.paymentMethod || '')
+    .trim()
+    .toLowerCase();
+  const gateway = String(order.paymentGatewayStatus || '')
+    .trim()
+    .toUpperCase();
+  const review = String(order.paymentReviewStatus || '')
+    .trim()
+    .toLowerCase();
+  const paidAmount = Number(order.amountPaid) || 0;
+  const channel = String(order.transferChannel || '')
+    .trim()
+    .toLowerCase();
+
+  const methodLabel =
+    method === 'efectivo'
+      ? 'Efectivo'
+      : method === 'transferencia' || channel === 'pasarela'
+        ? 'Pago en línea'
+        : method === 'ya_pagado'
+          ? 'Ya pagado'
+          : method === 'otro'
+            ? 'Otro'
+            : method
+              ? method
+              : 'Sin forma de pago';
+
+  const alreadyPaid =
+    method === 'ya_pagado' ||
+    review === 'approved' ||
+    gateway === 'APPROVED' ||
+    paidAmount > 0 ||
+    (method === 'transferencia' && review === 'approved');
+
+  const collectCash = method === 'efectivo' && !alreadyPaid;
+
+  const statusLabel = alreadyPaid
+    ? 'YA PAGADO · no cobrar'
+    : collectCash
+      ? 'COBRAR en entrega'
+      : method === 'transferencia' && review === 'pending_review'
+        ? 'Esperando pago en línea'
+        : 'Revisar pago con Central';
+
+  return { methodLabel, statusLabel, alreadyPaid, collectCash };
+}
 
 function parseLatLng(raw: unknown): LatLng | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -96,6 +175,14 @@ function mapOrderDoc(id: string, data: Record<string, unknown>): DriverOrder {
     description: data.description ? String(data.description) : undefined,
     notes: data.notes ? String(data.notes) : undefined,
     paymentMethod: data.paymentMethod ? String(data.paymentMethod) : undefined,
+    transferChannel: data.transferChannel ? String(data.transferChannel) : undefined,
+    paymentReviewStatus: data.paymentReviewStatus
+      ? String(data.paymentReviewStatus)
+      : undefined,
+    paymentGatewayStatus: data.paymentGatewayStatus
+      ? String(data.paymentGatewayStatus)
+      : undefined,
+    amountPaid: typeof data.amountPaid === 'number' ? data.amountPaid : null,
     invoiceNumber: data.invoiceNumber ? String(data.invoiceNumber) : undefined,
     invoicePhotoUrl: data.invoicePhotoUrl ? String(data.invoicePhotoUrl) : undefined,
     assignedDriverId: data.assignedDriverId ? String(data.assignedDriverId) : null,
@@ -104,6 +191,10 @@ function mapOrderDoc(id: string, data: Record<string, unknown>): DriverOrder {
       typeof data.routeDistanceKm === 'number' ? data.routeDistanceKm : null,
     routeDurationMin:
       typeof data.routeDurationMin === 'number' ? data.routeDurationMin : null,
+    shippingFee: typeof data.shippingFee === 'number' ? data.shippingFee : null,
+    isVip: Boolean(data.isVip),
+    vipSurchargeCop:
+      typeof data.vipSurchargeCop === 'number' ? data.vipSurchargeCop : undefined,
     createdAt: data.createdAt ? String(data.createdAt) : undefined,
     updatedAt: data.updatedAt ? String(data.updatedAt) : undefined,
     scheduledFor: data.scheduledFor ? String(data.scheduledFor) : undefined,
@@ -123,39 +214,262 @@ function isSameLocalDay(iso?: string): boolean {
   );
 }
 
-export async function findApprovedDriverByEmail(email: string): Promise<DriverProfile | null> {
+function mapDriverProfile(
+  id: string,
+  data: Record<string, unknown>,
+  fallbackEmail?: string,
+): DriverProfile {
+  const loc = data.location as { lat?: unknown; lng?: unknown; heading?: unknown } | null | undefined;
+  const lat = Number(loc?.lat);
+  const lng = Number(loc?.lng);
+  const heading = Number(loc?.heading);
+  return {
+    id,
+    fullName: String(data.fullName || data.name || 'Transportista'),
+    email: String(data.email || fallbackEmail || ''),
+    phone: data.phone ? String(data.phone) : undefined,
+    plateNumber: data.plateNumber ? String(data.plateNumber) : undefined,
+    motoModel: data.motoModel ? String(data.motoModel) : undefined,
+    photoUrl: data.photoUrl ? String(data.photoUrl) : undefined,
+    status: String(data.status || 'pending'),
+    isActive: Boolean(data.isActive),
+    completedDeliveries: Number(data.completedDeliveries) || 0,
+    rejectionReason: data.rejectionReason ? String(data.rejectionReason) : undefined,
+    lastLocation:
+      Number.isFinite(lat) && Number.isFinite(lng)
+        ? {
+            lat,
+            lng,
+            heading: Number.isFinite(heading) && heading >= 0 ? heading : undefined,
+          }
+        : null,
+  };
+}
+
+/** Cualquier perfil por correo (pending / approved / rejected). Preferido: approved. */
+export async function findDriverProfileByEmail(email: string): Promise<DriverProfile | null> {
   const normalized = email.trim().toLowerCase();
   if (!normalized) return null;
   const snap = await getDocs(query(collection(db, 'drivers'), where('email', '==', normalized), limit(5)));
   let rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Array<Record<string, unknown> & { id: string }>;
   if (!rows.length) {
-    // Fallback: algunos perfiles guardan email con mayúsculas
-    const all = await getDocs(query(collection(db, 'drivers'), limit(200)));
-    rows = all.docs
-      .map((d) => ({ id: d.id, ...(d.data() as Record<string, unknown>) }) as Record<string, unknown> & { id: string })
-      .filter((d) => String(d.email || '').trim().toLowerCase() === normalized);
+    // Fallback acotado: no bloquear la cabina con un scan enorme
+    try {
+      const all = await Promise.race([
+        getDocs(query(collection(db, 'drivers'), limit(120))),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
+      ]);
+      if (all) {
+        rows = all.docs
+          .map(
+            (d) =>
+              ({ id: d.id, ...(d.data() as Record<string, unknown>) }) as Record<string, unknown> & {
+                id: string;
+              },
+          )
+          .filter((d) => String(d.email || '').trim().toLowerCase() === normalized);
+      }
+    } catch {
+      /* query por email ya falló vacío */
+    }
   }
   const approved = rows.find((d) => String(d.status) === 'approved') || rows[0];
   if (!approved) return null;
-  return {
-    id: approved.id,
-    fullName: String(approved.fullName || approved.name || 'Transportista'),
-    email: String(approved.email || normalized),
-    phone: approved.phone ? String(approved.phone) : undefined,
-    plateNumber: approved.plateNumber ? String(approved.plateNumber) : undefined,
-    motoModel: approved.motoModel ? String(approved.motoModel) : undefined,
-    photoUrl: approved.photoUrl ? String(approved.photoUrl) : undefined,
-    status: String(approved.status || 'pending'),
-    isActive: Boolean(approved.isActive),
-    completedDeliveries: Number(approved.completedDeliveries) || 0,
+  return mapDriverProfile(approved.id, approved, normalized);
+}
+
+/** @deprecated alias — usa findDriverProfileByEmail */
+export async function findApprovedDriverByEmail(email: string): Promise<DriverProfile | null> {
+  return findDriverProfileByEmail(email);
+}
+
+/** Sigue el perfil del motorizado en vivo (aprobación, turno, GPS). */
+export function subscribeDriverByEmail(
+  email: string,
+  callback: (driver: DriverProfile | null) => void,
+): Unsubscribe {
+  const normalized = email.trim().toLowerCase();
+  let unsubDoc: Unsubscribe | null = null;
+  let unsubQuery: Unsubscribe | null = null;
+  let pollId: ReturnType<typeof setInterval> | undefined;
+  let cancelled = false;
+  let boundId: string | null = null;
+
+  function stopPoll() {
+    if (pollId != null) {
+      clearInterval(pollId);
+      pollId = undefined;
+    }
+  }
+
+  function bindDoc(id: string) {
+    if (boundId === id) return;
+    boundId = id;
+    stopPoll(); // ya tenemos doc: onSnapshot basta (aprobación / isActive)
+    unsubDoc?.();
+    unsubDoc = onSnapshot(
+      doc(db, 'drivers', id),
+      (snap) => {
+        if (!snap.exists()) {
+          callback(null);
+          return;
+        }
+        callback(mapDriverProfile(snap.id, snap.data() as Record<string, unknown>, normalized));
+      },
+      (err) => {
+        console.warn('[cabin] driver doc listen', err);
+        // No dejar la UI colgada si el listen falla
+        callback(null);
+      },
+    );
+  }
+
+  function considerRows(rows: Array<Record<string, unknown> & { id: string }>) {
+    if (!rows.length) {
+      if (!boundId) callback(null);
+      return;
+    }
+    const pick = rows.find((d) => String(d.status) === 'approved') || rows[0];
+    if (boundId && boundId !== pick.id) {
+      unsubDoc?.();
+      boundId = null;
+    }
+    bindDoc(pick.id);
+  }
+
+  unsubQuery = onSnapshot(
+    query(collection(db, 'drivers'), where('email', '==', normalized), limit(5)),
+    (snap) => {
+      considerRows(
+        snap.docs.map(
+          (d) =>
+            ({ id: d.id, ...(d.data() as Record<string, unknown>) }) as Record<string, unknown> & {
+              id: string;
+            },
+        ),
+      );
+    },
+    (err) => {
+      console.warn('[cabin] driver email query', err);
+    },
+  );
+
+  const scan = () => {
+    if (cancelled || boundId) return;
+    void findDriverProfileByEmail(normalized)
+      .then((found) => {
+        if (cancelled || boundId) return;
+        if (found) bindDoc(found.id);
+        else callback(null);
+      })
+      .catch(() => {
+        if (!cancelled && !boundId) callback(null);
+      });
   };
+  scan();
+  // Solo mientras no hay doc enlazado (p. ej. prerregistro recién enviado)
+  pollId = setInterval(scan, 6000);
+
+  return () => {
+    cancelled = true;
+    unsubDoc?.();
+    unsubQuery?.();
+    if (pollId != null) clearInterval(pollId);
+  };
+}
+
+export async function uploadDriverPhoto(file: File, driverId?: string): Promise<string> {
+  const maxBytes = 25 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    throw new Error('La foto supera el máximo de 25 MB.');
+  }
+  const id = driverId || `tmp_${Date.now()}`;
+  const safeName = (file.name || 'foto.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `drivers/${id}/photo_${Date.now()}_${safeName}`;
+  const storageRef = ref(storage, path);
+  const contentType = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg';
+  await uploadBytes(storageRef, file, { contentType });
+  const url = await getDownloadURL(storageRef);
+  if (!url) throw new Error('No se obtuvo la URL de la foto subida.');
+  return url;
+}
+
+export type DriverPreregisterInput = {
+  uid?: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  documentId: string;
+  birthDate: string;
+  licenseNumber: string;
+  photoFile: File;
+};
+
+/** Prerregistro desde la app. Si ya hay solicitud pendiente, la reutiliza. */
+export async function submitDriverPreregistration(input: DriverPreregisterInput): Promise<string> {
+  const email = input.email.trim().toLowerCase();
+  const fullName = input.fullName.trim();
+  const phone = input.phone.trim();
+  const documentId = input.documentId.trim();
+  const birthDate = input.birthDate.trim();
+  const licenseNumber = input.licenseNumber.trim();
+  if (!email || !fullName || !phone || !documentId || !birthDate || !licenseNumber) {
+    throw new Error('Completa todos los datos para enviar la solicitud.');
+  }
+  const existing = await findDriverProfileByEmail(email);
+  if (existing?.status === 'approved') {
+    throw new Error('Este correo ya está aprobado como transportista. Inicia sesión y marca entrada.');
+  }
+  const driverId = existing?.id || `drv_${Date.now()}`;
+  const photoUrl = await uploadDriverPhoto(input.photoFile, driverId);
+  const now = new Date().toISOString();
+  const payload: Record<string, unknown> = {
+    id: driverId,
+    fullName,
+    email,
+    phone,
+    documentId,
+    birthDate,
+    licenseNumber,
+    photoUrl,
+    status: 'pending',
+    isActive: false,
+    rating: 5,
+    rejectionReason: '',
+    applicationKind: 'transportista',
+    pendingAt: now,
+    updatedAt: now,
+    ...(input.uid ? { userId: input.uid } : {}),
+    location: {
+      lat: VILLAVICENCIO_CENTER.lat + (Math.random() - 0.5) * 0.02,
+      lng: VILLAVICENCIO_CENTER.lng + (Math.random() - 0.5) * 0.02,
+      addressName: 'Villavicencio, Meta',
+      neighborhood: 'Centro / Barzal',
+      updatedAt: now,
+    },
+  };
+  if (!existing) {
+    payload.createdAt = now;
+    payload.completedDeliveries = 0;
+  }
+  const ref = doc(db, 'drivers', driverId);
+  await setDoc(ref, payload, { merge: true });
+  // Confirma que la torre pueda leer status=pending
+  const verify = await getDoc(ref);
+  if (!verify.exists() || String(verify.data()?.status || '') !== 'pending') {
+    throw new Error('La solicitud no quedó registrada. Revisa la red e intenta de nuevo.');
+  }
+  return driverId;
 }
 
 export async function setDriverActive(_driverId: string, _isActive: boolean): Promise<void> {
   throw new Error('La cabina solo se activa o desactiva al marcar asistencia.');
 }
 
-/** Entrada o salida desde la app del transportista. Salida apaga la cabina. */
+/**
+ * Solo salida desde la app (si algún día se habilita).
+ * La ENTRADA / activación es exclusiva de la tablet de sede con PIN.
+ */
 export async function punchCabinShift(params: {
   driverId: string;
   driverName: string;
@@ -163,10 +477,18 @@ export async function punchCabinShift(params: {
   lat?: number;
   lng?: number;
 }): Promise<void> {
+  if (params.type === 'in') {
+    throw new Error(
+      'La entrada solo se marca en la tablet de sede con el PIN de asistencia. No se puede activar desde la app.',
+    );
+  }
   const at = new Date().toISOString();
   const id = 'att_' + Date.now();
-  const lat = Number(params.lat);
-  const lng = Number(params.lng);
+  const rawLat = Number(params.lat);
+  const rawLng = Number(params.lng);
+  const lat = Number.isFinite(rawLat) ? rawLat : VILLAVICENCIO_CENTER.lat;
+  const lng = Number.isFinite(rawLng) ? rawLng : VILLAVICENCIO_CENTER.lng;
+  const gpsOk = Number.isFinite(rawLat) && Number.isFinite(rawLng);
   await setDoc(doc(db, 'attendance_punches', id), {
     id,
     driverId: params.driverId,
@@ -175,14 +497,23 @@ export async function punchCabinShift(params: {
     at,
     dateKey: bogotaDay(at),
     method: 'cabin',
-    ...(Number.isFinite(lat) ? { lat } : {}),
-    ...(Number.isFinite(lng) ? { lng } : {}),
+    lat,
+    lng,
+    gpsApproximate: !gpsOk,
   });
   await updateDoc(doc(db, 'drivers', params.driverId), {
     lastPunchType: params.type,
     lastPunchAt: at,
-    isActive: params.type === 'in',
+    isActive: false,
     updatedAt: at,
+    location: {
+      lat,
+      lng,
+      heading: 0,
+      addressName: 'Salida del turno',
+      neighborhood: gpsOk ? 'Villavicencio' : 'Villavicencio (aprox.)',
+      updatedAt: at,
+    },
   });
 }
 
@@ -230,6 +561,37 @@ export async function listDriverOrders(driverId: string): Promise<DriverOrder[]>
       snap.docs.map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>)),
     );
   }
+}
+
+/**
+ * Solicitudes pendientes sin asignar (tablero en vivo).
+ * Excluye pagos en revisión. Sirve para alertar al motorizado disponible.
+ */
+export function subscribePendingDispatchOrders(
+  callback: (orders: DriverOrder[]) => void,
+): Unsubscribe {
+  const q = query(collection(db, 'orders'), where('status', '==', 'pending'), limit(40));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const rows = snap.docs
+        .map((d) => mapOrderDoc(d.id, d.data() as Record<string, unknown>))
+        .filter((o) => {
+          if (o.assignedDriverId) return false;
+          const raw = snap.docs.find((d) => d.id === o.id)?.data() as
+            | { paymentReviewStatus?: string }
+            | undefined;
+          if (raw?.paymentReviewStatus === 'pending_review') return false;
+          return true;
+        })
+        .sort((a, b) => {
+          if (Boolean(a.isVip) !== Boolean(b.isVip)) return a.isVip ? -1 : 1;
+          return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+        });
+      callback(rows);
+    },
+    () => callback([]),
+  );
 }
 
 /** Pedidos abiertos del transportista en tiempo real (hasta entregado/cancelado). */
@@ -456,6 +818,7 @@ export async function advanceDriverOrderStatus(
 
   const doWrite = async () => {
     const now = new Date().toISOString();
+    const snap = await getDoc(doc(db, 'orders', orderId));
     await updateDoc(doc(db, 'orders', orderId), {
       status,
       updatedAt: now,
@@ -466,6 +829,20 @@ export async function advanceDriverOrderStatus(
         note: `Actualizado por ${driverName}`,
       }),
     });
+    if (snap.exists()) {
+      const data = snap.data() as Record<string, unknown>;
+      const { notifyCustomerOrderEvent, notifyKindForStatus } = await import('./orderNotify');
+      const kind = notifyKindForStatus(status);
+      if (kind) {
+        await notifyCustomerOrderEvent({
+          orderId,
+          trackingCode: String(data.trackingCode || orderId),
+          customerUid: data.customerUid ? String(data.customerUid) : '',
+          customerEmail: data.customerEmail ? String(data.customerEmail) : '',
+          kind,
+        });
+      }
+    }
   };
 
   if (!isBrowserOnline()) {
@@ -518,6 +895,7 @@ export type { QueuedAdvance };
 async function applyDeliveryPin(
   orderId: string,
   pin: string,
+  proofUrl?: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const snap = await getDoc(doc(db, 'orders', orderId));
   if (!snap.exists()) return { ok: false, error: 'Pedido no encontrado' };
@@ -537,8 +915,9 @@ async function applyDeliveryPin(
   }
 
   const now = new Date().toISOString();
-  await updateDoc(doc(db, 'orders', orderId), {
+  const payload: Record<string, unknown> = {
     status: 'delivered',
+    deliveryConfirmCode: '',
     deliveryConfirmedAt: now,
     updatedAt: now,
     timeline: arrayUnion({
@@ -546,8 +925,18 @@ async function applyDeliveryPin(
       from: status,
       to: 'delivered',
       byRole: 'driver',
-      note: 'PIN validado en app móvil',
+      note: proofUrl ? 'PIN validado · foto de entrega' : 'PIN validado en app móvil',
     }),
+  };
+  if (proofUrl) payload.deliveryProofUrl = proofUrl;
+  await updateDoc(doc(db, 'orders', orderId), payload);
+  const { notifyCustomerOrderEvent } = await import('./orderNotify');
+  await notifyCustomerOrderEvent({
+    orderId,
+    trackingCode: String(order.trackingCode || orderId),
+    customerUid: order.customerUid ? String(order.customerUid) : '',
+    customerEmail: order.customerEmail ? String(order.customerEmail) : '',
+    kind: 'delivered',
   });
 
   const driverId = order.assignedDriverId ? String(order.assignedDriverId) : '';
@@ -563,6 +952,7 @@ async function applyDeliveryPin(
 export async function confirmDeliveryWithPin(
   orderId: string,
   pin: string,
+  proofUrl?: string,
 ): Promise<{ ok: true; queued?: boolean } | { ok: false; error: string }> {
   const given = pin.trim();
   if (!isBrowserOnline()) {
@@ -571,7 +961,7 @@ export async function confirmDeliveryWithPin(
     return { ok: true, queued: true };
   }
   try {
-    const result = await withTimeout(applyDeliveryPin(orderId, given));
+    const result = await withTimeout(applyDeliveryPin(orderId, given, proofUrl));
     noteNetworkResult(true);
     return result;
   } catch {

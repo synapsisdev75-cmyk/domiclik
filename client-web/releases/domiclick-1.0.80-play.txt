@@ -1,0 +1,7 @@
+﻿DomiClick 1.0.80 (versionCode 81) — Play Console
+
+Cambios:
+- Toque en pines/lista de paradas: solo información + centrado en mapa DomiClick
+- Sin apertura automática de Google Maps al seleccionar R1/E1/1/2/3…
+- Maps solo desde botones explícitos de la ficha
+

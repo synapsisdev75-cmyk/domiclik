@@ -1,16 +1,19 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, KeyRound, Loader2, PackageSearch, RefreshCw } from 'lucide-react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, Loader2, PackageSearch, RefreshCw } from 'lucide-react';
 import type { TrackingStatus } from '../contracts/salesIngest';
 import { BrandLogo } from '../components/BrandLogo';
 import { RatingForm } from '../components/RatingForm';
+import { DeliveryPinCard } from '../components/DeliveryPinCard';
 import { AuthButton } from '../components/AuthButton';
 import { subscribeOrderTracking, type PublicOrderTracking } from '../lib/firebase';
+import { PaymentReturnBanner } from '../components/PaymentReturnBanner';
 import { LiveTripMap } from '../components/LiveTripMap';
 import { CustomerOrdersPanel } from '../components/CustomerOrdersPanel';
 import { useAuth } from '../lib/auth';
 import { pushForStatus } from '../lib/brandCopy';
-import { rememberRecentOrder } from '../lib/recentOrders';
+import { forgetRecentOrder, rememberRecentOrder } from '../lib/recentOrders';
+import { DeliveryProofCard, OrderLifecycleNotice } from '../components/OrderLifecycleNotice';
 
 const STATUS_LABEL: Record<TrackingStatus, string> = {
   pending: 'Pendiente de asignación',
@@ -45,6 +48,8 @@ function asStatus(value: string): TrackingStatus {
 
 export function TrackingPage() {
   const { code } = useParams<{ code?: string }>();
+  const [searchParams] = useSearchParams();
+  const returningPay = searchParams.get('pago') === '1';
   const navigate = useNavigate();
   const { profile, signIn, loading: authLoading } = useAuth();
   const [lookup, setLookup] = useState(code?.toUpperCase() || '');
@@ -77,13 +82,17 @@ export function TrackingPage() {
       }
       setData(res);
       setError(null);
-      rememberRecentOrder({
-        trackingCode: res.trackingCode,
-        orderId: res.orderId,
-        deliveryAddress: res.deliveryAddress,
-        status: res.status,
-        createdAt: res.createdAt || new Date().toISOString(),
-      });
+      if (res.status === 'cancelled' || res.status === 'canceled' || res.status === 'cancelado') {
+        forgetRecentOrder(res.trackingCode);
+      } else {
+        rememberRecentOrder({
+          trackingCode: res.trackingCode,
+          orderId: res.orderId,
+          deliveryAddress: res.deliveryAddress,
+          status: res.status,
+          createdAt: res.createdAt || new Date().toISOString(),
+        });
+      }
     });
     return () => unsub();
   }, [code, profile, authLoading, refreshToken]);
@@ -181,13 +190,10 @@ export function TrackingPage() {
             <p className="font-mono mt-1 text-2xl font-bold tracking-wider text-white">
               {data.trackingCode}
             </p>
-            {data.paymentReviewStatus === 'pending_review' ? (
-              <div className="mt-4 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-                Central está revisando tu comprobante. El pedido entra en circulación cuando den luz verde.
-              </div>
-            ) : null}
+            <PaymentReturnBanner data={data} returning={returningPay} />
+            <OrderLifecycleNotice order={data} />
 
-            {push ? (
+            {push && status !== 'cancelled' ? (
               <div className="mt-5 rounded-xl border border-[rgba(43,108,255,0.35)] bg-[rgba(43,108,255,0.08)] px-4 py-4">
                 <p className="text-base font-bold text-white">{push.title}</p>
                 <p className="mt-1 text-sm text-[var(--domi-muted)]">{push.body}</p>
@@ -227,20 +233,9 @@ export function TrackingPage() {
               </div>
             ) : null}
 
-            {data.deliveryConfirmCode && status !== 'delivered' && status !== 'cancelled' ? (
-              <div className="mt-5 rounded-xl border border-[rgba(255,87,34,0.35)] bg-[rgba(255,87,34,0.08)] px-4 py-4 text-center">
-                <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--domi-orange)]">
-                  <KeyRound className="h-3.5 w-3.5" aria-hidden />
-                  PIN de entrega
-                </p>
-                <p className="font-mono mt-2 text-3xl font-bold tracking-[0.35em] text-white">
-                  {data.deliveryConfirmCode}
-                </p>
-                <p className="mt-2 text-xs text-[var(--domi-muted)]">
-                  Entrégaselo al repartidor al recibir el pedido.
-                </p>
-              </div>
-            ) : null}
+            <div className="mt-5">
+              <DeliveryPinCard code={data.deliveryConfirmCode} status={status} sticky />
+            </div>
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <div>
@@ -303,6 +298,7 @@ export function TrackingPage() {
               Actualizar
             </button>
 
+            <DeliveryProofCard url={data.deliveryProofUrl} />
             <RatingForm order={data} onRated={() => setRefreshToken((n) => n + 1)} />
           </div>
         ) : null}
